@@ -164,6 +164,10 @@ To roll back a cycle:
 - A markdown directory you treat as your personal wiki (Obsidian is the assumed shape, but any folder of markdown files with YAML frontmatter works)
 - Node 18+ — only if you want the optional MCP integrations
 
+## Compatibility
+
+dream-skill has only been tested against **Claude Code** (the official CLI). It assumes Claude Code's session log layout (`~/.claude/projects/<encoded-cwd>/*.jsonl`) and depends on Claude Code-specific flags (`--mcp-config`, `--strict-mcp-config`, `--append-system-prompt`, `--output-format json`). Other agent runtimes (Codex, Cursor, Gemini, etc.) are not verified and likely require adaptation. Ports are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Configuration
 
 dream-skill reads three env vars and one TOML file. Everything else is convention:
