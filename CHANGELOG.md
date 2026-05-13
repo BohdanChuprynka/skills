@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+- `apply_auto.py` now keeps vault `wiki/index.md` files in sync. After each applied edit, the page is appended to its subdir's index file if not already linked. Idempotent against both markdown links and Obsidian `[[wikilinks]]`, so curated descriptions are preserved.
+- New flags: `--index-file <path>` (override auto-discovery) and `--no-index-update` (disable entirely). New env var: `DREAM_INDEX_FILE`.
+- `apply_undo.sh` now reverts vault index edits alongside page edits when undoing a full cycle.
+- README compatibility note: dream-skill is tested only against Claude Code; other agent runtimes are not verified.
+
 ## [0.1.0] - 2026-05-13
 
 Initial public release.

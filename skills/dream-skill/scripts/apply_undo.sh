@@ -163,6 +163,40 @@ for idx, entry in targets:
     print(f"  [ok]   [{idx}] reverted: {file_rel}")
     reverted += 1
 
+# Revert vault index edits only in full-cycle mode. Single-entry undo
+# (--only N) skips index reverts because a partial revert can leave the
+# index half-consistent; the user can hand-edit if needed.
+if mode == "all":
+    index_edits = data.get("index_edits", []) or []
+    for ie in index_edits:
+        idx_rel = ie.get("index")
+        before = ie.get("before")
+        after = ie.get("after")
+        if not idx_rel or before is None:
+            print("  [skip] index entry missing 'index' or 'before'")
+            errors += 1
+            continue
+        index_path = (
+            (vault_root / idx_rel)
+            if not Path(idx_rel).is_absolute()
+            else Path(idx_rel)
+        )
+        if not index_path.exists():
+            print(f"  [skip] index file missing: {idx_rel}")
+            errors += 1
+            continue
+        current_idx = index_path.read_text(encoding="utf-8")
+        if after and current_idx.strip() != after.strip():
+            print(
+                f"  [skip] index {idx_rel} changed since apply -- "
+                "refusing to revert. Inspect manually."
+            )
+            errors += 1
+            continue
+        index_path.write_text(before, encoding="utf-8")
+        print(f"  [ok]   reverted index: {idx_rel}")
+        reverted += 1
+
 apply_log = skill_dir / ".apply-log.jsonl"
 apply_log.parent.mkdir(parents=True, exist_ok=True)
 with apply_log.open("a", encoding="utf-8") as f:

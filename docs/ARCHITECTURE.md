@@ -291,6 +291,30 @@ project mentions might land as a new `projects/<name>.md` page. The logic is
 intentionally simple — when in doubt, the proposal is left in the inbox
 report for human routing.
 
+### Vault index updates
+
+After every successful apply, dream-skill keeps the vault's content catalog
+in sync. For each updated page, it looks for an `index.md` in the same
+subdir-with-`wiki/`-convention and appends a list entry if the page isn't
+already linked.
+
+Resolution order:
+
+1. `--index-file <path>` flag (or `DREAM_INDEX_FILE` env var) — single index
+   updated for every applied edit.
+2. Auto-discover `<vault-root>/<subdir>/wiki/index.md` for each edit.
+3. Fallback `<vault-root>/<subdir>/index.md`.
+4. Skip silently if nothing is found.
+
+The update is idempotent: existing links (both markdown `[label](path.md)`
+and Obsidian `[[wikilink]]` forms) cause the call to be a no-op so curated
+descriptions aren't clobbered. Index edits are recorded in the cycle's
+rollback file under `index_edits` so `apply_undo.sh <date>` reverses them
+along with the page edits.
+
+`--no-index-update` disables the step. Useful when you maintain indexes by
+hand or your vault has no central catalog.
+
 ---
 
 ## 6. Output schema

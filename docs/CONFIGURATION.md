@@ -25,6 +25,8 @@ All flags are optional. `dream.sh` runs with sensible defaults.
 | `--output-dir <path>` | path | `<vault-root>/dream-reports` | Override the report destination directory. |
 | `--vault-root <path>` | path | from `vault-paths.toml` | Override the vault root for this run. |
 | `--sessions-root <path>` | path | `~/.claude/projects` | Where to find Claude Code session JSONLs. Rarely overridden. |
+| `--index-file <path>` | path | auto-discover | (apply_auto.py only) Vault index file to update with applied edits. By default, dream-skill looks for `<vault-root>/<subdir>/wiki/index.md` adjacent to each updated page and appends a list entry if the page is not already linked there. Use this flag to point at a single index file when your vault uses a non-standard layout. |
+| `--no-index-update` | boolean | off | (apply_auto.py only) Disable vault index updates entirely. |
 | `--verbose` | boolean | off | Surface internal logging (preprocess filter decisions, vault snapshot stats). |
 | `--help`, `-h` | | | Print usage and exit. |
 
@@ -43,6 +45,7 @@ shell args are awkward.
 | `DREAM_SINCE` | string | `7d` | Default scan window. CLI `--since` wins. |
 | `DREAM_NO_MCP` | `0`/`1` | `0` | Set to `1` to force Tier 0 mode globally. CLI `--no-mcp` also works. |
 | `DREAM_SESSIONS_ROOT` | path | `~/.claude/projects` | Override sessions JSONL root. |
+| `DREAM_INDEX_FILE` | path | auto-discover | Single vault index file to update on apply. Same as `--index-file`. Leave unset to auto-discover `<vault-root>/<subdir>/wiki/index.md`. |
 | `DREAM_CONFIG_DIR` | path | `<plugin>/config` | Override the directory `dream.sh` looks in for `vault-paths.toml`, `signal-patterns.toml`, `mcp-config.json`. Useful for testing alternative configs. |
 | `DREAM_USAGE_LOG` | path | `<plugin>/.usage-log.jsonl` | Override the rolling cost log location. |
 | `DREAM_VERBOSE` | `0`/`1` | `0` | Same as `--verbose`. |

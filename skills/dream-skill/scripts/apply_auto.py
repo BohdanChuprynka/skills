@@ -37,6 +37,89 @@ DEFAULT_VAULT_ROOT = Path(os.environ.get(
     str(Path.home() / "Documents" / "Obsidian"),
 ))
 DEFAULT_MODEL = os.environ.get("DREAM_MODEL", "claude-sonnet-4-6")
+DEFAULT_INDEX_FILE = os.environ.get("DREAM_INDEX_FILE")  # explicit override; optional
+
+
+# ============================================================
+# Vault index discovery + update
+# ============================================================
+
+def find_index_for(target: Path, vault_root: Path) -> Path | None:
+    """
+    Discover the wiki index file responsible for `target`.
+
+    Conventions tried in order:
+      <vault-root>/<subdir>/wiki/<page>.md → <vault-root>/<subdir>/wiki/index.md
+      <vault-root>/<subdir>/<page>.md      → <vault-root>/<subdir>/index.md
+    """
+    try:
+        rel = target.relative_to(vault_root)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) >= 3 and parts[1] == "wiki":
+        idx = vault_root / parts[0] / "wiki" / "index.md"
+        if idx.is_file():
+            return idx
+    if len(parts) >= 2:
+        idx = vault_root / parts[0] / "index.md"
+        if idx.is_file():
+            return idx
+    return None
+
+
+def _page_title_from_content(content: str, fallback: str) -> str:
+    for line in content.splitlines()[:80]:
+        if line.startswith("# "):
+            return line[2:].strip()
+    return fallback
+
+
+def append_index_entry_if_missing(
+    index_path: Path,
+    page_path: Path,
+    page_title: str,
+    summary: str,
+    cycle_date: str,
+) -> tuple[str, str] | None:
+    """
+    Append a list entry for `page_path` to `index_path` if not already linked.
+    Idempotent: existing links (in any common form) cause the call to be a no-op
+    so we never duplicate or clobber user-curated descriptions.
+
+    Returns (old_content, new_content) on change, or None if no change made.
+    """
+    old = index_path.read_text(encoding="utf-8")
+    rel_link = os.path.relpath(page_path, index_path.parent)
+    # Match the link in markdown link form, optionally with ./ prefix or
+    # with the .md extension stripped (Obsidian-style)
+    stem_link = re.sub(r"\.md$", "", rel_link)
+    rx = re.compile(
+        r"\]\(\.?/?\s*(?:"
+        + re.escape(rel_link)
+        + r"|"
+        + re.escape(stem_link)
+        + r")\s*\)"
+    )
+    if rx.search(old):
+        return None
+    # Also catch Obsidian [[wikilink]] style — strip dir + .md
+    wikilink_name = Path(rel_link).stem
+    wikilink_rx = re.compile(r"\[\[\s*" + re.escape(wikilink_name) + r"\s*(?:\|[^\]]*)?\]\]")
+    if wikilink_rx.search(old):
+        return None
+
+    new_line = (
+        f"- [{page_title}]({rel_link}) — added {cycle_date}"
+        + (f": {summary}" if summary else "")
+    )
+    lines = old.splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    lines.append(new_line)
+    new = "\n".join(lines) + "\n"
+    index_path.write_text(new, encoding="utf-8")
+    return old, new
 
 # Channels we detect heuristically in the "Evidence" field
 CHANNEL_PATTERNS = [
@@ -407,6 +490,19 @@ def main() -> int:
         action="store_true",
         help="(default; alias for not passing --apply)",
     )
+    ap.add_argument(
+        "--index-file",
+        default=DEFAULT_INDEX_FILE,
+        help="Path to a single vault index file to update with applied edits. "
+             "Default: auto-discover <vault-root>/<subdir>/wiki/index.md per "
+             "edit. Env: DREAM_INDEX_FILE. Skipped silently if no index is "
+             "found at the resolved location.",
+    )
+    ap.add_argument(
+        "--no-index-update",
+        action="store_true",
+        help="Disable post-apply vault index updates entirely.",
+    )
     args = ap.parse_args()
 
     vault_root = Path(args.vault_root).expanduser().resolve()
@@ -540,6 +636,53 @@ def main() -> int:
         "apply_cost_usd": total_cost,
     }
     rollback_path.write_text(json.dumps(rollback, indent=2), encoding="utf-8")
+
+    # Update vault index file(s) so newly-recorded pages show up in the
+    # vault's content catalog. Idempotent: existing links are left alone.
+    if not args.no_index_update:
+        index_edits = []
+        for r in records:
+            if r["status"] != "applied":
+                continue
+            target = (vault_root / r["file"]).resolve()
+            if args.index_file:
+                idx = Path(args.index_file).expanduser().resolve()
+                if not idx.is_file():
+                    continue
+            else:
+                idx = find_index_for(target, vault_root)
+                if idx is None:
+                    continue
+            page_title = _page_title_from_content(
+                r.get("new_content", ""), target.stem
+            )
+            summary = (r.get("title") or "").strip()[:140]
+            try:
+                result = append_index_entry_if_missing(
+                    idx, target, page_title, summary, cycle_date,
+                )
+            except Exception as e:
+                print(f"  WARN: index update failed for {idx}: {e}")
+                continue
+            if result is None:
+                continue
+            old, new = result
+            try:
+                idx_rel = str(idx.relative_to(vault_root))
+            except ValueError:
+                idx_rel = str(idx)
+            index_edits.append({
+                "index": idx_rel,
+                "before": old,
+                "after": new,
+            })
+        if index_edits:
+            rb = json.loads(rollback_path.read_text(encoding="utf-8"))
+            rb["index_edits"] = index_edits
+            rollback_path.write_text(
+                json.dumps(rb, indent=2), encoding="utf-8",
+            )
+            print(f"  index updates: {len(index_edits)} file(s)")
 
     # Append apply log
     apply_log_path.parent.mkdir(parents=True, exist_ok=True)
