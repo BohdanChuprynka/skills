@@ -1,0 +1,22 @@
+{
+  "name": "dream-skill",
+  "description": "Reconcile your Obsidian wiki against Claude Code session signals — flag stale, missing, and contradicted facts for review.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "homepage": "https://github.com/BohdanChuprynka/dream-skill",
+  "repository": "https://github.com/BohdanChuprynka/dream-skill",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "skill",
+    "obsidian",
+    "knowledge-base",
+    "personal-wiki",
+    "llm",
+    "memory",
+    "mcp"
+  ]
+}

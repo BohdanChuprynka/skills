@@ -1,0 +1,56 @@
+{
+  "_README": "Project-scoped MCP config for dream-skill. Loaded via `claude --mcp-config <this-file> --strict-mcp-config` from dream.sh. SINGLE PATTERN: local stdio MCPs via npx, tokens in this file's env blocks. No claude.ai integrations, no remote HTTP. This file is the EXAMPLE — copy to `mcp-config.json` (gitignored) and fill in real values. See docs/MCP-SETUP.md for per-MCP setup walkthroughs.",
+
+  "_security": "config/mcp-config.json (the real file, not this example) is gitignored. After creating it, run: chmod 600 config/mcp-config.json. Rotate tokens every 90 days. Revoke at source on any suspected leak.",
+
+  "_placeholders": "Anything in ${UPPER_CASE} is a sentinel for the setup wizard or a placeholder to replace by hand. Anything like REPLACE_WITH_X is a value to replace before the MCP will work.",
+
+  "mcpServers": {
+
+    "filesystem": {
+      "_what": "Tier 1. Lets the LLM write the dream report directly to your vault inbox via MCP write_file, and optionally read individual vault pages on demand. Sandboxed to listed directories with realpath enforcement.",
+      "_recommended_scope": "Inbox/dream-reports directory only. Expanding to vault root grants write access to all vault pages — defer until v0.3 ships with rollback log.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${VAULT_INBOX_PATH}"
+      ]
+    },
+
+    "notion": {
+      "_what": "Tier 2. Read Notion pages and databases during reconciliation. Useful if you keep goals, OKRs, or 'current focus' docs in Notion that your vault references.",
+      "_setup_url": "https://www.notion.so/profile/integrations",
+      "_token_format": "Internal Integration Token starting with 'ntn_' or 'secret_'.",
+      "_share_pages": "After creating the integration, manually share each Notion page/database with it via the page's '...' menu → Connections.",
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": {
+        "OPENAPI_MCP_HEADERS": "{\"Authorization\":\"Bearer REPLACE_WITH_NOTION_TOKEN\",\"Notion-Version\":\"2022-06-28\"}"
+      }
+    },
+
+    "google-calendar": {
+      "_what": "Tier 2. Read calendar events during reconciliation. Catches stale assumptions about routines and meeting patterns.",
+      "_setup_steps": "1) Enable Google Calendar API at https://console.cloud.google.com/ 2) Create OAuth Desktop client 3) Download client_secret JSON 4) Run: npx @cocal/google-calendar-mcp auth (see docs/MCP-SETUP.md for full flow)",
+      "_token_storage": "After running 'auth', the package stores the refresh token at ~/.config/google-calendar-mcp/tokens.json (hardcoded path, don't relocate).",
+      "command": "npx",
+      "args": ["-y", "@cocal/google-calendar-mcp"],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": "${GCAL_CREDS_PATH}"
+      }
+    },
+
+    "gmail": {
+      "_what": "Tier 2. Read email metadata (subjects, senders, dates) during reconciliation. Surfaces life-state signals from comms outside chat history.",
+      "_setup_steps": "1) Enable Gmail API in same Google Cloud project as Calendar 2) Create separate OAuth Desktop client 3) Download client_secret JSON 4) Run: GMAIL_OAUTH_PATH=... GMAIL_CREDENTIALS_PATH=... npx -y @gongrzhe/server-gmail-autoauth-mcp auth",
+      "_scopes": "Read-only is sufficient. Do not grant write/send scopes.",
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
+      "env": {
+        "GMAIL_OAUTH_PATH": "${GMAIL_CREDS_PATH}",
+        "GMAIL_CREDENTIALS_PATH": "${GMAIL_TOKEN_PATH}"
+      }
+    }
+  }
+}
