@@ -178,15 +178,17 @@ def count_channels(evidence_text: str) -> list[str]:
 def _parse_section(section_text: str, category_label: str) -> list[dict]:
     """Extract proposal dicts from one report section."""
     proposals = []
-    # The dream report uses `- ?` as the per-proposal bullet leader
-    # (the question-mark emoji u2753). Match either the emoji or a literal '?'.
-    chunks = re.split(r"\n(?=-\s+(?:❓|\?))", section_text)
+    # Per prompts/system.md, each proposal is a top-level (column-0) `- ` bullet;
+    # its sub-fields (**Channels:**, **Evidence:**, ...) are indented two spaces.
+    # Split on column-0 hyphen bullets only, so indented sub-fields stay attached
+    # and the section header / italic caption land in a leading non-bullet chunk.
+    chunks = re.split(r"\n(?=- )", section_text)
     for chunk in chunks:
         chunk = chunk.strip()
-        if not re.match(r"^-\s+(❓|\?)", chunk):
+        if not chunk.startswith("- "):
             continue
 
-        title_m = re.match(r"-\s+(?:❓|\?)\s*(.+)", chunk)
+        title_m = re.match(r"-\s+(.+)", chunk)
         title = title_m.group(1).strip() if title_m else ""
         title = re.sub(r"\*\*", "", title)
 
@@ -223,14 +225,14 @@ def parse_report(report_path: Path) -> list[dict]:
     text = report_path.read_text(encoding="utf-8")
 
     auto_m = re.search(
-        r"^## Auto-apply.*?(?=^## |\Z)",
+        r"^## auto-apply.*?(?=^## |\Z)",
         text,
-        re.MULTILINE | re.DOTALL,
+        re.IGNORECASE | re.MULTILINE | re.DOTALL,
     )
     needs_m = re.search(
-        r"^## Needs your confirmation.*?(?=^## |\Z)",
+        r"^## needs confirmation.*?(?=^## |\Z)",
         text,
-        re.MULTILINE | re.DOTALL,
+        re.IGNORECASE | re.MULTILINE | re.DOTALL,
     )
 
     proposals = []
@@ -278,8 +280,17 @@ def resolve_target_file(
                     if matches:
                         return matches[0]
 
-        # No .md suffix — search by stem, possibly stripping `[status]` suffix
+        # No .md suffix — first try the candidate as a direct relative path.
+        # Reports routinely cite `me/wiki/Career Direction` (subdir included,
+        # extension omitted); resolve that against the vault root before
+        # falling back to the slower stem search.
         stripped = re.sub(r"\s*\[[^\]]+\]\s*$", "", candidate).strip()
+        for variant in (candidate, stripped):
+            for rel in (variant, variant + ".md"):
+                direct = vault_root / rel
+                if direct.is_file():
+                    return direct
+        # Fallback: search by stem across each subdir's wiki.
         for variant in (stripped, candidate, candidate + ".md", stripped + ".md"):
             for sub in subdirs:
                 wiki = vault_root / sub / "wiki"
