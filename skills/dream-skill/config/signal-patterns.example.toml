@@ -1,7 +1,7 @@
 # dream-skill: signal extraction patterns
 #
 # Used by scripts/preprocess.py to mark high-signal lines in the cleaned
-# session transcript. Matching lines get a ★ prefix; non-matching lines are
+# conversation transcript. Matching lines get a ★ prefix; non-matching lines are
 # kept as-is (unless they hit a noise pattern).
 #
 # This file is the AUTHORITATIVE SPEC. The current implementation has these

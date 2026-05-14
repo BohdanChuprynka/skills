@@ -30,11 +30,11 @@ Karpathy keeps pointing out that the missing piece for personal LLMs is a hand-c
 
 The catch nobody talks about: that wiki goes stale fast. You curate it once during a productive Saturday, then life happens. Six months later your `roles/current.md` still says you work at a company you left in February. Your `projects/active.md` lists three projects, two of which shipped, one of which you quietly abandoned. The model now reads a confident document about a person who no longer exists, and the personalization gets worse the more it trusts the file.
 
-dream-skill is the fix. Once a week, it reads your recent Claude Code sessions, walks your vault, and produces a structured report of what's gone stale, what's missing, and what contradicts itself. You review the report, accept what's correct, and the vault stays alive.
+dream-skill is the fix. Once a week, it reads your recent local Claude Code and Codex CLI conversations, walks your vault, and produces a structured report of what's gone stale, what's missing, and what contradicts itself. You review the report, accept what's correct, and the vault stays alive.
 
 ## What dream-skill does
 
-- Diffs your last N days of Claude Code session transcripts against your vault contents.
+- Diffs your last N days of local Claude Code and Codex CLI conversation transcripts against your vault contents.
 - Surfaces three buckets: **auto-apply** (multi-channel agreement, high confidence), **needs confirmation** (single-channel signal, ask the user), **open contradictions** (vault says X, signals say Y).
 - Optionally cross-references Notion pages, Gmail subjects, and Calendar events for additional channels.
 - Writes a dated markdown report to `<vault>/dream-reports/` for human review.
@@ -44,7 +44,8 @@ dream-skill is the fix. Once a week, it reads your recent Claude Code sessions, 
 ## How it works
 
 ```
-sessions (jsonl)                                  vault (markdown)
+local conversations (jsonl)                       vault (markdown)
+Claude Code + Codex CLI
        |                                                |
        v                                                v
   preprocess.py                                   load_vault_state.py
@@ -64,7 +65,7 @@ sessions (jsonl)                                  vault (markdown)
 
 Four stages. Two are free local Python. One is a single paid Claude call (~$0.10 on Sonnet 4.6 with cache hits). One is manual review on your terms.
 
-The Python stages do the boring heavy lifting — chunking sessions, filtering to user-biased signal, snapshotting frontmatter — so the paid call gets a clean, compact input and stays cheap.
+The Python stages do the boring heavy lifting — chunking local conversations, filtering to user-biased signal, snapshotting frontmatter — so the paid call gets a clean, compact input and stays cheap.
 
 ## Example output
 
@@ -74,7 +75,7 @@ A real report looks roughly like this (names changed):
 ---
 date: 2026-05-13
 window: 7d
-sources: [sessions, notion, calendar]
+sources: [claude, codex, notion, calendar]
 ---
 
 # dream-report 2026-05-13
@@ -84,20 +85,20 @@ sources: [sessions, notion, calendar]
   evidence:
     - calendar: 1:1 with Phoenix Labs CEO 2026-05-08
     - notion: offer letter page edited 2026-05-09
-    - sessions: "starting at Phoenix Monday" (2026-05-10)
+    - claude: "starting at Phoenix Monday" (2026-05-10)
 
 - **persona/location.md**: city changed Berlin -> Lisbon
   evidence:
     - calendar: recurring events moved to WET 2026-05-06
-    - sessions: "from the new apartment" with Lisbon weather refs
+    - codex: "from the new apartment" with Lisbon weather refs
 
 ## needs confirmation (1 channel)
 - **projects/side-quest.md**: should status flip to completed?
-  evidence: session 2026-05-11 ("shipped v1.0, moving on")
+  evidence: Codex Session 2026-05-11 ("shipped v1.0, moving on")
   question: confirm completed vs ongoing maintenance phase?
 
 - **persona/reading.md**: add "Working in Public" (Eghbal)?
-  evidence: session 2026-05-09, recommended it twice in one conversation
+  evidence: Claude Session 2026-05-09, recommended it twice in one conversation
   question: actually reading it or just citing it?
 
 ## open contradictions
@@ -112,7 +113,7 @@ sources: [sessions, notion, calendar]
   question: still a rule?
 
 ## signals not acted on
-- session mentioned "considering grad school" (single mention, exploratory)
+- Claude Session mentioned "considering grad school" (single mention, exploratory)
 - calendar shows recurring "therapy" event (intentionally not tracked in vault?)
 ```
 
@@ -131,7 +132,7 @@ Then run the setup wizard from the cloned plugin directory:
 ./setup.sh
 ```
 
-The wizard asks for your vault root, your session log path, and any optional MCPs you want enabled. Defaults work for a stock Claude Code + Obsidian setup.
+The wizard asks for your vault root and any optional MCPs you want enabled. Conversation-source paths have stock defaults for Claude Code and Codex CLI, and can be overridden with env vars or CLI flags.
 
 ## Quickstart
 
@@ -159,14 +160,20 @@ To roll back a cycle:
 
 ## What you'll need
 
-- Claude Code CLI (logged in)
+- Claude Code CLI (logged in) for the reconcile call
+- Optional local Codex CLI conversations under `~/.codex/sessions`
 - Python 3.11+
 - A markdown directory you treat as your personal wiki (Obsidian is the assumed shape, but any folder of markdown files with YAML frontmatter works)
 - Node 18+ — only if you want the optional MCP integrations
 
 ## Compatibility
 
-dream-skill has only been tested against **Claude Code** (the official CLI). It assumes Claude Code's session log layout (`~/.claude/projects/<encoded-cwd>/*.jsonl`) and depends on Claude Code-specific flags (`--mcp-config`, `--strict-mcp-config`, `--append-system-prompt`, `--output-format json`). Other agent runtimes (Codex, Cursor, Gemini, etc.) are not verified and likely require adaptation. Ports are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+dream-skill uses **Claude Code** for the paid reconcile call and parses local transcript JSONLs from two sources:
+
+- Claude Code: `~/.claude/projects/<encoded-cwd>/*.jsonl`
+- Codex CLI: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+
+It deliberately ignores Codex Desktop/VS Code-originated sessions, ChatGPT app caches, prompt history, SQLite logs, and tool-output databases. Other agent runtimes (Cursor, Gemini, etc.) are not verified and likely require adaptation. Ports are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Configuration
 
@@ -174,8 +181,10 @@ dream-skill reads three env vars and one TOML file. Everything else is conventio
 
 ```bash
 export DREAM_VAULT_ROOT="$HOME/Documents/Obsidian"           # required
-export DREAM_SESSION_LOG_DIR="$HOME/.claude/projects"        # default
-export DREAM_REPORTS_DIR="$DREAM_VAULT_ROOT/dream-reports"   # default
+export DREAM_CONVERSATION_SOURCES="claude,codex"             # default
+export DREAM_CLAUDE_SESSIONS_ROOT="$HOME/.claude/projects"   # default
+export DREAM_CODEX_SESSIONS_ROOT="$HOME/.codex/sessions"     # default
+export DREAM_OUTPUT_DIR="$DREAM_VAULT_ROOT/dream-reports"     # default
 ```
 
 Vault categories, signal patterns, and channel weights live in `config/`. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
@@ -184,7 +193,7 @@ Vault categories, signal patterns, and channel weights live in `config/`. See [d
 
 dream-skill works in three tiers. Pick how far you want to go.
 
-**Tier 0** — zero config. Just vault snapshot plus session signals. This is enough to catch most stale-page issues and runs on every machine.
+**Tier 0** — zero config. Just vault snapshot plus local conversation signals. This is enough to catch most stale-page issues and runs on every machine.
 
 **Tier 1** — add the Filesystem MCP for read-only access to a sandboxed inbox folder (drop screenshots, exported chats, anything markdown-shaped). The reconcile call picks them up as an extra channel.
 
@@ -214,7 +223,7 @@ The dollar figure comes from the prompt staying mostly cache-resident across cyc
 Yes. Any directory of markdown files with YAML frontmatter works. dream-skill cares about file paths, titles, `status:`, and `updated:`. The Obsidian assumption is convention, not a hard dependency.
 
 **Can I use it without any MCPs?**
-Yes. Tier 0 is the default and runs against just your session logs and vault. You'll get fewer multi-channel auto-apply candidates and more "needs confirmation" entries, which is the right tradeoff for new users.
+Yes. Tier 0 is the default and runs against just your local Claude/Codex conversation logs and vault. You'll get fewer multi-channel auto-apply candidates and more "needs confirmation" entries, which is the right tradeoff for new users.
 
 **Why a separate MCP config instead of using my existing one?**
 Because cross-pollution is bad. Your daily Claude session probably has its own MCPs (project-specific, work-specific). Loading Notion/Gmail there leaks personal context into work contexts. dream-skill's MCPs only exist for the duration of one reconcile call.

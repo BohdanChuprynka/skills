@@ -18,13 +18,16 @@ All flags are optional. `dream.sh` runs with sensible defaults.
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--since <window>` | string | `7d` | How far back to scan Claude Code sessions. Examples: `7d`, `14d`, `30d`, `24h`. |
+| `--since <window>` | string | `7d` | How far back to scan local conversations. Examples: `7d`, `14d`, `30d`, `24h`. |
 | `--dry-run` | boolean | off | Build inputs (preprocess + vault snapshot) but skip the LLM call. Inputs written to `/tmp/dream-sessions-<date>.md` and `/tmp/dream-vault-<date>.md`. Free; useful for debugging. |
 | `--no-mcp` | boolean | off | Force Tier 0 mode for this run — ignore `config/mcp-config.json` entirely. Useful when an MCP is misbehaving. |
 | `--model <id>` | string | `claude-sonnet-4-6` | Override the reconciliation model. Example: `claude-opus-4-7` (more expensive). |
 | `--output-dir <path>` | path | `<vault-root>/dream-reports` | Override the report destination directory. |
 | `--vault-root <path>` | path | from `vault-paths.toml` | Override the vault root for this run. |
-| `--sessions-root <path>` | path | `~/.claude/projects` | Where to find Claude Code session JSONLs. Rarely overridden. |
+| `--sources <list>` | string | `claude,codex` | Conversation sources to scan. Use `claude`, `codex`, `claude,codex`, or `all`. |
+| `--sessions-root <path>` | path | `~/.claude/projects` | Backward-compatible alias for `--claude-sessions-root`. |
+| `--claude-sessions-root <path>` | path | `~/.claude/projects` | Where to find Claude Code session JSONLs. |
+| `--codex-sessions-root <path>` | path | `~/.codex/sessions` | Where to find Codex CLI local JSONLs. |
 | `--index-file <path>` | path | auto-discover | (apply_auto.py only) Vault index file to update with applied edits. By default, dream-skill looks for `<vault-root>/<subdir>/wiki/index.md` adjacent to each updated page and appends a list entry if the page is not already linked there. Use this flag to point at a single index file when your vault uses a non-standard layout. |
 | `--no-index-update` | boolean | off | (apply_auto.py only) Disable vault index updates entirely. |
 | `--verbose` | boolean | off | Surface internal logging (preprocess filter decisions, vault snapshot stats). |
@@ -44,7 +47,10 @@ shell args are awkward.
 | `DREAM_MODEL` | string | `claude-sonnet-4-6` | Default model. CLI `--model` wins. |
 | `DREAM_SINCE` | string | `7d` | Default scan window. CLI `--since` wins. |
 | `DREAM_NO_MCP` | `0`/`1` | `0` | Set to `1` to force Tier 0 mode globally. CLI `--no-mcp` also works. |
-| `DREAM_SESSIONS_ROOT` | path | `~/.claude/projects` | Override sessions JSONL root. |
+| `DREAM_CONVERSATION_SOURCES` | string | `claude,codex` | Default source list. Same values as `--sources`. |
+| `DREAM_SESSIONS_ROOT` | path | `~/.claude/projects` | Legacy Claude sessions root override. Prefer `DREAM_CLAUDE_SESSIONS_ROOT`. |
+| `DREAM_CLAUDE_SESSIONS_ROOT` | path | `~/.claude/projects` | Override Claude Code JSONL root. |
+| `DREAM_CODEX_SESSIONS_ROOT` | path | `~/.codex/sessions` | Override Codex CLI JSONL root. |
 | `DREAM_INDEX_FILE` | path | auto-discover | Single vault index file to update on apply. Same as `--index-file`. Leave unset to auto-discover `<vault-root>/<subdir>/wiki/index.md`. |
 | `DREAM_CONFIG_DIR` | path | `<plugin>/config` | Override the directory `dream.sh` looks in for `vault-paths.toml`, `signal-patterns.toml`, `mcp-config.json`. Useful for testing alternative configs. |
 | `DREAM_USAGE_LOG` | path | `<plugin>/.usage-log.jsonl` | Override the rolling cost log location. |
@@ -258,7 +264,7 @@ See the cron setup in [`INSTALL.md`](INSTALL.md#scheduling-with-cron).
 Inspect `/tmp/dream-sessions-<date>.md` and `/tmp/dream-vault-<date>.md`,
 along with verbose logs from the preprocess and snapshot stages.
 
-### "I want a different sessions root (testing, or non-standard install)"
+### "I want a different Claude sessions root (testing, or non-standard install)"
 
 ```bash
 ./dream.sh --sessions-root /custom/path
@@ -268,4 +274,28 @@ Or:
 
 ```bash
 export DREAM_SESSIONS_ROOT=/custom/path
+```
+
+### "I want to scan only Codex conversations"
+
+```bash
+./dream.sh --sources codex
+```
+
+Or:
+
+```bash
+export DREAM_CONVERSATION_SOURCES=codex
+```
+
+### "I want a different Codex sessions root"
+
+```bash
+./dream.sh --codex-sessions-root /custom/codex/sessions
+```
+
+Or:
+
+```bash
+export DREAM_CODEX_SESSIONS_ROOT=/custom/codex/sessions
 ```

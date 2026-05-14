@@ -4,15 +4,15 @@ description: >
   Use when the user says "run dream", "dream cycle", "reconcile my wiki",
   "check my wiki for stale info", "update my obsidian", "sync my persona vault",
   or wants to verify their personal Obsidian knowledge base is current against
-  recent Claude Code sessions and connected MCP sources (Notion, Calendar,
-  Gmail). Also use when the user wants to schedule, audit, or apply a dream
+  recent local Claude Code/Codex CLI conversations and connected MCP sources
+  (Notion, Calendar, Gmail). Also use when the user wants to schedule, audit, or apply a dream
   report. Do NOT use for code refactors, project documentation, or
   general-purpose note-taking — this only maintains a persona model.
 ---
 
 # dream-skill — persona-vault reconciliation
 
-Keeps a personal Obsidian knowledge base ("persona vault") accurate by diffing it against recent Claude Code sessions and optional MCP signals (Notion, Calendar, Gmail), then emitting a review-grade dream report.
+Keeps a personal Obsidian knowledge base ("persona vault") accurate by diffing it against recent local Claude Code and Codex CLI conversations plus optional MCP signals (Notion, Calendar, Gmail), then emitting a review-grade dream report.
 
 ## When to use
 
@@ -28,7 +28,7 @@ Keeps a personal Obsidian knowledge base ("persona vault") accurate by diffing i
 
 ## What it does
 
-Periodic reconciliation cycle: extracts user-side signals from Claude Code session JSONLs in the last N days, snapshots the persona vault (titles, frontmatter, `updated:` dates, `needs_verification:` markers), then makes one LLM call that compares the two against optional MCP sources and emits a structured dream report. The vault is treated as a persona model — stable facts about who the user is, not what they produced.
+Periodic reconciliation cycle: extracts user-side signals from local Claude Code and Codex CLI JSONLs in the last N days, snapshots the persona vault (titles, frontmatter, `updated:` dates, `needs_verification:` markers), then makes one LLM call that compares the two against optional MCP sources and emits a structured dream report. The vault is treated as a persona model — stable facts about who the user is, not what they produced.
 
 ## How to invoke
 
@@ -45,7 +45,7 @@ Paths and behavior come from environment variables and config files (`$DREAM_VAU
 
 ## The pipeline
 
-1. **Preprocess sessions** — local Python; user turns prioritized, assistant turns kept as anchors. No LLM tokens.
+1. **Preprocess conversations** — local Python; user turns prioritized, assistant turns kept as anchors. No LLM tokens.
 2. **Snapshot vault** — local Python; walks configured vault paths, extracts frontmatter and stale markers.
 3. **Reconcile** — one Claude call with `--strict-mcp-config` so only the skill's configured MCPs load.
 4. **Emit report** — markdown written to the configured output directory.
@@ -67,7 +67,7 @@ Dream cycles emit reports. **They do not edit the vault.** The user reviews the 
 
 ## Configuration
 
-All paths, MCPs, vault subdirectories, and signal patterns live in `<skill-dir>/config/` and environment variables. See `docs/CONFIGURATION.md` for the full reference.
+All paths, conversation sources, MCPs, vault subdirectories, and signal patterns live in `<skill-dir>/config/` and environment variables. See `docs/CONFIGURATION.md` for the full reference.
 
 ## Cost
 

@@ -5,7 +5,7 @@ The vault tracks **the user as a person**, not their work outputs. Filter accord
 **Today's date:** {TODAY}
 **Active window:** {WINDOW}
 
-=== SESSION SIGNALS (window: {WINDOW}) ===
+=== CONVERSATION SIGNALS (window: {WINDOW}) ===
 {SESSIONS}
 
 === VAULT STATE ===
@@ -21,7 +21,7 @@ The vault tracks **the user as a person**, not their work outputs. Filter accord
 
 If a tool is absent or errors, note the absence once under `## signals not acted on` and move on. Do not retry.
 
-**Step 2 — Reconcile.** Compare every available signal source (SESSIONS + VAULT + any MCP outputs) per your system-prompt protocol. Address:
+**Step 2 — Reconcile.** Compare every available signal source (CONVERSATIONS + VAULT + any MCP outputs) per your system-prompt protocol. Address:
 
 1. Persona-level facts that contradict or update the vault.
 2. New persona-level entities (people, programs, mentors, deadlines, gyms, courses) mentioned 2+ times across any sources, with no vault page.

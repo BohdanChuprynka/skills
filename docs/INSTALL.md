@@ -10,6 +10,7 @@ Two install methods. Pick one. After install, run the setup wizard, then a first
 | Requirement | Why | Required? |
 |---|---|---|
 | [Claude Code CLI](https://docs.claude.com/claude-code) | Runs the reconcile pass; provides `claude` on `$PATH` | Required |
+| Local Codex CLI JSONLs | Optional second conversation source at `~/.codex/sessions` | Optional |
 | Python 3.11+ | `scripts/load_vault_state.py` uses `tomllib` (stdlib in 3.11+) | Required |
 | An Obsidian vault, or any directory of markdown files | The thing we reconcile against | Required |
 | Node 18+ (`node`, `npx`) | Only needed if you wire up Tier 1+ MCP integrations (Filesystem / Notion / Calendar / Gmail) | Optional |
@@ -90,6 +91,7 @@ Expected output looks roughly like:
 [ok]   config/vault-paths.toml present
 [warn] config/mcp-config.json absent (Tier 0 mode)
 [ok]   write access to dream-reports output dir
+[ok]   codex conversations: ~/.codex/sessions
 ```
 
 A `[warn]` for missing MCP config is fine — that just means you'll run in Tier 0
@@ -109,7 +111,7 @@ preprocess and vault-snapshot stages produce sensible inputs.
 This writes preview inputs to `/tmp/dream-sessions-<date>.md` and
 `/tmp/dream-vault-<date>.md`. Open them, sanity-check that:
 
-- Sessions show actual recent conversation snippets (not empty).
+- Conversation signals show actual recent Claude/Codex snippets (not empty).
 - Vault snapshot lists your pages with `updated:` dates.
 
 If both look right, run a live cycle:

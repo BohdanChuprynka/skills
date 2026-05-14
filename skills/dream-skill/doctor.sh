@@ -15,7 +15,10 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
 VAULT_ROOT="${DREAM_VAULT_ROOT:-$HOME/Documents/Obsidian}"
 OUTPUT_DIR="${DREAM_OUTPUT_DIR:-$VAULT_ROOT/dream-reports}"
-SESSIONS_ROOT="${DREAM_SESSIONS_ROOT:-$HOME/.claude/projects}"
+CLAUDE_SESSIONS_ROOT="${DREAM_CLAUDE_SESSIONS_ROOT:-${DREAM_SESSIONS_ROOT:-$HOME/.claude/projects}}"
+CODEX_SESSIONS_ROOT="${DREAM_CODEX_SESSIONS_ROOT:-$HOME/.codex/sessions}"
+CONVERSATION_SOURCES="${DREAM_CONVERSATION_SOURCES:-claude,codex}"
+CONVERSATION_SOURCES="${CONVERSATION_SOURCES// /}"
 MCP_CONFIG="${DREAM_MCP_CONFIG:-$CONFIG_DIR/mcp-config.json}"
 VAULT_TOML="$CONFIG_DIR/vault-paths.toml"
 
@@ -26,6 +29,10 @@ SKIPS=0
 pass() { printf "[PASS] %-35s — %s\n" "$1" "$2"; PASSES=$((PASSES + 1)); }
 fail() { printf "[FAIL] %-35s — %s\n" "$1" "$2"; FAILS=$((FAILS + 1)); }
 sskip(){ printf "[SKIP] %-35s — %s\n" "$1" "$2"; SKIPS=$((SKIPS + 1)); }
+source_enabled() {
+  local source="$1"
+  [[ "$CONVERSATION_SOURCES" == "all" || ",$CONVERSATION_SOURCES," == *",$source,"* ]]
+}
 
 echo "dream-skill doctor.sh — $(date -u +%FT%TZ)"
 echo "---------------------------------------------------------------"
@@ -116,17 +123,76 @@ else
 fi
 
 # ============================================================
-# 7. Sessions root has JSONL files
+# 7. Selected local conversation roots have JSONL files
 # ============================================================
-if [[ -d "$SESSIONS_ROOT" ]]; then
-  JSONL_COUNT="$(find "$SESSIONS_ROOT" -name '*.jsonl' -type f 2>/dev/null | head -1 | wc -l | tr -d ' ')"
-  if [[ "$JSONL_COUNT" -gt 0 ]]; then
-    pass "sessions root has data" "$SESSIONS_ROOT"
+CONVERSATION_DATA_ROOTS=0
+
+if source_enabled "claude"; then
+  if [[ -d "$CLAUDE_SESSIONS_ROOT" ]]; then
+    JSONL_COUNT="$(find "$CLAUDE_SESSIONS_ROOT" -name '*.jsonl' -type f 2>/dev/null | head -1 | wc -l | tr -d ' ')"
+    if [[ "$JSONL_COUNT" -gt 0 ]]; then
+      pass "claude conversations" "$CLAUDE_SESSIONS_ROOT"
+      CONVERSATION_DATA_ROOTS=$((CONVERSATION_DATA_ROOTS + 1))
+    else
+      sskip "claude conversations" "no .jsonl files found under $CLAUDE_SESSIONS_ROOT"
+    fi
   else
-    fail "sessions root has data" "no .jsonl files found under $SESSIONS_ROOT"
+    sskip "claude conversations" "directory not found: $CLAUDE_SESSIONS_ROOT"
   fi
 else
-  fail "sessions root has data" "directory not found: $SESSIONS_ROOT"
+  sskip "claude conversations" "source disabled ($CONVERSATION_SOURCES)"
+fi
+
+if source_enabled "codex"; then
+  if [[ -d "$CODEX_SESSIONS_ROOT" ]]; then
+    JSONL_COUNT="$(python3 - "$CODEX_SESSIONS_ROOT" <<'PYEOF' 2>/dev/null
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+count = 0
+for path in root.rglob("*.jsonl"):
+    try:
+        lines = path.open(encoding="utf-8", errors="ignore")
+    except OSError:
+        continue
+    with lines:
+        for line in lines:
+            try:
+                evt = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if evt.get("type") != "session_meta":
+                continue
+            payload = evt.get("payload") or {}
+            originator = str(payload.get("originator", "")).lower()
+            source = payload.get("source")
+            if originator in {"codex-tui", "codex-cli"} or (
+                isinstance(source, str) and source.lower() == "cli"
+            ):
+                count += 1
+            break
+print(count)
+PYEOF
+)"
+    if [[ "${JSONL_COUNT:-0}" -gt 0 ]]; then
+      pass "codex conversations" "$CODEX_SESSIONS_ROOT ($JSONL_COUNT CLI JSONL files)"
+      CONVERSATION_DATA_ROOTS=$((CONVERSATION_DATA_ROOTS + 1))
+    else
+      sskip "codex conversations" "no CLI-generated .jsonl files found under $CODEX_SESSIONS_ROOT"
+    fi
+  else
+    sskip "codex conversations" "directory not found: $CODEX_SESSIONS_ROOT"
+  fi
+else
+  sskip "codex conversations" "source disabled ($CONVERSATION_SOURCES)"
+fi
+
+if [[ "$CONVERSATION_DATA_ROOTS" -gt 0 ]]; then
+  pass "selected conversation data" "$CONVERSATION_DATA_ROOTS source root(s) with JSONL"
+else
+  fail "selected conversation data" "no selected source root has local JSONL conversations"
 fi
 
 # ============================================================

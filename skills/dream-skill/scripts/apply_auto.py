@@ -123,7 +123,9 @@ def append_index_entry_if_missing(
 
 # Channels we detect heuristically in the "Evidence" field
 CHANNEL_PATTERNS = [
-    (re.compile(r"Session\s+[0-9a-f]{6,}", re.IGNORECASE), "sessions"),
+    (re.compile(r"\bClaude(?: Code)? Session\s+[\w.-]+", re.IGNORECASE), "claude"),
+    (re.compile(r"\bCodex(?: CLI)? (?:Session|Conversation)\s+[\w.-]+", re.IGNORECASE), "codex"),
+    (re.compile(r"(?<!Code )(?<!Claude )(?<!Codex )(?<!CLI )\bSession\s+[\w.-]+", re.IGNORECASE), "sessions"),
     (re.compile(r"\bNotion[\s:]", re.IGNORECASE), "notion"),
     (re.compile(r"\bCalendar[\s:]", re.IGNORECASE), "calendar"),
     (re.compile(r"\bGmail[\s:]", re.IGNORECASE), "gmail"),

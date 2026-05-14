@@ -7,10 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ## [Unreleased]
 
 ### Added
+- Codex CLI conversations are now a first-class local source alongside Claude Code. `preprocess.py` scans `~/.codex/sessions/**/*.jsonl` by default, labels Codex evidence separately, and ignores Codex Desktop/VS Code sessions, ChatGPT caches, prompt history, SQLite logs, reasoning/tool output, and context replay.
+- New conversation-source controls: `--sources`, `--claude-sessions-root`, `--codex-sessions-root`, `DREAM_CONVERSATION_SOURCES`, `DREAM_CLAUDE_SESSIONS_ROOT`, and `DREAM_CODEX_SESSIONS_ROOT`. The legacy `--sessions-root` / `DREAM_SESSIONS_ROOT` still map to Claude Code.
+- Unit tests for Claude+Codex preprocessing and conversation-channel detection.
 - `apply_auto.py` now keeps vault `wiki/index.md` files in sync. After each applied edit, the page is appended to its subdir's index file if not already linked. Idempotent against both markdown links and Obsidian `[[wikilinks]]`, so curated descriptions are preserved.
 - New flags: `--index-file <path>` (override auto-discovery) and `--no-index-update` (disable entirely). New env var: `DREAM_INDEX_FILE`.
 - `apply_undo.sh` now reverts vault index edits alongside page edits when undoing a full cycle.
-- README compatibility note: dream-skill is tested only against Claude Code; other agent runtimes are not verified.
+- README compatibility note: dream-skill uses Claude Code for reconciliation and parses local Claude Code/Codex CLI transcript formats; other agent runtimes are not verified.
 
 ## [0.1.0] - 2026-05-13
 

@@ -10,8 +10,9 @@ are.
 
 ```
                        ┌──────────────────────────────┐
-                       │  Claude Code session JSONLs  │
-                       │  ~/.claude/projects/*/*.jsonl│
+                       │  Local conversation JSONLs   │
+                       │  Claude: ~/.claude/projects  │
+                       │  Codex:  ~/.codex/sessions   │
                        └──────────────┬───────────────┘
                                       │
                                       ▼
@@ -66,18 +67,31 @@ writing the report.
 
 **Script:** `scripts/preprocess.py`
 
-**Input:** all `*.jsonl` files under `~/.claude/projects/` whose `mtime` is
-within the `--since` window.
+**Input:** selected local conversation sources whose `mtime` is within the
+`--since` window:
+
+- Claude Code JSONLs under `~/.claude/projects/`
+- Codex CLI JSONLs under `~/.codex/sessions/YYYY/MM/DD/`
 
 **Output:** a single markdown transcript (default to stdout, captured to
 `$TMP/sessions.md` by `dream.sh`).
 
 ### What it does
 
-The session JSONLs are noisy. Each contains every assistant turn, tool call,
+The conversation JSONLs are noisy. Each contains every assistant turn, tool call,
 tool result, hook output, system reminder, and bash transcript. The
 reconciliation cycle only cares about **what the user said and revealed about
 themselves** — assistant turns are mostly conversational scaffolding.
+
+Codex parsing is deliberately local and narrow: it reads Codex CLI JSONL
+rollout files only. Even inside `~/.codex/sessions`, files whose
+`session_meta` shows Codex Desktop or VS Code origins are skipped. It does not
+inspect ChatGPT app caches, prompt-history files, SQLite logs, context-mode
+databases, or tool-output stores. For Codex CLI files,
+`event_msg.user_message` / `event_msg.agent_message` records are preferred
+because they represent actual visible conversation events;
+`response_item.message` is used only as a fallback for JSONLs without
+event-message records.
 
 Preprocessing applies three filters:
 
@@ -103,6 +117,8 @@ message as system/hook chatter, dropped entirely:
 - Bash tool result blocks
 - User-prompt-submit-hook content
 - The Claude Code "Caveat" preamble
+- Codex tool calls, command output, reasoning blobs, context replay, and
+  developer/system records
 
 ### Truncation
 
@@ -424,7 +440,8 @@ jq -s 'map(.cost_usd) | add' ~/.claude/skills/dream-skill/.usage-log.jsonl
 
 | Source | Reader | Sink |
 |---|---|---|
-| `~/.claude/projects/*/*.jsonl` | `preprocess.py` | `$TMP/sessions.md` |
+| `~/.claude/projects/**/*.jsonl` | `preprocess.py` | `$TMP/sessions.md` |
+| `~/.codex/sessions/**/*.jsonl` | `preprocess.py` | `$TMP/sessions.md` |
 | `<vault-root>/<subdirs>/**/*.md` | `load_vault_state.py` | `$TMP/vault.md` |
 | `config/vault-paths.toml` | `load_vault_state.py` | (used internally) |
 | `config/signal-patterns.toml` | `preprocess.py` (spec) | (baked into script for now) |
@@ -456,6 +473,15 @@ jq -s 'map(.cost_usd) | add' ~/.claude/skills/dream-skill/.usage-log.jsonl
 3. Update `prompts/reconcile.md` to instruct the LLM to query that source.
 4. Run `dream.sh --dry-run` and inspect the cycle's tool calls (in the JSON
    response) to confirm the new MCP is being queried.
+
+### Add a new local conversation source
+
+1. Add a source adapter in `scripts/preprocess.py` that normalizes records to
+   `(user|assistant, text)` pairs.
+2. Add the source to `SOURCE_LABELS`, `--sources`, and `dream.sh` root flags.
+3. Update `prompts/system.md` citation rules so the report has a stable
+   evidence prefix.
+4. Add parser tests under `tests/` using synthetic JSONL fixtures only.
 
 ### Add a new vault category
 

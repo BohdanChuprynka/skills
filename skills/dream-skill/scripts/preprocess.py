@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-preprocess.py — clean Claude Code session JSONLs into a user-biased signal transcript.
+preprocess.py — clean local agent conversation JSONLs into a user-biased signal transcript.
 
 Filter policy (user-biased):
   - USER messages: kept (truncated); marked with "star" if matching a signal pattern.
   - ASSISTANT messages: dropped by default. Kept only if they contain "?" OR
     the immediately-following user reply is short (<SHORT_REPLY_CHARS).
   - System reminders, hook output, tool-call / tool-result blocks: dropped.
+
+Supported local conversation sources:
+  - Claude Code JSONLs under ~/.claude/projects
+  - Codex CLI JSONLs under ~/.codex/sessions
 
 Signal patterns are loaded from a TOML file (see --signal-patterns) so the
 patterns can be tuned per-user without editing this script. If no file is
@@ -15,8 +19,8 @@ are deliberately broad (goals / role-change / project-status / body / schedule /
 relationships) and contain NO personal entity names.
 
 Examples:
-    python preprocess.py --since 7d > sessions.md
-    python preprocess.py --since 24h --signal-patterns ./my-patterns.toml > recent.md
+    python preprocess.py --since 7d --sources claude,codex > sessions.md
+    python preprocess.py --since 24h --sources codex --signal-patterns ./my-patterns.toml > recent.md
 """
 
 import argparse
@@ -37,10 +41,15 @@ except ImportError:
 # Defaults
 # ============================================================
 
-DEFAULT_SESSIONS_ROOT = Path(os.environ.get(
-    "DREAM_SESSIONS_ROOT",
-    str(Path.home() / ".claude" / "projects"),
+DEFAULT_CLAUDE_SESSIONS_ROOT = Path(os.environ.get(
+    "DREAM_CLAUDE_SESSIONS_ROOT",
+    os.environ.get("DREAM_SESSIONS_ROOT", str(Path.home() / ".claude" / "projects")),
 ))
+DEFAULT_CODEX_SESSIONS_ROOT = Path(os.environ.get(
+    "DREAM_CODEX_SESSIONS_ROOT",
+    str(Path.home() / ".codex" / "sessions"),
+))
+DEFAULT_SOURCES = os.environ.get("DREAM_CONVERSATION_SOURCES", "claude,codex")
 DEFAULT_OUTPUT = Path("/tmp/dream-sessions.md")
 DEFAULT_SINCE = os.environ.get("DREAM_SINCE", "7d")
 
@@ -91,12 +100,17 @@ SYSREMINDER_BLOCK = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
-# Filtering thresholds (tuned for typical Claude Code transcripts)
+# Filtering thresholds (tuned for local agent transcripts)
 MIN_REAL_USER_CHARS = 8
 USER_MSG_MAX = 800
 ASST_MSG_MAX = 500
 SHORT_REPLY_CHARS = 60
 MAX_MSGS_PER_SESSION = 15
+
+SOURCE_LABELS = {
+    "claude": "Claude Code",
+    "codex": "Codex CLI",
+}
 
 
 # ============================================================
@@ -113,14 +127,14 @@ def parse_since(s: str) -> timedelta:
 
 
 def extract_text(content) -> str:
-    """Extract text from Claude message content (string OR list of content blocks)."""
+    """Extract text from message content (string OR list of text-bearing blocks)."""
     if isinstance(content, str):
         return content.strip()
     if not isinstance(content, list):
         return ""
     parts = []
     for c in content:
-        if isinstance(c, dict) and c.get("type") == "text":
+        if isinstance(c, dict) and isinstance(c.get("text"), str):
             parts.append(c.get("text", ""))
     return "\n".join(parts).strip()
 
@@ -133,6 +147,26 @@ def parse_timestamp(evt: dict):
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         return None
+
+
+def parse_sources(value: str) -> list[str]:
+    raw = [part.strip().lower() for part in value.split(",") if part.strip()]
+    if not raw or "all" in raw:
+        raw = ["claude", "codex"]
+
+    out = []
+    invalid = []
+    for source in raw:
+        if source not in SOURCE_LABELS:
+            invalid.append(source)
+            continue
+        if source not in out:
+            out.append(source)
+
+    if invalid:
+        allowed = ", ".join(sorted(SOURCE_LABELS))
+        raise ValueError(f"invalid --sources value(s): {', '.join(invalid)}; expected {allowed} or all")
+    return out
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -188,15 +222,15 @@ def load_signal_patterns(toml_path: Path | None, verbose: bool = False) -> re.Pa
 # Per-session processing
 # ============================================================
 
-def process_session(
-    path: Path,
-    cutoff: datetime,
+def emit_filtered_messages(
+    messages: list[tuple[str, str]],
+    session_id: str,
+    source: str,
     signal_re: re.Pattern,
     star_only: bool = True,
-) -> list:
-    """Walk one JSONL, return formatted message lines with user-biased filter."""
+) -> list[str]:
+    """Format normalized (kind, text) pairs with the user-biased filter."""
     out: list = []
-    session_id = path.stem
     header_added = False
     pending_asst = None
     msg_count = 0
@@ -204,44 +238,19 @@ def process_session(
     def ensure_header():
         nonlocal header_added
         if not header_added:
-            out.append(f"\n--- session {session_id} ---")
+            out.append(f"\n--- {source} session {session_id} ---")
             header_added = True
 
-    for line in path.open(encoding="utf-8", errors="ignore"):
+    for kind, text in messages:
         if msg_count >= MAX_MSGS_PER_SESSION:
             break
 
-        try:
-            evt = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        if evt.get("isMeta") or evt.get("isCompactSummary"):
-            continue
-
-        ts = parse_timestamp(evt)
-        if ts and ts < cutoff:
-            continue
-
-        kind = evt.get("type")
-        if kind not in ("user", "assistant"):
-            continue
-
-        msg = evt.get("message") or evt
-        content = msg.get("content") if isinstance(msg, dict) else None
-        if content is None:
-            continue
-
-        if kind == "user" and is_tool_result_user_msg(content):
-            continue
-
-        text = extract_text(content)
         if not text or NOISE_PATTERNS.match(text):
             continue
 
         if kind == "user":
             real_text = strip_sysreminders(text)
-            if len(real_text) < MIN_REAL_USER_CHARS:
+            if len(real_text) < MIN_REAL_USER_CHARS and pending_asst is None:
                 continue
             text = real_text
 
@@ -280,19 +289,191 @@ def process_session(
     return out
 
 
+def process_claude_session(
+    path: Path,
+    cutoff: datetime,
+    signal_re: re.Pattern,
+    star_only: bool = True,
+) -> list[str]:
+    """Walk one Claude Code JSONL and return formatted signal lines."""
+    messages: list[tuple[str, str]] = []
+
+    for line in path.open(encoding="utf-8", errors="ignore"):
+        try:
+            evt = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        if evt.get("isMeta") or evt.get("isCompactSummary"):
+            continue
+
+        ts = parse_timestamp(evt)
+        if ts and ts < cutoff:
+            continue
+
+        kind = evt.get("type")
+        if kind not in ("user", "assistant"):
+            continue
+
+        msg = evt.get("message") or evt
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if content is None:
+            continue
+
+        if kind == "user" and is_tool_result_user_msg(content):
+            continue
+
+        text = extract_text(content)
+        if text:
+            messages.append((kind, text))
+
+    return emit_filtered_messages(
+        messages,
+        session_id=path.stem,
+        source="claude",
+        signal_re=signal_re,
+        star_only=star_only,
+    )
+
+
+def codex_event_message(evt: dict) -> tuple[str, str] | None:
+    """Extract actual Codex UI/CLI message events, excluding tool/log mirrors."""
+    payload = evt.get("payload")
+    if not isinstance(payload, dict):
+        return None
+
+    payload_type = payload.get("type")
+    if payload_type == "user_message":
+        text = payload.get("message")
+        return ("user", text.strip()) if isinstance(text, str) else None
+    if payload_type == "agent_message":
+        text = payload.get("message")
+        return ("assistant", text.strip()) if isinstance(text, str) else None
+    return None
+
+
+def codex_response_item_message(evt: dict) -> tuple[str, str] | None:
+    """
+    Fallback extractor for Codex response_item message records.
+
+    Some Codex builds store the model conversation only as response_item rows.
+    When event_msg user_message/agent_message rows exist, those are preferred
+    because response_item rows can include context replay and developer input.
+    """
+    if evt.get("type") != "response_item":
+        return None
+    payload = evt.get("payload")
+    if not isinstance(payload, dict) or payload.get("type") != "message":
+        return None
+
+    role = payload.get("role")
+    if role not in ("user", "assistant"):
+        return None
+
+    text = extract_text(payload.get("content"))
+    if not text:
+        return None
+    return (role, text)
+
+
+def is_codex_cli_session(path: Path) -> bool:
+    """
+    Return True only for Codex CLI-generated local session JSONLs.
+
+    Codex stores multiple local products under ~/.codex/sessions. The dream
+    cycle intentionally excludes VS Code/Desktop-originated sessions even
+    though they share the rollout JSONL shape.
+    """
+    for line in path.open(encoding="utf-8", errors="ignore"):
+        try:
+            evt = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if evt.get("type") != "session_meta":
+            continue
+        payload = evt.get("payload")
+        if not isinstance(payload, dict):
+            return False
+        originator = str(payload.get("originator", "")).lower()
+        source = payload.get("source")
+        if originator in {"codex-tui", "codex-cli"}:
+            return True
+        if isinstance(source, str) and source.lower() == "cli":
+            return True
+        return False
+    return False
+
+
+def process_codex_session(
+    path: Path,
+    cutoff: datetime,
+    signal_re: re.Pattern,
+    star_only: bool = True,
+) -> list[str]:
+    """Walk one Codex CLI JSONL and return formatted signal lines."""
+    event_messages: list[tuple[str, str]] = []
+    response_messages: list[tuple[str, str]] = []
+
+    for line in path.open(encoding="utf-8", errors="ignore"):
+        try:
+            evt = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        ts = parse_timestamp(evt)
+        if ts and ts < cutoff:
+            continue
+
+        event_msg = codex_event_message(evt)
+        if event_msg is not None:
+            event_messages.append(event_msg)
+            continue
+
+        response_msg = codex_response_item_message(evt)
+        if response_msg is not None:
+            response_messages.append(response_msg)
+
+    messages = event_messages if event_messages else response_messages
+    return emit_filtered_messages(
+        messages,
+        session_id=path.stem,
+        source="codex",
+        signal_re=signal_re,
+        star_only=star_only,
+    )
+
+
 # ============================================================
 # Driver
 # ============================================================
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Preprocess Claude Code session logs into a user-biased signal transcript.",
+        description="Preprocess local Claude Code and Codex CLI logs into a user-biased signal transcript.",
     )
     ap.add_argument(
         "--sessions-root",
-        default=str(DEFAULT_SESSIONS_ROOT),
+        default=str(DEFAULT_CLAUDE_SESSIONS_ROOT),
+        help="Root directory of Claude Code session JSONLs. Backward-compatible alias "
+             "for --claude-sessions-root.",
+    )
+    ap.add_argument(
+        "--claude-sessions-root",
+        default=None,
         help="Root directory of Claude Code session JSONLs "
-             "(default: $DREAM_SESSIONS_ROOT or ~/.claude/projects)",
+             "(default: $DREAM_CLAUDE_SESSIONS_ROOT, $DREAM_SESSIONS_ROOT, or ~/.claude/projects)",
+    )
+    ap.add_argument(
+        "--codex-sessions-root",
+        default=str(DEFAULT_CODEX_SESSIONS_ROOT),
+        help="Root directory of Codex CLI session JSONLs "
+             "(default: $DREAM_CODEX_SESSIONS_ROOT or ~/.codex/sessions)",
+    )
+    ap.add_argument(
+        "--sources",
+        default=DEFAULT_SOURCES,
+        help="Comma-separated sources to scan: claude,codex, or all "
+             "(default: $DREAM_CONVERSATION_SOURCES or claude,codex)",
     )
     ap.add_argument(
         "--since",
@@ -320,14 +501,14 @@ def main() -> int:
         action="store_true",
         help="Print debug info to stderr (pattern count, file scan progress)",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     star_only = not args.all
-    cutoff = datetime.now(timezone.utc) - parse_since(args.since)
-    root = Path(args.sessions_root).expanduser()
-
-    if not root.exists():
-        print(f"preprocess.py: sessions root not found: {root}", file=sys.stderr)
+    try:
+        cutoff = datetime.now(timezone.utc) - parse_since(args.since)
+        sources = parse_sources(args.sources)
+    except ValueError as e:
+        print(f"preprocess.py: {e}", file=sys.stderr)
         return 1
 
     # Auto-resolve default signal-patterns path: <script-dir>/../config/signal-patterns.toml
@@ -344,27 +525,71 @@ def main() -> int:
     total_files = 0
     kept_files = 0
     signal_msgs = 0
+    available_roots = 0
+    stats: dict[str, dict[str, int]] = {}
 
-    for jsonl in root.rglob("*.jsonl"):
-        total_files += 1
-        try:
-            if jsonl.stat().st_mtime < cutoff.timestamp():
+    claude_root = Path(args.claude_sessions_root or args.sessions_root).expanduser()
+    codex_root = Path(args.codex_sessions_root).expanduser()
+    source_roots = {
+        "claude": claude_root,
+        "codex": codex_root,
+    }
+    processors = {
+        "claude": process_claude_session,
+        "codex": process_codex_session,
+    }
+
+    for source in sources:
+        root = source_roots[source]
+        stats[source] = {"scanned": 0, "kept": 0, "signals": 0}
+        if not root.exists():
+            print(f"# WARN: {source} sessions root not found: {root}", file=sys.stderr)
+            continue
+        if not root.is_dir():
+            print(f"# WARN: {source} sessions root is not a directory: {root}", file=sys.stderr)
+            continue
+
+        available_roots += 1
+        for jsonl in root.rglob("*.jsonl"):
+            total_files += 1
+            stats[source]["scanned"] += 1
+            try:
+                if jsonl.stat().st_mtime < cutoff.timestamp():
+                    continue
+            except OSError:
                 continue
-        except OSError:
-            continue
 
-        session_lines = process_session(jsonl, cutoff, signal_re, star_only=star_only)
-        if not session_lines:
-            continue
+            if source == "codex" and not is_codex_cli_session(jsonl):
+                continue
 
-        kept_files += 1
-        signal_msgs += sum(1 for ln in session_lines if "[★]" in ln)
-        all_lines.extend(session_lines)
+            session_lines = processors[source](jsonl, cutoff, signal_re, star_only=star_only)
+            if not session_lines:
+                continue
+
+            kept_files += 1
+            stats[source]["kept"] += 1
+            source_signal_msgs = sum(1 for ln in session_lines if "[★]" in ln)
+            signal_msgs += source_signal_msgs
+            stats[source]["signals"] += source_signal_msgs
+            all_lines.extend(session_lines)
+
+    if available_roots == 0:
+        selected = ", ".join(sources)
+        print(f"preprocess.py: no selected conversation roots found: {selected}", file=sys.stderr)
+        return 1
 
     mode = "star-only" if star_only else "all-user"
+    source_labels = ", ".join(SOURCE_LABELS[source] for source in sources)
+    source_stats = "; ".join(
+        f"{SOURCE_LABELS[source]} scanned {stats[source]['scanned']}, "
+        f"kept {stats[source]['kept']}, signals {stats[source]['signals']}"
+        for source in sources
+    )
     header = [
-        f"# Cleaned Claude Code session signals — window: last {args.since} | mode: {mode}",
+        f"# Cleaned local conversation signals — window: last {args.since} | mode: {mode}",
+        f"# Sources: {source_labels}",
         f"# Files scanned: {total_files} | files kept: {kept_files} | signal-marked messages: {signal_msgs}",
+        f"# Source stats: {source_stats}",
         f"# Cutoff: {cutoff.isoformat()}",
         f"# Legend: star = matched high-signal pattern",
         "",

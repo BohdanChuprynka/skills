@@ -60,7 +60,7 @@ Watch for which servers fail to register. Common causes:
 ### Reports are empty / say "nothing to reconcile"
 
 **Cause:** either everything truly is in sync (rare), the time window has no
-session activity, or the preprocess filter dropped everything as noise.
+local conversation activity, or the preprocess filter dropped everything as noise.
 
 **Fix:** inspect what's going in.
 
@@ -71,7 +71,9 @@ session activity, or the preprocess filter dropped everything as noise.
 Open `/tmp/dream-sessions-<date>.md`:
 
 - If it's empty: your `--since` window is too short, or `~/.claude/projects/`
-  has no matching JSONLs. Try `--since 30d`.
+  and `~/.codex/sessions/` have no matching JSONLs. Try `--since 30d`.
+- If only one source is missing: set `DREAM_CONVERSATION_SOURCES=claude` or
+  `DREAM_CONVERSATION_SOURCES=codex`, or pass `--sources <source>` for the run.
 - If it has content but no `★` markers: signal patterns aren't matching your
   actual conversation style. Edit `config/signal-patterns.toml` to add
   entities or anchor phrases relevant to you.
@@ -252,7 +254,7 @@ chmod 600 ~/.claude/skills/dream-skill/config/mcp-config.json
 
 ### "I see costs higher than expected"
 
-**Cause:** vault snapshot or session preprocessing is producing huge inputs,
+**Cause:** vault snapshot or conversation preprocessing is producing huge inputs,
 or you're running daily on Opus.
 
 **Fix:**
@@ -274,7 +276,7 @@ If `vault.md` is large, check whether new long-form pages should be added to
 the `frontmatter_only` glob in `vault-paths.toml`.
 
 If `sessions.md` is large, your `--since` window may include heavy chat
-days. The noise filter may also be missing patterns specific to your
+days across Claude and Codex. The noise filter may also be missing patterns specific to your
 workflow — extend `[noise]` in `signal-patterns.toml`.
 
 ---

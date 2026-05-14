@@ -2,7 +2,7 @@
 # dream.sh — entry point for the dream-skill reconciliation cycle.
 #
 # Pipeline (4 stages, only stage 3 calls the LLM):
-#   1. preprocess.py        → cleaned session transcript    (no LLM)
+#   1. preprocess.py        → cleaned conversation transcript (no LLM)
 #   2. load_vault_state.py  → vault snapshot                (no LLM)
 #   3. claude --mcp-config  → dream report                  (LLM, isolated MCPs)
 #   4. apply_auto.py        → dry-run summary of proposals  (no LLM at this stage)
@@ -36,7 +36,9 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 # ============================================================
 
 DEFAULT_VAULT_ROOT="$HOME/Documents/Obsidian"
-DEFAULT_SESSIONS_ROOT="$HOME/.claude/projects"
+DEFAULT_CLAUDE_SESSIONS_ROOT="$HOME/.claude/projects"
+DEFAULT_CODEX_SESSIONS_ROOT="$HOME/.codex/sessions"
+DEFAULT_CONVERSATION_SOURCES="claude,codex"
 DEFAULT_MODEL="claude-sonnet-4-6"
 DEFAULT_SINCE="7d"
 
@@ -46,11 +48,13 @@ DEFAULT_SINCE="7d"
 
 VAULT_ROOT="${DREAM_VAULT_ROOT:-$DEFAULT_VAULT_ROOT}"
 OUTPUT_DIR="${DREAM_OUTPUT_DIR:-}"
-SESSIONS_ROOT="${DREAM_SESSIONS_ROOT:-$DEFAULT_SESSIONS_ROOT}"
+CLAUDE_SESSIONS_ROOT="${DREAM_CLAUDE_SESSIONS_ROOT:-${DREAM_SESSIONS_ROOT:-$DEFAULT_CLAUDE_SESSIONS_ROOT}}"
+CODEX_SESSIONS_ROOT="${DREAM_CODEX_SESSIONS_ROOT:-$DEFAULT_CODEX_SESSIONS_ROOT}"
+CONVERSATION_SOURCES="${DREAM_CONVERSATION_SOURCES:-$DEFAULT_CONVERSATION_SOURCES}"
 MODEL="${DREAM_MODEL:-$DEFAULT_MODEL}"
 SINCE="${DREAM_SINCE:-$DEFAULT_SINCE}"
 MCP_CONFIG=""
-NO_MCP=0
+NO_MCP="${DREAM_NO_MCP:-0}"
 APPLY=0
 DRY_RUN=1   # default behavior: produce a report, do not apply
 VERBOSE=0
@@ -73,9 +77,24 @@ Configuration (highest priority first: CLI flag > env > config > default):
                           env: DREAM_OUTPUT_DIR
                           default: <vault-root>/dream-reports
 
-  --sessions-root PATH    Claude Code session JSONL root.
+  --sources LIST          Conversation sources to scan: claude,codex,all.
+                          env: DREAM_CONVERSATION_SOURCES
+                          default: claude,codex
+
+  --sessions-root PATH    Claude Code session JSONL root. Backward-compatible
+                          alias for --claude-sessions-root.
                           env: DREAM_SESSIONS_ROOT
                           default: \$HOME/.claude/projects
+
+  --claude-sessions-root PATH
+                          Claude Code session JSONL root.
+                          env: DREAM_CLAUDE_SESSIONS_ROOT
+                          default: \$HOME/.claude/projects
+
+  --codex-sessions-root PATH
+                          Codex CLI local session JSONL root.
+                          env: DREAM_CODEX_SESSIONS_ROOT
+                          default: \$HOME/.codex/sessions
 
   --model ID              Model used in stage 3 reconciliation.
                           env: DREAM_MODEL
@@ -104,6 +123,8 @@ Output:
 Examples:
   ./dream.sh                                # standard run
   ./dream.sh --since 14d --verbose          # wider window, show costs
+  ./dream.sh --sources claude               # Claude conversations only
+  ./dream.sh --sources codex                # Codex conversations only
   ./dream.sh --no-mcp                       # Tier 0 only
   ./dream.sh --vault-root /tmp/test-vault   # different vault
   ./dream.sh --apply                        # apply latest report (after manual review)
@@ -114,7 +135,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --vault-root)    VAULT_ROOT="$2"; shift 2 ;;
     --output-dir)    OUTPUT_DIR="$2"; shift 2 ;;
-    --sessions-root) SESSIONS_ROOT="$2"; shift 2 ;;
+    --sources)       CONVERSATION_SOURCES="$2"; shift 2 ;;
+    --sessions-root) CLAUDE_SESSIONS_ROOT="$2"; shift 2 ;;
+    --claude-sessions-root) CLAUDE_SESSIONS_ROOT="$2"; shift 2 ;;
+    --codex-sessions-root) CODEX_SESSIONS_ROOT="$2"; shift 2 ;;
     --model)         MODEL="$2"; shift 2 ;;
     --since)         SINCE="$2"; shift 2 ;;
     --mcp-config)    MCP_CONFIG="$2"; shift 2 ;;
@@ -184,7 +208,9 @@ echo "  dream-skill cycle — $DATE"
 echo "==============================================="
 echo "  vault:    $VAULT_ROOT"
 echo "  output:   $OUTPUT_REPORT"
-echo "  sessions: $SESSIONS_ROOT"
+echo "  sources:  $CONVERSATION_SOURCES"
+echo "  claude:   $CLAUDE_SESSIONS_ROOT"
+echo "  codex:    $CODEX_SESSIONS_ROOT"
 echo "  window:   $SINCE"
 echo "  model:    $MODEL"
 if [[ "$NO_MCP" == "1" ]]; then
@@ -222,17 +248,19 @@ if [[ "$APPLY" == "1" ]]; then
 fi
 
 # ============================================================
-# Stage 1: preprocess session JSONLs (no LLM)
+# Stage 1: preprocess local conversation JSONLs (no LLM)
 # ============================================================
 
-echo "[1/4] preprocess sessions…"
+echo "[1/4] preprocess conversations…"
 python3 "$SCRIPTS_DIR/preprocess.py" \
-  --sessions-root "$SESSIONS_ROOT" \
+  --sources "$CONVERSATION_SOURCES" \
+  --claude-sessions-root "$CLAUDE_SESSIONS_ROOT" \
+  --codex-sessions-root "$CODEX_SESSIONS_ROOT" \
   --since "$SINCE" \
   --output "$TMP/sessions.md"
 SESSIONS_BYTES=$(wc -c < "$TMP/sessions.md" | tr -d ' ')
-SIGNAL_COUNT=$(grep -c "★" "$TMP/sessions.md" 2>/dev/null || echo 0)
-echo "      sessions.md: ${SESSIONS_BYTES} bytes, ${SIGNAL_COUNT} star-marked messages"
+SIGNAL_COUNT=$(grep -c "\\[★\\]" "$TMP/sessions.md" 2>/dev/null || echo 0)
+echo "      conversations.md: ${SESSIONS_BYTES} bytes, ${SIGNAL_COUNT} star-marked messages"
 
 # ============================================================
 # Stage 2: snapshot vault state (no LLM)
@@ -272,12 +300,14 @@ VAULT_CONTENT="$(cat "$TMP/vault.md")"
 
 # Safe substitution via Python (avoids shell escaping hell on user content)
 PROMPT="$(WINDOW="$SINCE" \
+           TODAY="$DATE" \
            SESSIONS="$SESSIONS_CONTENT" \
            VAULT="$VAULT_CONTENT" \
            TEMPLATE="$RECONCILE_TEMPLATE" \
          python3 -c '
 import os
 t = os.environ["TEMPLATE"]
+t = t.replace("{TODAY}",   os.environ["TODAY"])
 t = t.replace("{WINDOW}",  os.environ["WINDOW"])
 t = t.replace("{SESSIONS}", os.environ["SESSIONS"])
 t = t.replace("{VAULT}",    os.environ["VAULT"])

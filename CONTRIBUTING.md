@@ -4,7 +4,7 @@ Thanks for considering a contribution. The repo is small and the surface area is
 
 ## Quick orientation
 
-dream-skill is a single Claude Code skill plus a small pipeline of Python scripts. The plugin manifest (`.claude-plugin/`) is what Claude Code loads. The skill body lives at `skills/dream-skill/SKILL.md`. Everything else supports those two surfaces: scripts that prepare inputs, prompts that drive the reconcile call, configs that the user customizes.
+dream-skill is a single Claude Code skill plus a small pipeline of Python scripts. The plugin manifest (`.claude-plugin/`) is what Claude Code loads. The skill body lives at `skills/dream-skill/SKILL.md`. Everything else supports those two surfaces: scripts that prepare inputs from local Claude/Codex conversations, prompts that drive the reconcile call, configs that the user customizes.
 
 Behavior changes should land in source-of-truth files at the top of the table below. Documentation changes should land in `docs/` or `README.md`. Avoid touching generated or mirrored content.
 
@@ -15,7 +15,7 @@ Behavior changes should land in source-of-truth files at the top of the table be
 | What the skill does conceptually, when it triggers, frontmatter | `skills/dream-skill/SKILL.md` |
 | The reconcile system prompt | `prompts/system.md` |
 | The reconcile user-message template | `prompts/reconcile.md` |
-| Session preprocessing (JSONL filter, signal extraction) | `scripts/preprocess.py` |
+| Conversation preprocessing (Claude/Codex JSONL filter, signal extraction) | `scripts/preprocess.py` |
 | Vault snapshot (frontmatter walker, file discovery) | `scripts/load_vault_state.py` |
 | Apply logic (write proposals to vault, log edits) | `scripts/apply_auto.py` |
 | Rollback logic | `scripts/apply_undo.sh` |
@@ -83,7 +83,7 @@ There is no automated test harness. The skill is tested by running it and readin
 3. The report you got after the change.
 4. One sentence on why the new report is better.
 
-For changes to `preprocess.py` or `load_vault_state.py` (pure Python, no LLM call), unit tests are welcome but not required. Put them under `tests/` and run with `python -m pytest`.
+For changes to `preprocess.py`, `apply_auto.py`, or `load_vault_state.py` (pure Python, no LLM call), unit tests are expected when behavior changes. Put them under `tests/` and run with `python -m unittest`.
 
 ## Commit style
 

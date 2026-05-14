@@ -1,6 +1,6 @@
 {
   "name": "dream-skill",
-  "description": "Reconcile your Obsidian wiki against Claude Code session signals — flag stale, missing, and contradicted facts for review.",
+  "description": "Reconcile your Obsidian wiki against local Claude Code and Codex conversation signals — flag stale, missing, and contradicted facts for review.",
   "version": "0.1.0",
   "author": {
     "name": "Bohdan Chuprynka",
@@ -11,6 +11,7 @@
   "license": "MIT",
   "keywords": [
     "claude-code",
+    "codex",
     "skill",
     "obsidian",
     "knowledge-base",
