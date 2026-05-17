@@ -14,6 +14,7 @@
   <a href="#the-problem">Problem</a> &middot;
   <a href="#what-sync-phone-does">What it does</a> &middot;
   <a href="#how-it-works">How</a> &middot;
+  <a href="#prerequisites">Prerequisites</a> &middot;
   <a href="#install">Install</a> &middot;
   <a href="#example-output">Example</a> &middot;
   <a href="#configuration">Config</a> &middot;
@@ -77,6 +78,17 @@ Everything runs locally in Claude Code. No external services. No data leaves you
 ```
 
 The capture side is an iPhone Shortcut. The routing side is a Claude Code skill that reads your vault schemas at runtime — there is no hard-coded vault list. Add a vault, the skill finds it. Move a vault, edit one path.
+
+## Prerequisites
+
+Before you install, make sure you have:
+
+- **iPhone** running iOS 17 or later. The Shortcut uses Record Audio + Transcribe, which is built in to iOS — no third-party app required. The Action Button is iPhone 15 Pro and later; older phones can bind the shortcut to Siri instead.
+- **Mac** with iCloud Drive enabled and signed in to the same Apple ID as the iPhone. This is what bridges the dictation file from phone to laptop.
+- **Claude Code CLI** installed and working on the Mac. The skill runs as a Claude Code plugin and uses Claude Code's Skill tool + slash command system. Install instructions: [docs.claude.com/claude-code](https://docs.claude.com/claude-code).
+- **Obsidian vaults** following the LLM-curated wiki pattern: one parent folder, one subfolder per vault, each subfolder has a `CLAUDE.md` describing its schema. If you don't have this yet, [docs/VAULT-SETUP.md](docs/VAULT-SETUP.md) is the 5-minute starter and [examples/sample-vault/](examples/sample-vault/) is a working example you can copy.
+
+**Codex CLI / other coding agents:** sync-phone is a Claude Code skill. Codex CLI and similar tools don't support the same skill/slash-command system, so the install isn't drop-in. The skill body in `skills/sync-phone/SKILL.md` is plain English though, so you can paste it as a prompt to any agent that can read your local filesystem.
 
 ## Install
 
