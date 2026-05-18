@@ -82,6 +82,65 @@ The hardest invariant: edits to `prompts/cron-prompt.md` must produce identical 
 
 If you find yourself wanting runtime-specific prompt behavior, prefer environment-conditional logic INSIDE the prompt over duplicating the prompt body. If that's unwieldy, fork into `prompts/claude-prompt.md` and `prompts/codex-prompt.md` and update both entrypoints — but document why.
 
+### Recommended install layout (auto-sync)
+
+To keep both runtimes in sync with minimal effort, install via symlinks:
+
+```bash
+# Clone once
+git clone https://github.com/BohdanChuprynka/calendar-plan-skill.git \
+  ~/Documents/IT-Work/Projects/IT/skills/calendar-plan-skill
+REPO=~/Documents/IT-Work/Projects/IT/skills/calendar-plan-skill
+
+# Claude target: symlink the whole skill dir
+ln -s "$REPO/skills/calendar-plan" ~/.claude/skills/calendar-plan
+
+# Codex target: symlink the stable files (SKILL.md, agents/openai.yaml)
+ln -s "$REPO/codex/SKILL.md"                  ~/.codex/skills/calendar-plan/SKILL.md
+ln -s "$REPO/codex/agents/openai.example.yaml" ~/.codex/skills/calendar-plan/agents/openai.yaml
+
+# Single shared planning-preferences.md (canonical = Codex side; Claude symlinks to it)
+ln -s ~/.codex/skills/calendar-plan/planning-preferences.md \
+      ~/.claude/skills/calendar-plan/config/planning-preferences.md
+```
+
+### Update workflow
+
+What needs explicit re-sync vs what auto-propagates:
+
+| You edited… | Claude target | Codex target |
+|---|---|---|
+| `skills/calendar-plan/SKILL.md` | Auto (symlinked) | N/A |
+| `skills/calendar-plan/calendar-plan.sh` or scripts | Auto (symlinked) | N/A |
+| `codex/SKILL.md` | N/A | Auto (symlinked) |
+| `codex/agents/openai.example.yaml` | N/A | Auto (symlinked) |
+| `planning-preferences.md` (either path) | Auto (symlinked → one file) | Auto (symlinked → one file) |
+| **`prompts/cron-prompt.md`** | Auto (read fresh per run) | **Run `bash sync.sh`** |
+| `codex/automation.example.toml` (RRULE, model) | N/A | Run `bash codex/setup.sh` (full re-render) |
+| `examples/*.example.md` | Auto if newly seeded (existing memory.md untouched) | Same |
+
+So the **only sync command you need in day-to-day use is**:
+
+```bash
+bash sync.sh         # re-render Codex automation.toml after editing the prompt
+```
+
+Use `bash sync.sh --dry-run` to preview without writing.
+
+For a full re-install (rare — only when you change Codex metadata like RRULE/model/cwd), use `bash codex/setup.sh`.
+
+### Disabling the Codex cron (manual-mode use)
+
+To use both runtimes manually without either firing on a schedule:
+
+```bash
+# Set status to INACTIVE in ~/.codex/automations/calendar-plan/automation.toml
+sed -i '' 's/^status = "ACTIVE"/status = "INACTIVE"/' \
+  ~/.codex/automations/calendar-plan/automation.toml
+```
+
+Re-enable later by flipping back to `"ACTIVE"`. The skill stays invocable via `/calendar-plan` in Codex regardless of status.
+
 ## License
 
 Contributions are licensed MIT (same as the project). By submitting a PR you agree to license your changes under MIT.
