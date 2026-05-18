@@ -123,6 +123,18 @@ fi
 MEMORY_FILE="$MEMORY_DIR/memory.md"
 [[ -f "$MEMORY_FILE" ]] || cp "$EXAMPLES_DIR/memory.example.md" "$MEMORY_FILE"
 
+PROMPT_FILE="$PROMPTS_DIR/cron-prompt.md"
+PROMPT_EXAMPLE="$PROMPTS_DIR/cron-prompt.example.md"
+if [[ ! -f "$PROMPT_FILE" ]]; then
+  if [[ -f "$PROMPT_EXAMPLE" ]]; then
+    cp "$PROMPT_EXAMPLE" "$PROMPT_FILE"
+    echo "auto-bootstrapped $PROMPT_FILE from example (edit to personalize)" >&2
+  else
+    echo "FATAL: neither $PROMPT_FILE nor $PROMPT_EXAMPLE exist." >&2
+    exit 1
+  fi
+fi
+
 PLANNING_PREFS="$CONFIG_DIR/planning-preferences.md"
 if [[ ! -f "$PLANNING_PREFS" ]]; then
   echo "FATAL: $PLANNING_PREFS missing. Run setup.sh first." >&2
@@ -133,7 +145,7 @@ TMP_PROMPT="$(mktemp -t calendar-plan-prompt.XXXXXX.md)"
 trap 'rm -f "$TMP_PROMPT"' EXIT
 
 python3 "$SCRIPTS_DIR/prep_context.py" \
-  --template "$PROMPTS_DIR/cron-prompt.md" \
+  --template "$PROMPT_FILE" \
   --out "$TMP_PROMPT" \
   --skill-dir "$SKILL_DIR" \
   --planning-prefs "$PLANNING_PREFS" \

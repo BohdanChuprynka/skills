@@ -41,8 +41,14 @@ for arg in "$@"; do
 done
 
 if [[ ! -f "$PROMPT_FILE" ]]; then
-  echo "FATAL: $PROMPT_FILE not found." >&2
-  exit 1
+  EXAMPLE="$REPO_DIR/prompts/cron-prompt.example.md"
+  if [[ -f "$EXAMPLE" ]]; then
+    cp "$EXAMPLE" "$PROMPT_FILE"
+    echo "auto-bootstrapped $PROMPT_FILE from $EXAMPLE (edit to personalize)" >&2
+  else
+    echo "FATAL: neither $PROMPT_FILE nor $EXAMPLE found." >&2
+    exit 1
+  fi
 fi
 if [[ ! -f "$CODEX_TOML" ]]; then
   echo "FATAL: $CODEX_TOML not found — run codex/setup.sh first." >&2

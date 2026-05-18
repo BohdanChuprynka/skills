@@ -98,11 +98,15 @@ if [[ -f "$CONFIG_DIR/settings.conf" ]]; then
   fi
 fi
 
-# 9. prompt template
-if [[ -n "$PROMPTS_DIR" && -f "$PROMPTS_DIR/cron-prompt.md" ]]; then
-  report PASS "cron-prompt.md"       "$PROMPTS_DIR/cron-prompt.md"
-else
-  report FAIL "cron-prompt.md"       "missing — re-clone repo"
+# 9. prompt (local copy, not the .example template)
+if [[ -n "$PROMPTS_DIR" ]]; then
+  if [[ -f "$PROMPTS_DIR/cron-prompt.md" ]]; then
+    report PASS "cron-prompt.md"     "$PROMPTS_DIR/cron-prompt.md (local, gitignored)"
+  elif [[ -f "$PROMPTS_DIR/cron-prompt.example.md" ]]; then
+    report SKIP "cron-prompt.md"     "missing — will be auto-bootstrapped from .example on first run"
+  else
+    report FAIL "cron-prompt.md"     "neither local nor .example.md found — re-clone repo"
+  fi
 fi
 
 # 10. memory.md

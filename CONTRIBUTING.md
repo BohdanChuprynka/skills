@@ -104,6 +104,22 @@ ln -s ~/.codex/skills/calendar-plan/planning-preferences.md \
       ~/.claude/skills/calendar-plan/config/planning-preferences.md
 ```
 
+### Local vs committed files (.env pattern)
+
+Every user-customizable file follows the dotenv convention: a committed `*.example.*` template and a gitignored local copy. Edit the local copy; the example stays generic.
+
+| Committed template (in repo) | Local file (gitignored) | Where the local file lives |
+|---|---|---|
+| `prompts/cron-prompt.example.md` | `prompts/cron-prompt.md` | repo dir (same folder as the example) |
+| `examples/planning-preferences.example.md` | `planning-preferences.md` | `~/.codex/skills/calendar-plan/` (canonical; Claude side symlinks) |
+| `examples/memory.example.md` | `memory.md` | `~/.codex/automations/calendar-plan/` (canonical; Claude side symlinks) |
+| `examples/calendar-context.example.md` | `Calendar Context.md` | Your Obsidian vault (anywhere — path is in settings.conf) |
+| `skills/calendar-plan/config/mcp-config.example.json` | `mcp-config.json` | `<repo>/skills/calendar-plan/config/` |
+| `skills/calendar-plan/config/settings.example.conf` | `settings.conf` | `<repo>/skills/calendar-plan/config/` |
+| `codex/automation.example.toml` | `automation.toml` | `~/.codex/automations/calendar-plan/` |
+
+The local file is auto-bootstrapped from the example on first run for the prompt (`calendar-plan.sh` and `sync.sh` both auto-copy if missing). Other files are seeded by `setup.sh` / `codex/setup.sh`.
+
 ### Update workflow
 
 What needs explicit re-sync vs what auto-propagates:
@@ -114,10 +130,11 @@ What needs explicit re-sync vs what auto-propagates:
 | `skills/calendar-plan/calendar-plan.sh` or scripts | Auto (symlinked) | N/A |
 | `codex/SKILL.md` | N/A | **Run `bash sync.sh`** + restart Codex |
 | `codex/agents/openai.example.yaml` | N/A | **Run `bash sync.sh`** + restart Codex |
-| `planning-preferences.md` (either path) | Auto (symlinked → one file) | Auto (symlinked → one file) |
-| **`prompts/cron-prompt.md`** | Auto (read fresh per run) | **Run `bash sync.sh`** |
+| `planning-preferences.md` (local) | Auto (symlinked → one file) | Auto (symlinked → one file) |
+| `memory.md` (local) | Auto (symlinked → one file) | Auto (symlinked → one file) |
+| **`prompts/cron-prompt.md`** (local) | Auto (read fresh per run) | **Run `bash sync.sh`** |
+| `prompts/cron-prompt.example.md` (template) | Touched only via local copy (see above) | Same |
 | `codex/automation.example.toml` (RRULE, model) | N/A | Run `bash codex/setup.sh` (full re-render) |
-| `examples/*.example.md` | Auto if newly seeded (existing memory.md untouched) | Same |
 
 So the **only sync command you need in day-to-day use is**:
 
