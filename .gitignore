@@ -10,6 +10,9 @@
 # Local (personalized) prompt body — see prompts/cron-prompt.example.md for the template
 prompts/cron-prompt.md
 
+# Local (personalized) env — single source of all your paths, tokens, IDs
+local.env
+
 # launchd plists (user-specific paths)
 **/launchd/com.*.plist
 !**/launchd/*.plist.example

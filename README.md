@@ -110,51 +110,30 @@ The memory.md entry written for this run becomes the input to the NEXT run, so t
 
 ## Install
 
-> calendar-plan-skill works in **two runtimes**: Claude Code (via the plugin marketplace) and Codex CLI (via a local installer script). Pick the one you actually run the cron on — both can coexist for ad-hoc invocation, but only one should own the schedule.
-
-### Claude Code (recommended)
-
-Plugin marketplace install — one command, lands in `~/.claude/skills/calendar-plan/`:
-
-```bash
-/plugin marketplace add BohdanChuprynka/calendar-plan-skill
-/plugin install calendar-plan@calendar-plan-marketplace
-```
-
-Then run the one-time setup wizard:
-
-```bash
-cd ~/.claude/skills/calendar-plan
-./setup.sh
-```
-
-The wizard asks for your timezone, the path to your Calendar Context markdown, the Notion task-source page title, and optionally walks you through each MCP. Skip any MCP and the planner degrades gracefully (see Tier model below).
-
-### Codex CLI
-
-Codex has its own automations system (`~/.codex/automations/*/automation.toml`). The installer renders the right files in the right places:
+Three commands. The installer wires both Claude and Codex from one config file.
 
 ```bash
 git clone https://github.com/BohdanChuprynka/calendar-plan-skill.git ~/calendar-plan-skill
-bash ~/calendar-plan-skill/codex/setup.sh
+cd ~/calendar-plan-skill
+bash setup.sh
 ```
 
-Skill files land in `~/.codex/skills/calendar-plan/`. The cron RRULE lands in `~/.codex/automations/calendar-plan/automation.toml`. MCP enablement is per Codex's own model (`~/.codex/config.toml` `[mcp_servers]` blocks, OAuth via the Codex desktop app).
+The first run of `setup.sh` creates `local.env` from a template, then exits. Open it, fill in your values (paths, Notion token, Google OAuth file locations), and re-run `bash setup.sh`. After that, the installer:
 
-### Manual clone (any runtime)
+- Symlinks the skill into `~/.claude/skills/calendar-plan/` (Claude picks it up automatically)
+- Copies the Codex skill files into `~/.codex/skills/calendar-plan/` (restart Codex to discover)
+- Generates `mcp-config.json`, `settings.conf`, and `automation.toml` from your `local.env`
+- Seeds a `planning-preferences.md` for your calendar IDs (edit this once)
+- Runs a health check
 
-```bash
-git clone https://github.com/BohdanChuprynka/calendar-plan-skill.git ~/calendar-plan-skill
+**The two files you actually edit:**
 
-# Claude target
-ln -s ~/calendar-plan-skill/skills/calendar-plan ~/.claude/skills/calendar-plan
-bash ~/.claude/skills/calendar-plan/setup.sh
+| File | What goes in it |
+|---|---|
+| `local.env` | Paths, tokens, IDs, timezone — basically everything specific to you |
+| `~/.codex/skills/calendar-plan/planning-preferences.md` | Calendar routing rules, daily defaults |
 
-# Codex target
-bash ~/calendar-plan-skill/codex/setup.sh
-```
-
-Symlink so updates propagate: `cd ~/calendar-plan-skill && git pull` and both runtimes pick up changes.
+Everything else is generated. Re-run `bash setup.sh` whenever you edit `local.env`.
 
 Full walkthrough with troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 
@@ -163,21 +142,24 @@ Full walkthrough with troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 After install:
 
 ```bash
-# 1. Configure
-./setup.sh
+# Dry-run (no LLM call, no calendar writes)
+bash ~/.claude/skills/calendar-plan/calendar-plan.sh --dry-run
 
-# 2. Dry-run (no LLM call, no calendar writes)
-./calendar-plan.sh --dry-run
+# Draft mode (real LLM call, NO calendar writes — review the plan)
+bash ~/.claude/skills/calendar-plan/calendar-plan.sh --mode draft
 
-# 3. Draft mode (real LLM call, NO calendar writes — review the plan)
-./calendar-plan.sh --mode draft
+# Live auto mode (writes safe blocks to Google Calendar)
+bash ~/.claude/skills/calendar-plan/calendar-plan.sh --mode auto
+```
 
-# 4. Live auto mode (writes safe blocks to Google Calendar)
-./calendar-plan.sh --mode auto
+Or invoke it as a slash command in any Claude Code or Codex session: `/calendar-plan`.
 
-# 5. Schedule (mac, launchd)
-cp launchd/com.user.calendar-plan.plist.example ~/Library/LaunchAgents/com.user.calendar-plan.plist
-# Edit the plist to point at your skill dir, then:
+Optional — schedule the daily cron (macOS launchd):
+
+```bash
+cp ~/.claude/skills/calendar-plan/launchd/com.user.calendar-plan.plist.example \
+   ~/Library/LaunchAgents/com.user.calendar-plan.plist
+# Edit the plist (replace the SKILL_DIR placeholder), then:
 launchctl load ~/Library/LaunchAgents/com.user.calendar-plan.plist
 ```
 
