@@ -1,4 +1,4 @@
-# Real (non-example) configs — must stay local
+# Real (non-example) configs — must stay local. .env-style: copy *.example.* to non-example, edit.
 **/config/mcp-config.json
 **/config/planning-preferences.md
 **/config/settings.conf
@@ -6,6 +6,9 @@
 **/logs/
 **/.last-run/
 **/.tmp/
+
+# Local (personalized) prompt body — see prompts/cron-prompt.example.md for the template
+prompts/cron-prompt.md
 
 # launchd plists (user-specific paths)
 **/launchd/com.*.plist
