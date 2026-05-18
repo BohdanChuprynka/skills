@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 #
-# sync.sh — re-render the Codex automation.toml prompt body from prompts/cron-prompt.md.
+# sync.sh — push repo edits into the Codex install.
 #
-# Use this whenever you edit prompts/cron-prompt.md. The Claude target reads the
-# prompt fresh on every run (no sync needed), but Codex bakes the prompt into
-# automation.toml at install time — this script updates that baked copy in-place
-# without touching the rest of the metadata (rrule, model, status, cwd, etc.).
+# The Claude target is symlinked to the repo and picks up edits automatically.
+# Codex does NOT follow symlinks for skill discovery (all working sibling skills
+# are real files), so we copy. This script handles:
+#
+#   1. copy codex/SKILL.md                  → ~/.codex/skills/calendar-plan/SKILL.md
+#   2. copy codex/agents/openai.example.yaml → ~/.codex/skills/calendar-plan/agents/openai.yaml
+#   3. re-render prompt body inside ~/.codex/automations/calendar-plan/automation.toml
+#      from prompts/cron-prompt.md (preserves rrule, model, status, cwd, etc.)
+#
+# After running, RESTART Codex — it scans skills at startup only.
 #
 # Usage:
-#   bash sync.sh                  # use settings from the existing automation.toml
-#   bash sync.sh --dry-run        # render and print, do not write
+#   bash sync.sh                  # full sync
+#   bash sync.sh --dry-run        # show what would change, write nothing
 #   bash sync.sh --help
 
 set -euo pipefail
@@ -42,6 +48,36 @@ if [[ ! -f "$CODEX_TOML" ]]; then
   echo "FATAL: $CODEX_TOML not found — run codex/setup.sh first." >&2
   exit 1
 fi
+
+# ============================================================
+# 1. Copy stable skill files into Codex install
+# ============================================================
+copy_one() {  # $1 src, $2 dst, $3 label
+  local src="$1" dst="$2" label="$3"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
+      echo "  unchanged: $label"
+    elif [[ -f "$dst" ]]; then
+      echo "  would update: $label  ($(wc -c < "$dst") → $(wc -c < "$src") bytes)"
+    else
+      echo "  would create: $label  ($(wc -c < "$src") bytes)"
+    fi
+  else
+    mkdir -p "$(dirname "$dst")"
+    cp "$src" "$dst"
+    echo "  copied:   $label"
+  fi
+}
+
+echo "== Codex skill files =="
+copy_one "$REPO_DIR/codex/SKILL.md"                  "$CODEX_SKILL_DIR/SKILL.md"            "SKILL.md"
+copy_one "$REPO_DIR/codex/agents/openai.example.yaml" "$CODEX_SKILL_DIR/agents/openai.yaml" "agents/openai.yaml"
+echo
+
+# ============================================================
+# 2. Re-render automation.toml prompt body
+# ============================================================
+echo "== Codex automation.toml prompt =="
 
 # Pull placeholder values: prefer Claude settings.conf (same values both sides),
 # otherwise fall back to parsing the existing automation.toml.
@@ -120,6 +156,6 @@ PYEOF
 
 if [[ "$DRY_RUN" == "0" ]]; then
   echo
-  echo "Codex automation.toml in sync with prompts/cron-prompt.md"
-  echo "Verify:  python3 -c 'import tomllib; tomllib.loads(open(\"$CODEX_TOML\").read()); print(\"valid TOML\")'"
+  echo "✓ Codex install in sync with repo."
+  echo "  RESTART Codex to pick up skill changes (Codex scans skills at startup only)."
 fi

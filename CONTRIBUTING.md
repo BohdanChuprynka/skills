@@ -95,9 +95,9 @@ REPO=~/Documents/IT-Work/Projects/IT/skills/calendar-plan-skill
 # Claude target: symlink the whole skill dir
 ln -s "$REPO/skills/calendar-plan" ~/.claude/skills/calendar-plan
 
-# Codex target: symlink the stable files (SKILL.md, agents/openai.yaml)
-ln -s "$REPO/codex/SKILL.md"                  ~/.codex/skills/calendar-plan/SKILL.md
-ln -s "$REPO/codex/agents/openai.example.yaml" ~/.codex/skills/calendar-plan/agents/openai.yaml
+# Codex target: COPY the stable files (Codex doesn't follow symlinks for skill discovery)
+cp "$REPO/codex/SKILL.md"                  ~/.codex/skills/calendar-plan/SKILL.md
+cp "$REPO/codex/agents/openai.example.yaml" ~/.codex/skills/calendar-plan/agents/openai.yaml
 
 # Single shared planning-preferences.md (canonical = Codex side; Claude symlinks to it)
 ln -s ~/.codex/skills/calendar-plan/planning-preferences.md \
@@ -112,8 +112,8 @@ What needs explicit re-sync vs what auto-propagates:
 |---|---|---|
 | `skills/calendar-plan/SKILL.md` | Auto (symlinked) | N/A |
 | `skills/calendar-plan/calendar-plan.sh` or scripts | Auto (symlinked) | N/A |
-| `codex/SKILL.md` | N/A | Auto (symlinked) |
-| `codex/agents/openai.example.yaml` | N/A | Auto (symlinked) |
+| `codex/SKILL.md` | N/A | **Run `bash sync.sh`** + restart Codex |
+| `codex/agents/openai.example.yaml` | N/A | **Run `bash sync.sh`** + restart Codex |
 | `planning-preferences.md` (either path) | Auto (symlinked → one file) | Auto (symlinked → one file) |
 | **`prompts/cron-prompt.md`** | Auto (read fresh per run) | **Run `bash sync.sh`** |
 | `codex/automation.example.toml` (RRULE, model) | N/A | Run `bash codex/setup.sh` (full re-render) |
@@ -122,12 +122,16 @@ What needs explicit re-sync vs what auto-propagates:
 So the **only sync command you need in day-to-day use is**:
 
 ```bash
-bash sync.sh         # re-render Codex automation.toml after editing the prompt
+bash sync.sh         # copies SKILL.md / openai.yaml AND re-renders automation.toml
 ```
 
 Use `bash sync.sh --dry-run` to preview without writing.
 
+**Restart Codex** after `sync.sh` if you edited `codex/SKILL.md` — Codex scans skills at process startup, not per-invocation.
+
 For a full re-install (rare — only when you change Codex metadata like RRULE/model/cwd), use `bash codex/setup.sh`.
+
+> **Why not symlink the Codex side too?** Codex's skill discovery looks for real files in `~/.codex/skills/<name>/SKILL.md`. Symlinks are silently skipped (verified — all working sibling skills are regular files). The Claude side is fine with symlinks; Codex is not.
 
 ### Disabling the Codex cron (manual-mode use)
 
