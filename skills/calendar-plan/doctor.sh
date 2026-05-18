@@ -11,7 +11,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_DIR="$SKILL_DIR/config"
-PROMPTS_DIR="$(cd "$SKILL_DIR/../prompts" 2>/dev/null && pwd || echo "")"
+PROMPTS_DIR="$(cd "$SKILL_DIR/../../prompts" 2>/dev/null && pwd || echo "")"
 
 failed=0
 report() {  # $1 status, $2 name, $3 detail

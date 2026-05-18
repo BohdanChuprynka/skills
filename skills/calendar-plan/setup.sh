@@ -44,14 +44,41 @@ read_yn() {  # $1 prompt, $2 default (y|n)
 
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_DIR="$SKILL_DIR/config"
-EXAMPLES_DIR="$(cd "$SKILL_DIR/../examples" && pwd)"
+EXAMPLES_DIR="$(cd "$SKILL_DIR/../../examples" && pwd)"
 MEMORY_DIR="$SKILL_DIR/memory"
 mkdir -p "$CONFIG_DIR" "$MEMORY_DIR"
 
 # ============================================================
+# CLI flags
+# ============================================================
+MCP_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --mcp)       MCP_ONLY=1 ;;
+    --help|-h)
+      cat <<EOF
+Usage: setup.sh [--mcp]
+
+Default: walk through the full wizard (prereqs, settings, planning prefs, MCPs, memory, doctor).
+
+  --mcp     Re-run ONLY the MCP credential wizard (step 4). Useful after rotating tokens.
+  --help    This message.
+EOF
+      exit 0
+      ;;
+  esac
+done
+
+if [[ $MCP_ONLY -eq 1 ]]; then
+  heading "MCP-only wizard"
+  say "Skipping prereqs / settings / planning-preferences / memory — re-running MCP step only."
+fi
+
+# ============================================================
 # Step 1 — prereqs
 # ============================================================
-heading "1. Prereqs"
+[[ $MCP_ONLY -eq 1 ]] || heading "1. Prereqs"
+if [[ $MCP_ONLY -eq 0 ]]; then
 
 if command -v claude >/dev/null 2>&1; then
   ok "claude CLI: $(claude --version 2>&1 | head -1)"
@@ -74,9 +101,12 @@ else
   exit 1
 fi
 
+fi  # end Step 1 (MCP_ONLY guard)
+
 # ============================================================
 # Step 2 — settings.conf
 # ============================================================
+if [[ $MCP_ONLY -eq 0 ]]; then
 heading "2. Settings (model, timezone, cron hour, Calendar Context)"
 
 SETTINGS="$CONFIG_DIR/settings.conf"
@@ -105,9 +135,12 @@ EOF
   ok "wrote $SETTINGS (chmod 600)"
 fi
 
+fi  # end Step 2 (MCP_ONLY guard)
+
 # ============================================================
 # Step 3 — planning-preferences.md
 # ============================================================
+if [[ $MCP_ONLY -eq 0 ]]; then
 heading "3. planning-preferences.md"
 
 PREFS="$CONFIG_DIR/planning-preferences.md"
@@ -121,8 +154,10 @@ else
   say "open with: \$EDITOR $PREFS"
 fi
 
+fi  # end Step 3 (MCP_ONLY guard)
+
 # ============================================================
-# Step 4 — MCP integrations
+# Step 4 — MCP integrations (always runs, including under --mcp)
 # ============================================================
 heading "4. MCP integrations (tokens stored in mcp-config.json, chmod 600)"
 
@@ -200,6 +235,7 @@ fi
 # ============================================================
 # Step 5 — memory.md seed
 # ============================================================
+if [[ $MCP_ONLY -eq 0 ]]; then
 heading "5. memory.md seed"
 
 MEMORY_FILE="$MEMORY_DIR/memory.md"
@@ -216,8 +252,10 @@ EOF
   ok "seeded $MEMORY_FILE"
 fi
 
+fi  # end Step 5 (MCP_ONLY guard)
+
 # ============================================================
-# Step 6 — doctor.sh
+# Step 6 — doctor.sh (always runs — useful for both flows)
 # ============================================================
 heading "6. Health check"
 

@@ -26,6 +26,7 @@ read_default() { local p="$1" d="$2" r; read -rp "$p [$d]: " r || true; echo "${
 
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXAMPLES_DIR="$(cd "$SRC_DIR/../examples" && pwd)"
+PROMPTS_DIR="$(cd "$SRC_DIR/../prompts" && pwd)"
 
 CODEX_SKILL_DIR="$HOME/.codex/skills/calendar-plan"
 CODEX_AUTO_DIR="$HOME/.codex/automations/calendar-plan"
@@ -89,21 +90,63 @@ if [[ "$OVERWRITE_TOML" == "1" ]]; then
   CODEX_REASONING=$(read_default "Reasoning effort" "xhigh")
 
   python3 - <<PYEOF
+"""Render automation.toml from automation.example.toml + prompts/cron-prompt.md.
+
+Single source of truth: prompts/cron-prompt.md. The .example.toml file
+holds metadata only — the prompt body is injected from cron-prompt.md
+after substituting placeholders and stripping the doc-header.
+"""
 import pathlib
-src = pathlib.Path("$SRC_DIR/automation.example.toml").read_text(encoding="utf-8")
-out = (src
-    .replace("{{CODEX_SKILL_DIR}}", "$CODEX_SKILL_DIR")
-    .replace("{{CODEX_AUTO_DIR}}", "$CODEX_AUTO_DIR")
+
+# 1. Load prompt body from the canonical source
+prompt_md = pathlib.Path("$PROMPTS_DIR/cron-prompt.md").read_text(encoding="utf-8")
+
+# Strip the doc-header (everything above the first standalone "---" separator)
+if "\n---\n" in prompt_md:
+    prompt_body = prompt_md.split("\n---\n", 1)[1].lstrip()
+else:
+    prompt_body = prompt_md
+
+# Substitute the prompt-level placeholders (CODEX_SKILL_DIR for "{{PLANNING_PREFS}}", etc.)
+# Note: the prompt template uses different placeholder names than the codex automation.toml.
+# Map prompt placeholders -> codex paths here.
+prompt_body = (prompt_body
+    .replace("{{SKILL_DIR}}",        "$CODEX_SKILL_DIR")
+    .replace("{{PLANNING_PREFS}}",   "$CODEX_SKILL_DIR/planning-preferences.md")
+    .replace("{{MEMORY_FILE}}",      "$CODEX_AUTO_DIR/memory.md")
     .replace("{{CALENDAR_CONTEXT}}", "$CALENDAR_CONTEXT")
     .replace("{{TASK_SOURCE_NAME}}", "$TASK_SOURCE_NAME")
-    .replace("{{TIMEZONE}}", "$TIMEZONE")
-    .replace("{{CRON_HOUR}}", "$CRON_HOUR")
-    .replace("{{CODEX_CWD}}", "$CODEX_CWD")
-    .replace("{{CODEX_MODEL}}", "$CODEX_MODEL")
-    .replace("{{CODEX_REASONING}}", "$CODEX_REASONING")
+    .replace("{{TIMEZONE}}",         "$TIMEZONE")
+    .replace("{{CRON_HOUR}}",        "$CRON_HOUR")
+    .replace("{{TARGET_DATE}}",      "")  # left empty for cron; resolved at run-time
+    .replace("{{MODE}}",             "auto")
+)
+
+# Escape triple-quotes if any (TOML basic-string safety inside """ block)
+prompt_body = prompt_body.replace('"""', '\\"\\"\\"')
+
+# 2. Load TOML template and substitute the rest
+src = pathlib.Path("$SRC_DIR/automation.example.toml").read_text(encoding="utf-8")
+out = (src
+    .replace("{{PROMPT_BODY}}",      prompt_body.rstrip())
+    .replace("{{CODEX_SKILL_DIR}}",  "$CODEX_SKILL_DIR")
+    .replace("{{CODEX_AUTO_DIR}}",   "$CODEX_AUTO_DIR")
+    .replace("{{CALENDAR_CONTEXT}}", "$CALENDAR_CONTEXT")
+    .replace("{{TASK_SOURCE_NAME}}", "$TASK_SOURCE_NAME")
+    .replace("{{TIMEZONE}}",         "$TIMEZONE")
+    .replace("{{CRON_HOUR}}",        "$CRON_HOUR")
+    .replace("{{CODEX_CWD}}",        "$CODEX_CWD")
+    .replace("{{CODEX_MODEL}}",      "$CODEX_MODEL")
+    .replace("{{CODEX_REASONING}}",  "$CODEX_REASONING")
 )
 pathlib.Path("$CODEX_AUTO_DIR/automation.toml").write_text(out, encoding="utf-8")
-print("rendered $CODEX_AUTO_DIR/automation.toml")
+
+# Sanity check — no placeholders should remain
+import re
+leftover = re.findall(r"\{\{[A-Z_]+\}\}", out)
+if leftover:
+    print(f"WARN: unresolved placeholders: {set(leftover)}")
+print("rendered $CODEX_AUTO_DIR/automation.toml ({} bytes)".format(len(out)))
 PYEOF
   chmod 600 "$CODEX_AUTO_DIR/automation.toml"
   ok "  automation.toml (chmod 600)"

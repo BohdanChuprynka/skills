@@ -1,158 +1,290 @@
-# calendar-plan-skill
+<div align="center">
 
-Daily calendar planner that runs as a skill in **Claude Code** *and* as a Codex CLI automation, with isolated per-skill MCP credentials. One source of truth for the prompt; two runtimes pick it up.
+<h1>calendar-plan-skill</h1>
 
-## Mental model
+<p><strong>plan tomorrow tonight — google calendar, notion, gmail, and a local context page, written by a model that knows your daily rhythm</strong></p>
 
-The planner has one job each evening: turn your fixed calendar, your task source (a Notion page), recent email signals, and a local Obsidian "Calendar Context" note into a small number of useful blocks on tomorrow's calendar.
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/BohdanChuprynka/calendar-plan-skill?style=flat" alt="License"></a>
+  <a href="https://github.com/BohdanChuprynka/calendar-plan-skill/stargazers"><img src="https://img.shields.io/github/stars/BohdanChuprynka/calendar-plan-skill?style=flat&color=yellow" alt="Stars"></a>
+  <a href="https://github.com/BohdanChuprynka/calendar-plan-skill/releases"><img src="https://img.shields.io/github/v/release/BohdanChuprynka/calendar-plan-skill?style=flat&include_prereleases" alt="Version"></a>
+</p>
 
-Two surfaces, same brain:
+<p>
+  <a href="#the-problem">Problem</a> &middot;
+  <a href="#what-calendar-plan-does">What it does</a> &middot;
+  <a href="#how-it-works">How</a> &middot;
+  <a href="#install">Install</a> &middot;
+  <a href="#example-output">Example</a> &middot;
+  <a href="#configuration">Config</a> &middot;
+  <a href="#cost">Cost</a>
+</p>
 
-- **Claude target** (`claude/`) — a skill at `~/.claude/skills/calendar-plan/`. Triggered by `/calendar-plan` in any Claude Code session, OR fired by launchd at 22:00 local time. Uses `claude --mcp-config <file> --strict-mcp-config` so only this skill's MCPs load. Daily Claude sessions stay lean — no token bloat from Notion/Calendar/Gmail integrations leaking into every context.
-- **Codex target** (`codex/`) — a skill at `~/.codex/skills/calendar-plan/` plus a cron automation at `~/.codex/automations/calendar-plan/`. Same prompt body, executed under Codex's own RRULE scheduler.
+</div>
 
-Both targets read the **same prompt** (`prompts/cron-prompt.md`) and the **same example planning preferences** (`examples/planning-preferences.example.md`). Edit the prompt once; both runtimes pick it up on next run.
+---
 
-## Paths (after install)
+## The problem
 
-| Path | What lives there | Source |
-|---|---|---|
-| `<repo>/prompts/cron-prompt.md`                | Scheduled-run prompt template with `{{PLACEHOLDERS}}` | Edit-only |
-| `<repo>/examples/*.example.md`                 | Sanitized templates for prefs / memory / calendar context | Edit-only |
-| `~/.claude/skills/calendar-plan/SKILL.md`      | Discoverability metadata for `/calendar-plan` | Installed |
-| `~/.claude/skills/calendar-plan/config/`       | **REAL** mcp-config.json, planning-preferences.md, settings.conf — chmod 600, **gitignored** | Created by setup.sh |
-| `~/.claude/skills/calendar-plan/memory/memory.md` | Append-only run memory | Created by first run |
-| `~/.claude/skills/calendar-plan/logs/`         | Per-run logs and launchd out/err | Created by first run |
-| `~/Library/LaunchAgents/com.user.calendar-plan.plist` | macOS cron job | Installed manually from `claude/launchd/*.example` |
-| `~/.codex/skills/calendar-plan/`               | Codex-side skill files | Installed by codex/setup.sh |
-| `~/.codex/automations/calendar-plan/`          | Codex-side cron + memory | Installed by codex/setup.sh |
+You have a Notion page with tomorrow's goals. A Google calendar with three sub-calendars and a moving exam schedule. A Gmail inbox that quietly tells you someone needs a reply by morning. A markdown note in Obsidian that says "low energy this week, no gym Thursday." Every evening you reconcile all of that into a day plan — and most evenings, you don't, and tomorrow gets reactive.
 
-## Workflow
+Anthropic's Claude desktop has a "Cowork / Automations" feature for this kind of thing, and so does Codex CLI. Both are scoped to their host app, both rely on global MCP enablement that pollutes every daily session with Notion/Calendar/Gmail tools, and both are opaque when something breaks.
 
-### 1. Clone
+calendar-plan-skill is the same idea, owned by you. One markdown file holds the prompt. One JSON file holds the MCP credentials, scoped to this skill alone. One script renders it and calls Claude (or Codex). The scheduler is plain launchd or a Codex RRULE. If a connector fails, the planner pauses with a memory entry — not silently writes garbage.
 
-```bash
-git clone git@github.com:<you>/calendar-plan-skill.git ~/calendar-plan-skill
-cd ~/calendar-plan-skill
+## What calendar-plan does
+
+- Reads tomorrow's fixed events across every configured Google sub-calendar.
+- Pulls the next day's task sequence from a private Notion page.
+- Scans recent Gmail for deadlines and obligations that aren't yet on a calendar.
+- Reads a local Obsidian "Calendar Context" markdown page for one-off modifiers (low energy, travel days, exam constraints) and durable upcoming items.
+- Drafts a small number of useful planning blocks — meals, deep work, commute, recovery — sized to your real rhythm, not a packed ideal day.
+- In `auto` mode, writes the safe blocks directly to the matching sub-calendar (`School` / `Personal` / `Work` / primary). Pauses for risky changes.
+- Appends an append-only memory entry per run: which connectors worked, what was written, what got paused, what to investigate.
+- Runs under `--strict-mcp-config` on the Claude side, so the planner's tokens never leak into your daily Claude Code sessions.
+
+## How it works
+
+```
+fixed calendar events          notion task page             recent gmail               local calendar context
+(google calendar mcp)          (notion mcp)                 (gmail mcp)                 (filesystem mcp / --add-dir)
+       |                              |                            |                            |
+       +-------------------------+----+----------------------------+----------------------------+
+                                 |
+                                 v
+                       prep_context.py (placeholder substitution, no LLM)
+                                 |
+                                 v
+                  claude --mcp-config <skill>/config/mcp-config.json --strict-mcp-config
+                                 |
+                                 v
+                draft proposal      OR      apply safe blocks to google calendar (auto mode)
+                                 |
+                                 v
+                       apply_log.py (parse log, append to memory.md)
 ```
 
-### 2. Install the Claude target
+Four stages. One paid LLM call (~$0.05-$0.15 on Sonnet 4.6 with cache hits). Everything else is local Python or the MCP subprocess loop.
+
+Both runtime targets share the same `prompts/cron-prompt.md` body. Edit once, both planners pick it up next run.
+
+## Example output
+
+A real auto-mode run looks like this (names changed):
+
+```
+target_date: 2026-05-19 (Mon)
+mode: auto
+connectors: google-calendar ok, notion ok, gmail ok, filesystem ok
+
+Fixed events read:
+  School      08:30-15:30  Regular school day
+  Personal    19:00-20:00  Run with friend (location: park)
+
+Notion task sequence (12-Week Planner):
+  1. AP Calc problem set
+  2. ML lecture 4
+  3. Outreach: 3 founders
+  4. Github commit
+
+Calendar Context modifiers:
+  - low-energy week, prefer one deep block over many small
+
+Email-derived obligations:
+  - Reply to advisor about thesis topic (received 2026-05-18, expects answer by Mon)
+
+Wrote (auto):
+  Personal    16:00-16:30  Landing buffer
+  Personal    16:30-17:30  Outreach: 3 founders            (Notion seq #3)
+  School      17:45-19:00  AP Calc problem set             (Notion seq #1)
+  Personal    20:15-21:30  Dinner + reset
+  Work        21:30-23:00  ML lecture 4 + commit           (Notion seq #2,#4 merged: low-energy modifier)
+
+Paused (no write):
+  - Thesis advisor reply: ambiguous priority; surfaced for user decision.
+
+Re-query post-write: no overlaps, no stale duplicates.
+```
+
+The memory.md entry written for this run becomes the input to the NEXT run, so the planner remembers that you merged ML+commit into one block and stops trying to split them.
+
+## Install
+
+> calendar-plan-skill works in **two runtimes**: Claude Code (via the plugin marketplace) and Codex CLI (via a local installer script). Pick the one you actually run the cron on — both can coexist for ad-hoc invocation, but only one should own the schedule.
+
+### Claude Code (recommended)
+
+Plugin marketplace install — one command, lands in `~/.claude/skills/calendar-plan/`:
 
 ```bash
-# Symlink (recommended) — edits to the repo propagate to the skill
-ln -s "$PWD/claude" ~/.claude/skills/calendar-plan
+/plugin marketplace add BohdanChuprynka/calendar-plan-skill
+/plugin install calendar-plan@calendar-plan-marketplace
+```
 
-# Configure
+Then run the one-time setup wizard:
+
+```bash
+cd ~/.claude/skills/calendar-plan
+./setup.sh
+```
+
+The wizard asks for your timezone, the path to your Calendar Context markdown, the Notion task-source page title, and optionally walks you through each MCP. Skip any MCP and the planner degrades gracefully (see Tier model below).
+
+### Codex CLI
+
+Codex has its own automations system (`~/.codex/automations/*/automation.toml`). The installer renders the right files in the right places:
+
+```bash
+git clone https://github.com/BohdanChuprynka/calendar-plan-skill.git ~/calendar-plan-skill
+bash ~/calendar-plan-skill/codex/setup.sh
+```
+
+Skill files land in `~/.codex/skills/calendar-plan/`. The cron RRULE lands in `~/.codex/automations/calendar-plan/automation.toml`. MCP enablement is per Codex's own model (`~/.codex/config.toml` `[mcp_servers]` blocks, OAuth via the Codex desktop app).
+
+### Manual clone (any runtime)
+
+```bash
+git clone https://github.com/BohdanChuprynka/calendar-plan-skill.git ~/calendar-plan-skill
+
+# Claude target
+ln -s ~/calendar-plan-skill/skills/calendar-plan ~/.claude/skills/calendar-plan
 bash ~/.claude/skills/calendar-plan/setup.sh
 
-# Dry-run
-bash ~/.claude/skills/calendar-plan/calendar-plan.sh --dry-run
+# Codex target
+bash ~/calendar-plan-skill/codex/setup.sh
 ```
 
-`setup.sh` walks through:
-- model / timezone / cron hour / Calendar Context path
-- copies `planning-preferences.example.md` → `config/planning-preferences.md` (edit this)
-- prompts for Notion token, GCal/Gmail OAuth paths, FS root → writes `config/mcp-config.json`
-- chmod 600 on everything secret
+Symlink so updates propagate: `cd ~/calendar-plan-skill && git pull` and both runtimes pick up changes.
 
-### 3. Install the Codex target (optional, can run alongside)
+Full walkthrough with troubleshooting: [docs/INSTALL.md](docs/INSTALL.md).
 
-```bash
-bash codex/setup.sh
-```
+## Quickstart
 
-Resolves placeholders, writes `~/.codex/skills/calendar-plan/` and `~/.codex/automations/calendar-plan/`. MCP enablement on the Codex side is handled in `~/.codex/config.toml` (the Codex desktop app's OAuth flow populates tokens).
-
-### 4. Run once manually
+After install:
 
 ```bash
-# Draft mode (no calendar writes)
-bash ~/.claude/skills/calendar-plan/calendar-plan.sh --mode draft
+# 1. Configure
+./setup.sh
 
-# Live mode (writes safe blocks to Google Calendar)
-bash ~/.claude/skills/calendar-plan/calendar-plan.sh --mode auto
+# 2. Dry-run (no LLM call, no calendar writes)
+./calendar-plan.sh --dry-run
 
-# Plan a specific date
-bash ~/.claude/skills/calendar-plan/calendar-plan.sh --date 2026-05-19 --mode auto
-```
+# 3. Draft mode (real LLM call, NO calendar writes — review the plan)
+./calendar-plan.sh --mode draft
 
-### 5. Schedule (Claude target)
+# 4. Live auto mode (writes safe blocks to Google Calendar)
+./calendar-plan.sh --mode auto
 
-```bash
-cp claude/launchd/com.user.calendar-plan.plist.example \
-   ~/Library/LaunchAgents/com.user.calendar-plan.plist
-# Edit the plist: replace <REPLACE_WITH_ABSOLUTE_PATH_TO_SKILL_DIR>
+# 5. Schedule (mac, launchd)
+cp launchd/com.user.calendar-plan.plist.example ~/Library/LaunchAgents/com.user.calendar-plan.plist
+# Edit the plist to point at your skill dir, then:
 launchctl load ~/Library/LaunchAgents/com.user.calendar-plan.plist
-
-# Verify
-launchctl list | grep com.user.calendar-plan
-launchctl start com.user.calendar-plan    # fire immediately for a test
 ```
 
-Codex target schedules itself via the RRULE in `automation.toml` — no extra step.
+## What you'll need
 
-### 6. Health check
+- **Claude Code CLI** (logged in) — for the Claude target. Install: https://docs.claude.com/claude-code.
+- **Codex CLI** (run at least once) — only if you're using the Codex target.
+- **Node 18+** (`npx`) — for the MCP subprocesses.
+- **Python 3.10+** — for `prep_context.py` / `apply_log.py`.
+- **A Google account** with Calendar (and optionally Gmail). OAuth desktop-client credentials, set up once.
+- **(Optional) A Notion workspace** with a daily/weekly planner page and an internal integration token.
+- **(Optional) An Obsidian vault** with a `Calendar Context.md` page. Any markdown file works — Obsidian is just a convenient editor.
+
+## Compatibility
+
+Two runtimes are first-class supported:
+
+- **Claude Code CLI** — invoked as `claude --mcp-config ... --strict-mcp-config`. The `--strict-mcp-config` flag is load-bearing for token isolation.
+- **Codex CLI** — invoked via Codex's own automation runner (`~/.codex/automations/<id>/automation.toml`).
+
+Other agent runtimes (Cursor, Gemini, etc.) are not verified. The prompt body in `prompts/cron-prompt.md` is plain English with explicit placeholders, so adapting it to a different runtime is straightforward — see [CONTRIBUTING.md](CONTRIBUTING.md) for guidance.
+
+## Configuration
+
+The Claude target reads one config file and a handful of env vars:
 
 ```bash
-bash ~/.claude/skills/calendar-plan/doctor.sh
-bash codex/doctor.sh
+# Required
+CALENDAR_CONTEXT="$HOME/Documents/Obsidian/me/wiki/Calendar Context.md"
+
+# Sensible defaults
+MODEL="claude-sonnet-4-6"
+TIMEZONE="America/New_York"
+CRON_HOUR="22"
+DEFAULT_MODE="auto"
+TASK_SOURCE_NAME="12-Week Planner"
 ```
 
-## What's in each directory
+These live in `config/settings.conf` after `./setup.sh` runs. The planning preferences (calendar IDs, daily defaults, calendar routing) live in `config/planning-preferences.md` — copied from the sanitized `examples/planning-preferences.example.md` template.
 
-```
-calendar-plan-skill/
-├── README.md                 (this file)
-├── LICENSE
-├── .gitignore                blocks real configs/tokens/memory/logs
-├── docs/
-│   ├── ARCHITECTURE.md       how the two targets share state
-│   ├── INSTALLATION.md       longer install walkthrough
-│   └── SETUP-MCPS.md         per-MCP credential setup (Notion, GCal, Gmail, FS)
-├── prompts/
-│   └── cron-prompt.md        single source of truth for the scheduled prompt
-├── examples/
-│   ├── planning-preferences.example.md
-│   ├── memory.example.md
-│   └── calendar-context.example.md
-├── claude/                   Claude Code target
-│   ├── SKILL.md              discoverability for /calendar-plan
-│   ├── calendar-plan.sh      entrypoint
-│   ├── setup.sh              wizard
-│   ├── doctor.sh             health check
-│   ├── scripts/              prep_context.py, apply_log.py
-│   ├── config/
-│   │   ├── mcp-config.example.json
-│   │   └── settings.example.conf
-│   └── launchd/
-│       └── com.user.calendar-plan.plist.example
-└── codex/                    Codex CLI target
-    ├── SKILL.md
-    ├── automation.example.toml
-    ├── agents/openai.example.yaml
-    ├── setup.sh
-    └── doctor.sh
-```
+Full reference: CLI flags, env vars, config files, common recipes — see [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
-## Edge cases
+## MCP integrations (optional)
 
-- **One MCP unavailable.** The prompt says: continue with available sources; in `auto` mode, do NOT write blocks if the missing source could materially change the day. The planner emits a no-write + pause memory entry instead.
-- **Cron fires while mac is asleep.** launchd will fire the job on next wake. The planner will see the calendar state at wake-time, not at the original fire-time. If you skipped a night, run manually the next morning to fill the gap.
-- **Two targets run on the same evening.** Both Claude and Codex targets read/write the same Google Calendar. If both are active, expect duplicate planning blocks. Pick one for the cron; keep the other for ad-hoc use only.
-- **Stale exam/deadline event on calendar.** The planner pauses rather than silently leaving conflicting events. Resolve manually.
-- **Notion page renamed.** Both `TASK_SOURCE_NAME` (title search) and the planning-preferences.md fallback page ID (UUID lookup) should match. Update both if you rename.
-- **Token rotated.** Edit `~/.claude/skills/calendar-plan/config/mcp-config.json` directly, or re-run `setup.sh`. No daemon restart needed — each run spawns fresh MCP processes.
+calendar-plan-skill works in three tiers. Pick how far you want to go.
 
-## What not to do
+**Tier 0** — `--mode draft` with no MCPs. Calendar Context page + Notion (via `--add-dir`) are still readable. The planner can read but cannot write to Google Calendar. Useful for first-time validation, or as a daily preview if you prefer to copy blocks over manually.
 
-- Do not commit `config/mcp-config.json`, `config/planning-preferences.md`, `config/settings.conf`, `memory/memory.md`, `automation.toml`, `agents/openai.yaml`, or anything under `logs/`. The repo's `.gitignore` blocks them by default — do not weaken it.
-- Do not edit the Calendar Context page from the planner. The prompt forbids it for a reason: the user owns that page; the planner only reads it.
-- Do not relax `--strict-mcp-config`. The whole point of this skill is that its MCPs do not leak into other Claude Code sessions.
-- Do not delete existing calendar events from `auto` mode. The planner is additive only. Cleanup is a human task.
-- Do not store secrets in `settings.conf` (it is sourced as bash; values are shell-escaped poorly). All secrets go in `mcp-config.json` only.
+**Tier 1** — add the **Google Calendar MCP**. This is the minimum viable cron — the planner can now actually write blocks. All other connectors are optional augmentations.
 
-## See also
+**Tier 2** — add any combination of **Notion**, **Gmail**, and **Filesystem** MCPs. Each is independently optional. More channels means more accurate sequence reads, fewer "Pause: missing task source" memory entries, and richer email-derived obligations.
 
-- `docs/ARCHITECTURE.md` — how the two targets share the prompt and what state lives where.
-- `docs/SETUP-MCPS.md` — Notion / Google Calendar / Gmail / Filesystem MCP credential walkthroughs.
-- `docs/INSTALLATION.md` — longer install walkthrough with troubleshooting.
+Critical: `calendar-plan.sh` launches Claude with `--mcp-config <skill>/config/mcp-config.json --strict-mcp-config`. Only the skill's MCPs load. Your daily Claude Code session is untouched — no token bloat, no context pollution.
+
+Per-server setup walkthroughs (auth, tokens, scopes) live in [docs/MCP-SETUP.md](docs/MCP-SETUP.md).
+
+## Cost
+
+Roughly **$0.05-$0.15 per run on Sonnet 4.6 with prompt caching enabled**. Daily cadence ≈ $1.50-$4.50/month.
+
+The prompt stays mostly cache-resident — SKILL.md and planning-preferences.md don't change between runs. First-run cost can be 2-3x higher because the cache is cold. Watch `logs/run-<ISO>.log` for actual per-cycle numbers.
+
+Opus 4.7 is overkill for typical days but can be worth it on weeks with multi-exam + travel + meeting collisions — bump `MODEL` in `settings.conf` or pass `--model claude-opus-4-7` for one run.
+
+## Safety
+
+- **Draft mode is the default first run.** `./setup.sh` defaults `DEFAULT_MODE="auto"` only because the cron needs it; the first manual run should always be `--mode draft` to inspect the plan before writing.
+- **Auto mode is additive only.** The planner never deletes events. Never rewrites non-planning events. Never modifies the Calendar Context page. These are hard prompt constraints, not soft suggestions.
+- **MCP isolation.** `--strict-mcp-config` guarantees the planner's MCPs do not leak into other Claude Code sessions. Tokens live in `config/mcp-config.json` (chmod 600, gitignored).
+- **Append-only memory.** Run summaries append to `memory/memory.md`. Compaction is opt-in (`./scripts/compact_memory.py`). The planner reads memory at the start of each run, so wiping it loses preference signal.
+- **Graceful degradation on connector failure.** If Notion is down or Gmail's tool isn't exposed, the planner pauses with a memory entry rather than writing a partial plan. The next morning's review surfaces the gap.
+- **No autonomous firing.** The installer does not register a cron. You opt in by copying the launchd plist (Claude target) or by letting Codex's RRULE pick up the rendered automation.toml (Codex target).
+
+## FAQ
+
+**Do I need both runtimes?**
+No. Pick one for the cron. The Claude target is recommended if you want token isolation and full ownership of the schedule (launchd). The Codex target is recommended if you already live in Codex and want the planner to share the OAuth integrations the desktop app already manages.
+
+**Can I run without Notion?**
+Yes. The planner reads Notion via MCP, but if the connector is unavailable it falls back to a conservative scaffold built from calendar state + Calendar Context + daily defaults. Configured behavior: pause only when the missing source could materially change the day.
+
+**What if the planner writes blocks I don't want?**
+Edit them or delete them in Google Calendar. The next run reads existing blocks and treats your edits/deletions as preference signal — the planner will not re-add a block you deleted, and learns from merges.
+
+**Why a separate MCP config instead of using my existing one?**
+Because cross-pollution is bad. Your daily Claude Code session probably has its own MCPs (project-specific, work-specific). Loading Notion/Gmail there leaks personal context into work contexts. calendar-plan's MCPs only exist for the duration of one run.
+
+**The cron didn't fire last night — what happened?**
+launchd does NOT replay missed `StartCalendarInterval` events for non-system jobs. If the mac was asleep at 22:00, no fire. Two fixes: (1) keep the mac awake at the configured time, (2) use `pmset` to schedule a wake just before. The Codex target has a similar limitation — the Codex daemon must be running for RRULEs to fire.
+
+**Can I use Opus for this?**
+Yes — pass `--model claude-opus-4-7`. Typical evenings don't need it, but Opus's deeper reasoning is worth it for weeks with conflicting exams + travel + immovable meetings.
+
+## Contributing
+
+PRs welcome. The repo is small and the surface is intentionally limited. Read [CONTRIBUTING.md](CONTRIBUTING.md) first — it lists which file to edit when you want to change behavior, the local dev loop, and how to test a skill change end-to-end without burning your real calendar.
+
+## Acknowledgments
+
+- The Codex CLI automation system, which made the first version of this skill possible.
+- Anthropic's Claude Code, the plugin marketplace format, and `--strict-mcp-config`.
+- `dream-skill` for the MCP-isolation pattern and the tier model.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+Built by [Bohdan Chuprynka](https://github.com/BohdanChuprynka).
