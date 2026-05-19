@@ -1,0 +1,42 @@
+{
+  "_comment": "MCP config for calendar-plan skill ONLY. Loaded via `claude --mcp-config <this-file> --strict-mcp-config` from calendar-plan.sh. Local stdio MCPs via npx. Tokens in env blocks. No claude.ai integrations, no remote HTTP. See docs/SETUP-MCPS.md for per-server credential walkthroughs.",
+  "_setup": "Copy to config/mcp-config.json, fill in real values. The real file is chmod 600 and gitignored.",
+
+  "mcpServers": {
+
+    "notion": {
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": {
+        "OPENAPI_MCP_HEADERS": "{\"Authorization\":\"Bearer <REPLACE_WITH_NOTION_INTEGRATION_TOKEN>\",\"Notion-Version\":\"2022-06-28\"}"
+      }
+    },
+
+    "google-calendar": {
+      "command": "npx",
+      "args": ["-y", "@cocal/google-calendar-mcp"],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": "<REPLACE_WITH_ABSOLUTE_PATH_TO_GCAL_CREDENTIALS_JSON>"
+      }
+    },
+
+    "gmail": {
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
+      "env": {
+        "GMAIL_OAUTH_PATH": "<REPLACE_WITH_ABSOLUTE_PATH_TO_GMAIL_CREDENTIALS_JSON>",
+        "GMAIL_CREDENTIALS_PATH": "<REPLACE_WITH_ABSOLUTE_PATH_TO_GMAIL_TOKEN_JSON>"
+      }
+    },
+
+    "filesystem-vault": {
+      "_scope": "Scoped to entire Obsidian vault root for read AND write. Used to read Calendar Context page, and append to it if the planner ever needs to (default: read-only behavior enforced by the prompt). Narrow this path if you want stricter scope.",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "<REPLACE_WITH_ABSOLUTE_PATH_TO_OBSIDIAN_ROOT>"
+      ]
+    }
+  }
+}
