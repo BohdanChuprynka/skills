@@ -1,0 +1,61 @@
+# dream-skill: vault paths config
+#
+# This is the EXAMPLE. Copy to `vault-paths.toml` and adapt to your vault.
+#
+# vault_root
+#   Absolute path to your Obsidian vault, or any directory of markdown files.
+#   Tilde and shell env vars are NOT expanded — use a literal path or run the
+#   setup wizard which does expansion for you.
+#
+# subdirs
+#   Which directories under vault_root contain persona-relevant content.
+#   Each entry is a directory name relative to vault_root.
+#   - name        relative path under vault_root (required)
+#   - description human label (optional, surfaced in logs)
+#   - weight      "high" / "medium" / "low" (optional, default "medium")
+#                 Higher weight = more attention from the reconcile pass.
+#
+# stale_days
+#   Pages with frontmatter `updated:` older than this are flagged as stale
+#   candidates in the snapshot the LLM sees. Default 60.
+#
+# frontmatter_only
+#   List of glob patterns. Matching pages have only frontmatter extracted —
+#   body is skipped. Use for very long reference content (books, course notes)
+#   that would otherwise blow the token budget.
+#
+# Customize subdirs to match YOUR vault structure. See
+# examples/vault-structure.md for layout patterns.
+
+vault_root = "$HOME/Documents/Obsidian"
+stale_days = 60
+
+frontmatter_only = [
+  # "learning/books/**/*",
+  # "learning/papers/**/*",
+]
+
+[[subdirs]]
+name = "persona"
+description = "core identity: roles, goals, skills, schedule, relationships"
+weight = "high"
+
+[[subdirs]]
+name = "projects"
+description = "active and archived projects"
+weight = "high"
+
+[[subdirs]]
+name = "fitness"
+description = "training, body comp, nutrition (optional — remove if not used)"
+weight = "medium"
+
+[[subdirs]]
+name = "learning"
+description = "course notes, books, papers (optional)"
+weight = "low"
+
+[[subdirs]]
+name = "notes"
+description = "atomic notes, journal, meetings (optional)"
+weight = "low"
