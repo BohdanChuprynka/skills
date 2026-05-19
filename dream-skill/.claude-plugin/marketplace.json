@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "dream-skill-marketplace",
+  "description": "Distribution marketplace for dream-skill — Obsidian wiki reconciliation for local Claude Code and Codex conversations.",
+  "owner": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "plugins": [
+    {
+      "name": "dream-skill",
+      "description": "Reconcile your Obsidian wiki against local Claude Code and Codex conversation signals — flag stale, missing, and contradicted facts for review.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "productivity",
+      "author": {
+        "name": "Bohdan Chuprynka",
+        "url": "https://github.com/BohdanChuprynka"
+      }
+    }
+  ]
+}
