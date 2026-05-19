@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sync-phone-marketplace",
+  "description": "Distribution marketplace for sync-phone — iPhone voice capture to Obsidian vault pipeline for Claude Code.",
+  "owner": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "plugins": [
+    {
+      "name": "sync-phone",
+      "description": "Drain iPhone voice-dictation captures into LLM-curated Obsidian vaults. Summarizes raw dictation, routes by vault, archives, clears the inbox.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "productivity",
+      "author": {
+        "name": "Bohdan Chuprynka",
+        "url": "https://github.com/BohdanChuprynka"
+      }
+    }
+  ]
+}
