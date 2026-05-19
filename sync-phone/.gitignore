@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Editor backups
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local capture data — never commit user dictation
+_obsidian-capture/iphone-raw.md
+_obsidian-capture/ingest.md
+_obsidian-capture/archive/
+
+# Local overrides
+local.toml
+config.local.*
