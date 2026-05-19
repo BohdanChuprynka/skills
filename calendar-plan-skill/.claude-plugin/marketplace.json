@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "calendar-plan-marketplace",
+  "description": "Distribution marketplace for calendar-plan-skill — daily calendar planning via Google Calendar, Notion, Gmail, and a local Obsidian Calendar Context page.",
+  "owner": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "plugins": [
+    {
+      "name": "calendar-plan",
+      "description": "Build a practical daily plan from calendar commitments, a Notion task page, recent Gmail signals, and a local Calendar Context note. Two modes: /calendar-plan (draft first) and /calendar-plan auto (write safe blocks). Pairs with a launchd job for an evening cron.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "productivity",
+      "author": {
+        "name": "Bohdan Chuprynka",
+        "url": "https://github.com/BohdanChuprynka"
+      }
+    }
+  ]
+}

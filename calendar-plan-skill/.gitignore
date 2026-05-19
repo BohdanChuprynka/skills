@@ -1,0 +1,43 @@
+# Real (non-example) configs — must stay local. .env-style: copy *.example.* to non-example, edit.
+**/config/mcp-config.json
+**/config/planning-preferences.md
+**/config/settings.conf
+**/memory/memory.md
+**/logs/
+**/.last-run/
+**/.tmp/
+
+# Local (personalized) prompt body — see prompts/cron-prompt.example.md for the template
+prompts/cron-prompt.md
+
+# Local (personalized) env — single source of all your paths, tokens, IDs
+local.env
+
+# launchd plists (user-specific paths)
+**/launchd/com.*.plist
+!**/launchd/*.plist.example
+
+# Codex-side artifacts that leak local paths
+**/automation.toml
+!**/automation.example.toml
+**/agents/*.yaml
+!**/agents/*.example.yaml
+
+# OAuth and credential files (should NEVER be in repo regardless)
+**/credentials.json
+**/token.json
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

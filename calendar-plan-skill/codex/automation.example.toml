@@ -1,0 +1,35 @@
+# Codex CLI cron automation for calendar-plan.
+#
+# Install via codex/setup.sh, which:
+#   1. Reads prompts/cron-prompt.md (single source of truth for the prompt body)
+#   2. Strips the doc-header, substitutes {{PLACEHOLDERS}}
+#   3. Injects the result into the prompt = """...""" block below
+#   4. Writes the rendered file to ~/.codex/automations/calendar-plan/automation.toml
+#
+# Placeholders setup.sh substitutes:
+#   {{CODEX_SKILL_DIR}}      e.g. /Users/<user>/.codex/skills/calendar-plan
+#   {{CODEX_AUTO_DIR}}       e.g. /Users/<user>/.codex/automations/calendar-plan
+#   {{CALENDAR_CONTEXT}}     absolute path to the Calendar Context markdown
+#   {{TASK_SOURCE_NAME}}     Notion page title (e.g. "12-Week Planner")
+#   {{TIMEZONE}}             IANA timezone
+#   {{CRON_HOUR}}            local hour the cron fires
+#   {{CODEX_CWD}}            cwd Codex should run in (often the Obsidian root)
+#   {{CODEX_MODEL}}          e.g. gpt-5.5
+#   {{CODEX_REASONING}}      e.g. xhigh
+#   {{PROMPT_BODY}}          rendered body of prompts/cron-prompt.md (injected by setup.sh)
+
+version = 1
+id = "calendar-plan"
+kind = "cron"
+name = "Calendar Plan"
+
+prompt = """
+{{PROMPT_BODY}}
+"""
+
+status = "ACTIVE"
+rrule = "RRULE:FREQ=WEEKLY;BYHOUR={{CRON_HOUR}};BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA"
+model = "{{CODEX_MODEL}}"
+reasoning_effort = "{{CODEX_REASONING}}"
+execution_environment = "worktree"
+cwds = ["{{CODEX_CWD}}"]
