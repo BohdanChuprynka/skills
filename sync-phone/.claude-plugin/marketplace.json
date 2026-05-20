@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "sync-phone",
-      "description": "Drain iPhone voice-dictation captures into LLM-curated Obsidian vaults. Summarizes raw dictation, routes by vault, archives, clears the inbox.",
-      "version": "0.1.0",
+      "description": "Drain iPhone voice-dictation captures into LLM-curated Obsidian vaults. Summarizes raw dictation, routes by vault, archives, clears the inbox. Runs in both Claude Code and Codex CLI from a single source.",
+      "version": "0.2.0",
       "source": "./",
       "category": "productivity",
       "author": {
