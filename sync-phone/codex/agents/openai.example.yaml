@@ -1,0 +1,7 @@
+interface:
+  display_name: "Sync Phone"
+  short_description: "Drain iPhone voice dictation into Obsidian vaults"
+  default_prompt: "Use $sync-phone to drain my iPhone capture inbox into the right Obsidian vaults."
+
+policy:
+  allow_implicit_invocation: true

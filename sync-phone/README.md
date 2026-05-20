@@ -85,21 +85,46 @@ Before you install, make sure you have:
 
 - **iPhone** running iOS 17 or later. The Shortcut uses Record Audio + Transcribe, which is built in to iOS — no third-party app required. The Action Button is iPhone 15 Pro and later; older phones can bind the shortcut to Siri instead.
 - **Mac** with iCloud Drive enabled and signed in to the same Apple ID as the iPhone. This is what bridges the dictation file from phone to laptop.
-- **Claude Code CLI** installed and working on the Mac. The skill runs as a Claude Code plugin and uses Claude Code's Skill tool + slash command system. Install instructions: [docs.claude.com/claude-code](https://docs.claude.com/claude-code).
-- **Obsidian vaults** following the LLM-curated wiki pattern: one parent folder, one subfolder per vault, each subfolder has a `CLAUDE.md` describing its schema. If you don't have this yet, [docs/VAULT-SETUP.md](docs/VAULT-SETUP.md) is the 5-minute starter and [examples/sample-vault/](examples/sample-vault/) is a working example you can copy.
-
-**Codex CLI / other coding agents:** sync-phone is a Claude Code skill. Codex CLI and similar tools don't support the same skill/slash-command system, so the install isn't drop-in. The skill body in `skills/sync-phone/SKILL.md` is plain English though, so you can paste it as a prompt to any agent that can read your local filesystem.
+- **At least one CLI agent:**
+  - **Claude Code** — install via [docs.claude.com/claude-code](https://docs.claude.com/claude-code). Uses the Skill tool + `/sync-phone` slash command.
+  - **and/or Codex CLI** — install via [openai.com/codex](https://openai.com/codex). Uses the skill registry under `~/.codex/skills/` and the `agents/openai.yaml` interface declaration.
+  - The `setup.sh` installer detects whichever CLIs are on your `PATH` and installs into all of them from a single source. You don't have to pick one upfront.
+- **Obsidian vaults** following the LLM-curated wiki pattern: one parent folder, one subfolder per vault, each subfolder has a `CLAUDE.md` (or `AGENTS.md`) describing its schema. If you don't have this yet, [docs/VAULT-SETUP.md](docs/VAULT-SETUP.md) is the 5-minute starter and [examples/sample-vault/](examples/sample-vault/) is a working example you can copy.
 
 ## Install
 
-### 1. Install the Claude Code plugin
+You have two install paths. Pick one.
+
+### Option A — Marketplace (Claude Code only, fastest)
 
 ```bash
 /plugin marketplace add BohdanChuprynka/sync-phone
 /plugin install sync-phone@sync-phone-marketplace
 ```
 
-That gives you the `sync-phone` skill and the `/sync-phone` slash command in Claude Code.
+That gives you the `sync-phone` skill and the `/sync-phone` slash command in Claude Code. **Skip to step 2** below.
+
+### Option B — From source (Claude Code **+ Codex CLI**, recommended)
+
+This is the dual-runtime install. One source on disk feeds both `~/.claude/skills/sync-phone` (symlink) and `~/.codex/skills/sync-phone` (file copy), so a single edit to the skill body propagates to both.
+
+```bash
+git clone https://github.com/BohdanChuprynka/sync-phone.git
+cd sync-phone
+bash setup.sh                # first run creates local.env from the template
+$EDITOR local.env            # review CAPTURE_DIR / VAULTS_DIR (defaults usually fine)
+bash setup.sh                # second run does the actual install
+```
+
+`setup.sh` detects whichever CLIs are on your `PATH` (`claude`, `codex`) and only installs into the ones it finds, so installing for both is the same command as installing for one.
+
+After editing `codex/SKILL.md`, push the change into the Codex install with:
+
+```bash
+bash sync.sh                 # then restart Codex so it re-scans skills
+```
+
+For the optional scheduled drain (Codex cron), see [docs/CODEX-AUTOMATION.md](docs/CODEX-AUTOMATION.md) — off by default.
 
 ### 2. Set up the capture directory
 
@@ -136,11 +161,10 @@ Default vault parent: `~/Documents/Obsidian`. If yours is elsewhere, update the 
 
 After you've dictated a few entries:
 
-```
-/sync-phone
-```
+- **Claude Code:** `/sync-phone`
+- **Codex CLI:** restart Codex once after install, then either say *"drain my phone inbox"* or invoke the default prompt baked into `~/.codex/skills/sync-phone/agents/openai.yaml`.
 
-Claude reads, summarizes, routes, archives, clears. See [examples/](examples/) for what a real run looks like.
+The agent reads, summarizes, routes, archives, clears. See [examples/](examples/) for what a real run looks like. The output and side-effects are identical regardless of which CLI you ran it from — the skill body and the vault contract are shared.
 
 ## Example output
 
@@ -166,12 +190,14 @@ See [examples/sample-run.md](examples/sample-run.md) for a full walk-through wit
 
 ## Configuration
 
-Two paths inside `skills/sync-phone/SKILL.md` are the only knobs:
+Two paths in `local.env` (or, for marketplace installs, near the top of `skills/sync-phone/SKILL.md`) are the only knobs:
 
 ```
 CAPTURE_DIR = ~/Library/Mobile Documents/com~apple~CloudDocs/_obsidian-capture
 VAULTS_DIR  = ~/Documents/Obsidian
 ```
+
+If you installed from source, edit `local.env` and re-run `bash setup.sh` — the script regenerates `config/settings.conf` on both runtimes from the same `local.env`, so the two installs never drift.
 
 Everything else is convention:
 
@@ -192,7 +218,7 @@ The Obsidian vaults themselves do **not** need to live in iCloud. The capture fo
 
 - **Truncate, never delete.** The iPhone Shortcut needs `iphone-raw.md` to exist as an append target. The skill truncates both `iphone-raw.md` and `ingest.md` to zero bytes instead of deleting them.
 - **Archive, then clear.** The skill writes to `archive/YYYY-MM.md` *before* it truncates anything. If the archive write fails, nothing gets cleared.
-- **No external network.** Everything runs in your Claude Code session against local files and your Obsidian vaults. No telemetry. No cloud uploads beyond the iCloud sync you already use for the capture file.
+- **No external network.** Everything runs in your CLI agent session (Claude Code or Codex CLI) against local files and your Obsidian vaults. No telemetry. No cloud uploads beyond the iCloud sync you already use for the capture file. `local.env` and `config/settings.conf` are `.gitignore`d so your machine-specific paths never end up in a commit.
 - **Defensive on transcription ambiguity.** If a name or number in the dictation is unclear, the skill preserves the ambiguity in the bullet (and notes it) rather than guessing.
 
 ## Related

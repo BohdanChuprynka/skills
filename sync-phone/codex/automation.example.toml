@@ -1,0 +1,44 @@
+# Optional Codex CLI automation for sync-phone.
+#
+# This is OFF by default. Most users invoke /sync-phone on demand. Install only
+# if you want a scheduled drain (e.g., every evening before reviewing your day).
+#
+# setup.sh renders this template by substituting:
+#   {{CODEX_SKILL_DIR}}      e.g. /Users/<user>/.codex/skills/sync-phone
+#   {{CODEX_AUTO_DIR}}       e.g. /Users/<user>/.codex/automations/sync-phone
+#   {{CAPTURE_DIR}}           absolute path to the iPhone capture directory
+#   {{VAULTS_DIR}}            absolute path to the Obsidian vaults parent dir
+#   {{TIMEZONE}}              IANA timezone
+#   {{CRON_HOUR}}             local hour the cron fires
+#   {{CODEX_CWD}}             cwd Codex should run in (often VAULTS_DIR)
+#   {{CODEX_MODEL}}           e.g. gpt-5.5
+#   {{CODEX_REASONING}}       e.g. xhigh
+
+version = 1
+id = "sync-phone"
+kind = "cron"
+name = "Sync Phone"
+
+prompt = """
+Use the sync-phone skill at {{CODEX_SKILL_DIR}}/SKILL.md.
+
+Capture inbox: {{CAPTURE_DIR}}/iphone-raw.md
+Vaults parent: {{VAULTS_DIR}}
+Timezone:      {{TIMEZONE}}
+
+Drain whatever is in the inbox into the appropriate vaults. If the inbox is
+empty or only whitespace, report "nothing to process" and exit without writing
+to any vault. If a bullet does not fit any existing vault, surface it at the
+end and ask before archiving.
+
+Never delete iphone-raw.md or ingest.md — truncate only. Never exfiltrate the
+dictated content to the network. Stay local.
+"""
+
+# Default INACTIVE — flip to "ACTIVE" only after reviewing the rrule + cwd.
+status = "INACTIVE"
+rrule = "RRULE:FREQ=WEEKLY;BYHOUR={{CRON_HOUR}};BYMINUTE=0;BYDAY=SU,MO,TU,WE,TH,FR,SA"
+model = "{{CODEX_MODEL}}"
+reasoning_effort = "{{CODEX_REASONING}}"
+execution_environment = "worktree"
+cwds = ["{{CODEX_CWD}}"]
