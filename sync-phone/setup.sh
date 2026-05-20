@@ -137,24 +137,41 @@ if [[ $have_codex -eq 1 ]]; then
   chmod 600 "$CODEX_INSTALL/config/settings.conf"
   ok "copied $CODEX_INSTALL/{SKILL.md, agents/openai.yaml, config/settings.conf}"
 
-  # Render automation.toml (INACTIVE by default — opt-in cron)
-  python3 - <<PYEOF
-import pathlib, re
-src = pathlib.Path("$REPO_DIR/codex/automation.example.toml").read_text(encoding="utf-8")
-out = (src
-    .replace("{{CODEX_SKILL_DIR}}", "$CODEX_INSTALL")
-    .replace("{{CODEX_AUTO_DIR}}",  "$CODEX_AUTO")
-    .replace("{{CAPTURE_DIR}}",     "$CAPTURE_DIR")
-    .replace("{{VAULTS_DIR}}",      "$VAULTS_DIR")
-    .replace("{{TIMEZONE}}",        "$TIMEZONE")
-    .replace("{{CRON_HOUR}}",       "$CRON_HOUR")
-    .replace("{{CODEX_CWD}}",       "$CODEX_CWD")
-    .replace("{{CODEX_MODEL}}",     "$CODEX_MODEL")
-    .replace("{{CODEX_REASONING}}", "$CODEX_REASONING"))
+  # Render automation.toml (INACTIVE by default — opt-in cron).
+  # Quoted heredoc + env passthrough so paths containing " or \ can't break Python literals.
+  SRC_TOML="$REPO_DIR/codex/automation.example.toml" \
+  OUT_TOML="$CODEX_AUTO/automation.toml" \
+  V_CODEX_SKILL_DIR="$CODEX_INSTALL" \
+  V_CODEX_AUTO_DIR="$CODEX_AUTO" \
+  V_CAPTURE_DIR="$CAPTURE_DIR" \
+  V_VAULTS_DIR="$VAULTS_DIR" \
+  V_TIMEZONE="$TIMEZONE" \
+  V_CRON_HOUR="$CRON_HOUR" \
+  V_CODEX_CWD="$CODEX_CWD" \
+  V_CODEX_MODEL="$CODEX_MODEL" \
+  V_CODEX_REASONING="$CODEX_REASONING" \
+  python3 - <<'PYEOF'
+import os, pathlib, re
+src = pathlib.Path(os.environ["SRC_TOML"]).read_text(encoding="utf-8")
+mapping = {
+    "{{CODEX_SKILL_DIR}}": os.environ["V_CODEX_SKILL_DIR"],
+    "{{CODEX_AUTO_DIR}}":  os.environ["V_CODEX_AUTO_DIR"],
+    "{{CAPTURE_DIR}}":     os.environ["V_CAPTURE_DIR"],
+    "{{VAULTS_DIR}}":      os.environ["V_VAULTS_DIR"],
+    "{{TIMEZONE}}":        os.environ["V_TIMEZONE"],
+    "{{CRON_HOUR}}":       os.environ["V_CRON_HOUR"],
+    "{{CODEX_CWD}}":       os.environ["V_CODEX_CWD"],
+    "{{CODEX_MODEL}}":     os.environ["V_CODEX_MODEL"],
+    "{{CODEX_REASONING}}": os.environ["V_CODEX_REASONING"],
+}
+out = src
+for key, val in mapping.items():
+    out = out.replace(key, val)
 # Force INACTIVE — the user opts in to scheduled cron explicitly.
 out = re.sub(r'^status\s*=\s*".*"', 'status = "INACTIVE"', out, count=1, flags=re.MULTILINE)
-pathlib.Path("$CODEX_AUTO/automation.toml").write_text(out, encoding="utf-8")
-print(f"  wrote $CODEX_AUTO/automation.toml (status=INACTIVE — opt in by flipping the field)")
+target = pathlib.Path(os.environ["OUT_TOML"])
+target.write_text(out, encoding="utf-8")
+print(f"  wrote {target} (status=INACTIVE — opt in by flipping the field)")
 PYEOF
   ok "rendered $CODEX_AUTO/automation.toml"
 else
