@@ -45,6 +45,18 @@ Sync-phone touches your knowledge base. A scheduled run that fires while your iC
 
 Flip `status` back to `"INACTIVE"` (or delete the file outright). Codex won't fire it the next time it scans.
 
+## Model + reasoning
+
+The rendered `automation.toml` carries `model = "$CODEX_MODEL"` and `reasoning_effort = "$CODEX_REASONING"` straight from your `local.env`. These must match real values your local Codex CLI accepts — either built-in (`gpt-4o`, `o1`, `gpt-5-codex`, etc.) or an alias you've defined in `~/.codex/config.toml`. If the model name is wrong, the cron silently fails: Codex rejects the run and there's no surfacing back to your normal session.
+
+Verify by inspecting the same fields in your existing automations:
+
+```bash
+grep -h '^model\|^reasoning_effort' ~/.codex/automations/*/automation.toml
+```
+
+Match what's already working.
+
 ## Safety knobs
 
 - The cron prompt explicitly tells Codex to **truncate, never delete** and to **never exfiltrate dictated content to the network**. Re-read the `prompt = """..."""` block before activating — it's the contract Codex follows on every run.

@@ -35,11 +35,13 @@ if [[ ! -d "$CODEX_SKILL_DIR" ]]; then
   exit 1
 fi
 
+MISSING=0
 copy_one() {  # $1 src, $2 dst, $3 label
   local src="$1" dst="$2" label="$3"
   if [[ ! -f "$src" ]]; then
-    echo "  ${label}: source missing, skipping"
-    return 0
+    echo "  FATAL: $label source missing at $src" >&2
+    MISSING=1
+    return 1
   fi
   if [[ "$DRY_RUN" == "1" ]]; then
     if [[ -f "$dst" ]] && cmp -s "$src" "$dst"; then
@@ -57,8 +59,15 @@ copy_one() {  # $1 src, $2 dst, $3 label
 }
 
 echo "== Codex skill files =="
-copy_one "$REPO_DIR/codex/SKILL.md"                   "$CODEX_SKILL_DIR/SKILL.md"               "SKILL.md"
-copy_one "$REPO_DIR/codex/agents/openai.example.yaml" "$CODEX_SKILL_DIR/agents/openai.yaml"     "agents/openai.yaml"
+copy_one "$REPO_DIR/codex/SKILL.md"                   "$CODEX_SKILL_DIR/SKILL.md"               "SKILL.md"             || true
+copy_one "$REPO_DIR/codex/agents/openai.example.yaml" "$CODEX_SKILL_DIR/agents/openai.yaml"     "agents/openai.yaml"   || true
+
+if [[ "$MISSING" == "1" ]]; then
+  echo
+  echo "✗ One or more source files were missing — Codex install may be stale." >&2
+  echo "  Re-clone or pull the repo, then re-run sync.sh." >&2
+  exit 1
+fi
 
 if [[ "$DRY_RUN" == "0" ]]; then
   echo

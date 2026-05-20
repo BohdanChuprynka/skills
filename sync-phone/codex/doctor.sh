@@ -36,7 +36,7 @@ if [[ -f "$SETTINGS" ]]; then
     && report PASS "iphone-raw.md"  "exists ($(wc -c <"$CAP/iphone-raw.md" | tr -d ' ') bytes)" \
     || report FAIL "iphone-raw.md"  "missing in $CAP"
   [[ -d "$VLT" ]] \
-    && report PASS "VAULTS_DIR"     "$VLT ($(find "$VLT" -maxdepth 2 -name CLAUDE.md -o -name AGENTS.md 2>/dev/null | wc -l | tr -d ' ') vault marker files found)" \
+    && report PASS "VAULTS_DIR"     "$VLT ($(find "$VLT" -maxdepth 2 \( -name CLAUDE.md -o -name AGENTS.md \) 2>/dev/null | wc -l | tr -d ' ') vault marker files found)" \
     || report FAIL "VAULTS_DIR"     "$VLT does not exist"
 else
   report FAIL "settings.conf"       "missing — run setup.sh"
