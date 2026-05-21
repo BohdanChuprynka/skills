@@ -141,6 +141,46 @@ Specific MCP issues are covered in detail in
 
 ---
 
+### `invalid_grant` after about a week (Google MCPs)
+
+**Cause:** the OAuth consent screen is in **Testing** mode in Google Cloud
+Console. Refresh tokens issued to Testing-mode apps expire every 7 days
+regardless of activity. This is the root cause of "it worked, then a week
+later it stopped working" with Calendar or Gmail.
+
+**Permanent fix:** publish the consent screen to production mode.
+
+Google Cloud Console → **APIs & Services** → **OAuth consent screen** →
+**Publishing status** → **Publish app**.
+
+This does **not** require Google's formal app verification, does **not**
+expose your account to other users, and does **not** change the scopes your
+token grants. Full security notes — including what stays the same and what
+not to do — are in
+[`MCP-SETUP.md#publishing-the-consent-screen-avoid-weekly-token-expiry-applies-to-all-google-mcps`](MCP-SETUP.md#publishing-the-consent-screen-avoid-weekly-token-expiry-applies-to-all-google-mcps).
+
+After publishing, delete the stale token and re-auth once more:
+
+```bash
+# Calendar
+rm ~/.config/google-calendar-mcp/tokens.json
+GOOGLE_OAUTH_CREDENTIALS=~/.config/dream-skill/gcal-credentials.json \
+  npx @cocal/google-calendar-mcp auth
+
+# Gmail
+rm ~/.config/dream-skill/gmail-token.json
+GMAIL_OAUTH_PATH=~/.config/dream-skill/gmail-credentials.json \
+GMAIL_CREDENTIALS_PATH=~/.config/dream-skill/gmail-token.json \
+  npx -y @gongrzhe/server-gmail-autoauth-mcp auth
+```
+
+Tokens minted post-publish do not expire under normal use. Google may still
+invalidate them if you change your account password or revoke the app from
+https://myaccount.google.com/permissions — those are explicit user actions,
+not silent weekly expiry.
+
+---
+
 ### Cron job doesn't run
 
 **Cause:** PATH issue. Cron runs with a minimal environment. `claude` and

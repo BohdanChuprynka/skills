@@ -301,6 +301,64 @@ meetings the last four Fridays" — exactly the staleness the dream cycle is for
    Note the directory name and the plural `tokens.json`. This is the package's
    default; don't try to relocate it.
 
+9. **Publish the consent screen** (recommended — see next section). Without this,
+   refresh tokens expire every 7 days and the dream cycle starts failing with
+   `invalid_grant` weekly.
+
+### Publishing the consent screen (avoid weekly token expiry — applies to all Google MCPs)
+
+By default the OAuth consent screen sits in **Testing** mode. Refresh tokens
+issued to Testing-mode apps **expire every 7 days**, which is the root cause of
+recurring `invalid_grant` errors. This applies to *every* Google MCP using your
+OAuth client — Calendar, Gmail, Drive, etc. — and is a one-time fix at the
+Cloud project level.
+
+Google Cloud Console → **APIs & Services** → **OAuth consent screen** →
+**Publishing status** → click **Publish app**. Status flips to *In production*.
+That's the entire fix — refresh tokens minted afterward last indefinitely under
+normal use.
+
+**What "In production" does NOT change:**
+
+- **Verification status.** The app is still unverified. Anyone authenticating
+  still sees Google's "Google hasn't verified this app" warning. For solo
+  personal use this is fine and expected.
+- **Discoverability.** Publishing does not list the app in any Google directory.
+  The only way someone can authenticate against your app is if they already
+  have your `client_id`. Without the matching `client_secret` they can't start
+  the OAuth flow at all.
+- **Scopes.** Whatever scopes the OAuth client requests are still controlled
+  entirely by you. Publishing doesn't broaden access.
+
+**User isolation — what happens if someone else authenticates against your client:**
+
+- Each Google user who completes OAuth gets a token **issued to themselves**,
+  stored on **their machine**. Your account is never exposed to them. Theirs
+  is never exposed to you. There is no shared store.
+- Unverified apps are capped at **100 distinct users for sensitive scopes**
+  (Calendar, Gmail). For solo use you will never hit this.
+- The `client_secret` for "Desktop / Installed" app type is officially not
+  meaningfully secret per Google's docs — installed apps can't actually keep
+  secrets, since the binary contains them. Treat it as low-sensitivity, not
+  as a password.
+
+**Do not put yourself or others at risk:**
+
+- **Do not** publish `client_id` + `client_secret` + redirect URI together in
+  any public place (gist, README, screenshot, video). That combo lets a
+  phisher craft a convincing consent URL in your app's name and harvest other
+  users' tokens — those tokens authorize *their* Google account, not yours,
+  but you're now the named operator of a phishing front.
+- **Do not** apply for Google "App Verification" (the formal review).
+  Verification requires domain ownership, a privacy policy, and a security
+  review. Pointless for a solo personal client, and permanently attaches your
+  real-name app to Google's verified-apps directory.
+- **Do not** add other users under *Test users* after publishing. Leave that
+  field empty — the field is meaningless for published apps and adds confusion.
+- **Keep scopes minimal.** Stick to read-only for Gmail. Calendar needs the
+  scopes the package requests by default; don't grant Drive, Photos, or other
+  unrelated scopes.
+
 ### Where the credentials go
 
 `config/mcp-config.json`:
@@ -344,9 +402,14 @@ accounts found" or empty output, re-run the `auth` step.
 
 - **Test users.** External-mode OAuth apps require you to add yourself as a
   test user explicitly. Forgetting this is the #1 setup failure.
-- **Token expiry.** The refresh token doesn't expire under normal use, but
-  Google may invalidate it if you change your password or revoke the app.
-  If the integration suddenly fails after months of working, re-run `auth`.
+- **Token expiry / `invalid_grant`.** Refresh tokens from Testing-mode OAuth
+  clients **expire every 7 days**. If the integration suddenly fails after
+  about a week with `invalid_grant`, that's the cause —
+  [publish the consent screen](#publishing-the-consent-screen-avoid-weekly-token-expiry-applies-to-all-google-mcps)
+  once and the problem stops recurring. Tokens from published clients don't
+  expire under normal use, though Google will still invalidate them if you
+  change your password or revoke the app from
+  https://myaccount.google.com/permissions.
 - **Multiple Google accounts.** OAuth will let you pick which account during
   the browser flow. Make sure you pick the one whose calendar you want
   dream-skill to see.
@@ -391,6 +454,11 @@ the Gmail API in it.
    ```
 
    Browser opens, you grant access, token is written to `GMAIL_CREDENTIALS_PATH`.
+6. If the underlying Google Cloud project is still in *Testing* mode, refresh
+   tokens will expire every 7 days. The publishing step from the Calendar setup
+   covers this for the whole project —
+   [Publishing the consent screen](#publishing-the-consent-screen-avoid-weekly-token-expiry-applies-to-all-google-mcps).
+   One publish, both MCPs stop expiring weekly.
 
 ### Where the credentials go
 
