@@ -85,6 +85,32 @@ Without this MCP, the planner is read-only. With it, the cron is viable.
    - Application type: **Desktop app**.
    - Download the JSON → save as `~/.config/gcal-mcp/credentials.json` (chmod 600).
 5. **First run triggers OAuth**: a browser tab opens, you consent, and the MCP server caches the resulting token alongside `credentials.json` as `token.json`. Future runs auto-refresh.
+6. **Publish the consent screen** (recommended — see next section). Without this, refresh tokens expire every 7 days and you'll re-OAuth weekly.
+
+### Publishing the consent screen (avoid weekly token expiry)
+
+By default the OAuth consent screen sits in **Testing** mode. Refresh tokens issued to Testing-mode apps **expire every 7 days**, which is the root cause of recurring `invalid_grant` errors that force a re-OAuth.
+
+Google Cloud Console → **APIs & Services** → **OAuth consent screen** → **Publishing status** → click **Publish app**. Status flips to *In production*. That's the entire fix — refresh tokens minted afterward last indefinitely under normal use.
+
+**What "In production" does NOT change:**
+
+- **Verification status.** The app is still unverified. Anyone authenticating still sees Google's "Google hasn't verified this app" warning. For solo personal use this is fine and expected.
+- **Discoverability.** Publishing does not list the app in any Google directory. The only way someone can authenticate against your app is if they already have your `client_id`. Without the matching `client_secret` they can't start the OAuth flow at all.
+- **Scopes.** Whatever scopes the OAuth client requests are still controlled entirely by you. Publishing doesn't broaden access.
+
+**User isolation — what happens if someone else uses your client:**
+
+- Each Google user who completes OAuth gets a token **issued to themselves**, stored on **their machine**. Your account is never exposed to them. Theirs is never exposed to you. There is no shared store.
+- Unverified apps are capped at **100 distinct users for sensitive scopes** (Calendar, Gmail). For solo use you will never hit this.
+- The `client_secret` for "Desktop / Installed" app type is officially not meaningfully secret per Google's docs — installed apps can't actually keep secrets, since the binary contains them. Treat it as low-sensitivity, not as a password.
+
+**Do not put yourself or others at risk:**
+
+- **Do not** publish `client_id` + `client_secret` + redirect URI together in any public place (gist, README, screenshot, video). That combo lets a phisher craft a convincing consent URL in your app's name and harvest other users' tokens — those tokens authorize *their* Google account, not yours, but you're now the named operator of a phishing front.
+- **Do not** apply for Google "App Verification" (the formal review). Verification requires domain ownership, a privacy policy, and a security review. Pointless for a solo personal client, and permanently attaches your real-name app to Google's verified-apps directory.
+- **Do not** add other users under *Test users* after publishing. Leave that field empty — the field is meaningless for published apps and adds confusion.
+- **Keep scopes minimal.** Calendar read+write is required by this planner. Don't grant Drive, Photos, or other scopes you don't need.
 
 ### Where the credentials go
 
@@ -125,7 +151,7 @@ claude --mcp-config config/mcp-config.json --strict-mcp-config \
 
 ### Common gotchas
 
-- **`invalid_grant` on token refresh**: the OAuth client is in "Testing" mode and the refresh token expired after 7 days. Either publish the OAuth consent screen (production mode) or just re-OAuth: `rm ~/.config/gcal-mcp/token.json && <run the planner once>`.
+- **`invalid_grant` on token refresh**: the OAuth client is in "Testing" mode and the refresh token expired after 7 days. **Permanent fix:** [publish the consent screen](#publishing-the-consent-screen-avoid-weekly-token-expiry) — tokens minted afterward don't expire under normal use. **Temporary fix only:** `rm ~/.config/gcal-mcp/token.json && <run the planner once>` (re-OAuths, but you'll hit this again in 7 days if the app is still in Testing mode).
 - **`Calendar not found` for a specific sub-calendar**: the calendar ID in `planning-preferences.md` is wrong or the OAuth scope is missing that calendar. Verify by fetching the calendar list above and confirming the ID is present.
 - **`Quota exceeded`**: Google Calendar API has generous limits but a runaway test loop can hit them. The planner makes ~5-10 calls per run, so this only happens during development.
 
