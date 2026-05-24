@@ -1,0 +1,97 @@
+# clean-wiki: vault paths config — EXAMPLE
+# Copy to vault-paths.toml and adapt to your vault layout.
+# Real vault-paths.toml is .gitignored.
+
+# ============================================================
+# Vaults to scan
+# ============================================================
+# Each [[vaults]] block declares one Obsidian vault.
+# Required: name, path
+# Optional: wiki_subdir (default "wiki"), index_file, archive_dir, required_frontmatter
+
+[[vaults]]
+name = "me"
+path = "/ABSOLUTE/PATH/TO/Obsidian/me"
+wiki_subdir = "wiki"
+index_file = "wiki/index.md"
+archive_dir = "wiki/_archive"
+required_frontmatter = ["tags", "created", "updated"]
+
+[[vaults]]
+name = "projects"
+path = "/ABSOLUTE/PATH/TO/Obsidian/projects"
+wiki_subdir = "wiki"
+index_file = "wiki/index.md"
+archive_dir = "wiki/_archive"
+required_frontmatter = ["tags", "created", "updated"]
+
+# Add more [[vaults]] blocks as needed. Comment out vaults you don't want scanned.
+
+# [[vaults]]
+# name = "gym-sprint"
+# path = "/ABSOLUTE/PATH/TO/Obsidian/gym-sprint"
+# wiki_subdir = "wiki"
+# index_file = "wiki/index.md"
+
+# [[vaults]]
+# name = "learning"
+# path = "/ABSOLUTE/PATH/TO/Obsidian/learning"
+# wiki_subdir = "wiki"
+# index_file = "wiki/index.md"
+
+# [[vaults]]
+# name = "setup"
+# path = "/ABSOLUTE/PATH/TO/Obsidian/setup"
+# wiki_subdir = "wiki"
+# index_file = "wiki/index.md"
+
+# [[vaults]]
+# name = "personal-notes"
+# path = "/ABSOLUTE/PATH/TO/Obsidian/personal-notes"
+# wiki_subdir = "wiki"
+# index_file = "wiki/index.md"
+
+
+# ============================================================
+# Scan tuning
+# ============================================================
+
+[scan]
+# Active pages with updated: > stale_active_days are flagged for confirmation
+stale_active_days = 180
+
+# Paths (glob) excluded from scan entirely
+ignore_globs = [
+    ".obsidian/**",
+    "**/_archive/**",
+    "**/raw/**",
+    "**/raw/completed/**",
+    "**/.trash/**",
+]
+
+# Statuses that exempt pages from "stale active" checks
+non_active_statuses = ["completed", "superseded", "archived", "paused"]
+
+
+# ============================================================
+# Web UI
+# ============================================================
+
+[ui]
+port = 5173
+auto_open_browser = true
+# Confidence levels to show by default. "low" hidden unless --aggressive flag passed.
+default_confidence_filter = ["high", "medium"]
+# How many context characters to include in each card
+context_snippet_chars = 400
+
+
+# ============================================================
+# Apply behavior
+# ============================================================
+
+[apply]
+# Where to move archived files (per-vault archive_dir overrides this)
+default_archive_pattern = "_archive/{date}/{original_path}"
+# Confirm with extra prompt for actions on files older than this many days
+extra_confirm_age_days = 365

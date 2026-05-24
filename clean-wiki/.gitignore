@@ -1,0 +1,51 @@
+# clean-wiki — privacy guards
+# Never commit vault content, real paths, or runtime logs.
+
+# Runtime data (queue, decisions, apply log — all contain vault content snippets)
+skills/clean-wiki/data/
+
+# Real vault paths config (template at config/vault-paths.example.toml)
+skills/clean-wiki/config/vault-paths.toml
+
+# Usage + apply logs
+skills/clean-wiki/.usage-log.jsonl
+skills/clean-wiki/.apply-log.jsonl
+
+# Reports / exports
+skills/clean-wiki/reports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Node (in case any web tooling added later)
+node_modules/
+package-lock.json
+yarn.lock
+
+# OS / shell
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Editor
+.vscode/
+.idea/
+
+# Direnv
+.envrc
+.direnv/
