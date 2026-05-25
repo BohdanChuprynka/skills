@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "transcribe-audio"
+version = "0.1.0"
+description = "Audio file → transcript → optional summary → optional Obsidian note. OpenAI Whisper API backend."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Bohdan Chuprynka" }]
+keywords = ["transcription", "whisper", "obsidian", "audio", "openai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "openai>=1.50",
+    "typer>=0.12",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "pydub>=0.25",
+    "jinja2>=3.1",
+    "rich>=13.7",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "ruff>=0.5",
+    "pyright>=1.1",
+]
+
+[project.scripts]
+transcribe-audio = "transcribe_audio.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/BohdanChuprynka/skills/tree/main/transcribe-audio"
+Repository = "https://github.com/BohdanChuprynka/skills"
+Issues = "https://github.com/BohdanChuprynka/skills/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/transcribe_audio"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/transcribe_audio/templates" = "transcribe_audio/templates"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

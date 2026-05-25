@@ -22,6 +22,7 @@ Each skill is independent: you can install one without the others. They're all M
 | [**calendar-plan-skill**](./calendar-plan-skill) | Dual-target (Claude Code + Codex CLI) daily calendar planner. Drafts tomorrow's calendar from your Obsidian vault, Google Calendar, Gmail, and a local context note. Two modes — `/calendar-plan` (draft → confirm) and `/calendar-plan auto` (apply safe blocks directly). Includes a launchd job for evening auto-runs. |
 | [**sync-phone**](./sync-phone) | iPhone voice-dictation pipeline. Drains an iCloud-shared dictation sink, summarizes the raw audio transcripts, routes the bullets into the right Obsidian vault, archives the source, and clears the inbox. Pairs with an iPhone Shortcut for the capture side. |
 | [**dream-skill**](./dream-skill) | Wiki reconciliation. Audits your Obsidian vaults against recent Claude Code / Codex CLI sessions and connected MCP sources (Notion, Calendar, Gmail) — flags stale, missing, and contradicted facts for review before applying. |
+| [**transcribe-audio**](./transcribe-audio) | Audio file → clean transcript → optional LLM summary → optional Obsidian note. OpenAI Whisper API backend. Auto-chunks files past the 25 MB API limit, primes the recognizer with custom technical vocabulary, ships three summary styles. Strong on Ukrainian, Russian, English, and code-switching. |
 
 ## Install
 

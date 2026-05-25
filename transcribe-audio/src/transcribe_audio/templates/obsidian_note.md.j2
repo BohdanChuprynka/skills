@@ -1,0 +1,37 @@
+---
+created: {{ frontmatter.created }}
+type: {{ frontmatter.type }}
+{%- if frontmatter.source %}
+source: {{ frontmatter.source }}
+{%- endif %}
+{%- if frontmatter.duration_seconds %}
+duration_seconds: {{ frontmatter.duration_seconds }}
+{%- endif %}
+{%- if frontmatter.language %}
+language: {{ frontmatter.language }}
+{%- endif %}
+{%- if frontmatter.transcribe_model %}
+transcribe_model: {{ frontmatter.transcribe_model }}
+{%- endif %}
+{%- if frontmatter.summary_model %}
+summary_model: {{ frontmatter.summary_model }}
+{%- endif %}
+{%- if frontmatter.summary_style %}
+summary_style: {{ frontmatter.summary_style }}
+{%- endif %}
+status: unreviewed
+---
+
+# {{ title }}
+
+{% if summary -%}
+## Summary
+
+{{ summary }}
+
+---
+
+{% endif -%}
+## Transcript
+
+{{ transcript }}

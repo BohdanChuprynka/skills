@@ -1,0 +1,15 @@
+{
+  "name": "transcribe-audio",
+  "version": "0.1.0",
+  "description": "Transcribe audio files via the OpenAI Whisper API. Optional LLM summary and Obsidian export. Multilingual (en/uk/ru + code-switching).",
+  "author": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "homepage": "https://github.com/BohdanChuprynka/skills/tree/main/transcribe-audio",
+  "repository": "https://github.com/BohdanChuprynka/skills",
+  "license": "MIT",
+  "keywords": ["transcription", "whisper", "openai", "obsidian", "audio", "voice"],
+  "commands": "./commands",
+  "skills": "./skills"
+}
