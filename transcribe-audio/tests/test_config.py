@@ -24,6 +24,20 @@ def test_load_config_from_env(fake_openai_key: str) -> None:
     assert config.default_language == "auto"
 
 
+def test_load_config_reads_canonical_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    """When no env var is set, ~/.config/transcribe-audio/.env should be picked up."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config_dir = isolated_home / ".config" / "transcribe-audio"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / ".env").write_text("OPENAI_API_KEY=sk-from-canonical-env\n")
+    # Run from a directory with no .env so we know it came from the canonical path.
+    monkeypatch.chdir(tmp_path)
+    config = load_config()
+    assert config.openai_api_key == "sk-from-canonical-env"
+
+
 def test_load_config_merges_yaml_with_env(
     fake_openai_key: str,
     tmp_path: Path,

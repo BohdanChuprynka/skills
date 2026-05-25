@@ -43,17 +43,31 @@ echo
 
 # --- 2. .env file
 cyan "==> .env setup"
-if [ ! -f "$SCRIPT_DIR/.env" ]; then
-  if [ -f "$SCRIPT_DIR/.env.example" ]; then
-    cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
-    yellow "  → Created .env from .env.example"
-    yellow "  → Edit .env and add your OPENAI_API_KEY before first run"
-  else
-    red "  ✗ .env.example missing — repo is in a bad state"
-    exit 1
-  fi
+if [ ! -f "$SCRIPT_DIR/.env.example" ]; then
+  red "  ✗ .env.example missing — repo is in a bad state"
+  exit 1
+fi
+
+# Canonical location for the installed CLI is ~/.config/transcribe-audio/.env
+# so the binary can find credentials regardless of cwd.
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/transcribe-audio"
+mkdir -p "$CONFIG_DIR"
+CANONICAL_ENV="$CONFIG_DIR/.env"
+
+if [ ! -f "$CANONICAL_ENV" ]; then
+  cp "$SCRIPT_DIR/.env.example" "$CANONICAL_ENV"
+  chmod 600 "$CANONICAL_ENV"
+  yellow "  → Created $CANONICAL_ENV from .env.example"
+  yellow "  → Edit it and add your OPENAI_API_KEY before first run"
 else
-  green "  ✓ .env already exists (not overwriting)"
+  green "  ✓ $CANONICAL_ENV already exists (not overwriting)"
+fi
+
+# Also create a repo-local .env for in-repo development work, if missing.
+if [ ! -f "$SCRIPT_DIR/.env" ]; then
+  cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+  chmod 600 "$SCRIPT_DIR/.env"
+  green "  ✓ Also created $SCRIPT_DIR/.env (for in-repo development)"
 fi
 echo
 
@@ -101,6 +115,6 @@ echo
 green "==> Done."
 echo
 echo "Next steps:"
-echo "  1. Edit .env and set OPENAI_API_KEY"
+echo "  1. Edit $CANONICAL_ENV and set OPENAI_API_KEY"
 echo "  2. transcribe-audio transcribe ~/path/to/audio.mp3"
 echo "  3. In Claude Code: /transcribe-audio"
