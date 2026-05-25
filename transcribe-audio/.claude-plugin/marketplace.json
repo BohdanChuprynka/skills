@@ -1,0 +1,10 @@
+{
+  "name": "transcribe-audio",
+  "displayName": "Transcribe Audio",
+  "description": "Audio → transcript → optional summary → optional Obsidian note. OpenAI Whisper backend.",
+  "version": "0.1.0",
+  "category": "productivity",
+  "tags": ["transcription", "whisper", "obsidian", "audio"],
+  "icon": "🎙️",
+  "trigger": "/transcribe-audio"
+}

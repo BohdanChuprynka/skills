@@ -1,0 +1,48 @@
+# Secrets
+.env
+.env.local
+*.local
+
+# Generated transcripts (user output)
+transcripts/
+*.srt
+*.vtt
+*.txt.summary.md
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.pyright/
+*.pyc
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+htmlcov/
+.coverage
+coverage.xml
+
+# Local Obsidian sample vault
+examples/sample-vault/.obsidian/
