@@ -43,12 +43,23 @@ class Config(BaseModel):
 
 
 def load_config(env_file: Path | None = None) -> Config:
-    """Load config from layered sources. .env first, then yaml, then env vars win."""
+    """Load config from layered sources. .env first, then yaml, then env vars win.
+
+    .env search order (first match wins):
+      1. Explicit `env_file` argument
+      2. ~/.config/transcribe-audio/.env       (canonical for installed CLI)
+      3. ./.env in current working directory   (handy when developing in-repo)
+      4. <repo>/.env relative to the source    (works only for `uv pip install -e .`)
+    """
     if env_file and env_file.exists():
         load_dotenv(env_file)
     else:
-        # Try .env in cwd, then repo root
-        for candidate in [Path.cwd() / ".env", Path(__file__).parents[2] / ".env"]:
+        candidates = [
+            CONFIG_DIR / ".env",
+            Path.cwd() / ".env",
+            Path(__file__).parents[2] / ".env",
+        ]
+        for candidate in candidates:
             if candidate.exists():
                 load_dotenv(candidate)
                 break

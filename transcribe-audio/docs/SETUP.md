@@ -79,10 +79,15 @@ The script is idempotent — safe to re-run after `git pull`.
 
 ## 4. Add your OpenAI API key
 
-Open `.env` in your editor:
+`setup.sh` creates two `.env` files for you:
+
+- **`~/.config/transcribe-audio/.env`** — the canonical one. The installed CLI looks here first, regardless of which directory you run from. Permissions are set to `600` (only you can read it).
+- **`./.env`** in the repo — convenience copy for in-repo development.
+
+Edit the canonical one:
 
 ```bash
-$EDITOR .env
+$EDITOR ~/.config/transcribe-audio/.env
 ```
 
 Set:
