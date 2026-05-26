@@ -40,7 +40,8 @@ DEFAULT_CLAUDE_SESSIONS_ROOT="$HOME/.claude/projects"
 DEFAULT_CODEX_SESSIONS_ROOT="$HOME/.codex/sessions"
 DEFAULT_CONVERSATION_SOURCES="claude,codex"
 DEFAULT_MODEL="claude-sonnet-4-6"
-DEFAULT_SINCE="7d"
+# DEFAULT_SINCE is intentionally unset: when SINCE is empty, preprocess.py
+# resolves the cutoff from <skill>/.last-run with a 30d cap fallback.
 
 # ============================================================
 # Resolve from env (priority 2 — overridden only by CLI flags)
@@ -52,7 +53,7 @@ CLAUDE_SESSIONS_ROOT="${DREAM_CLAUDE_SESSIONS_ROOT:-${DREAM_SESSIONS_ROOT:-$DEFA
 CODEX_SESSIONS_ROOT="${DREAM_CODEX_SESSIONS_ROOT:-$DEFAULT_CODEX_SESSIONS_ROOT}"
 CONVERSATION_SOURCES="${DREAM_CONVERSATION_SOURCES:-$DEFAULT_CONVERSATION_SOURCES}"
 MODEL="${DREAM_MODEL:-$DEFAULT_MODEL}"
-SINCE="${DREAM_SINCE:-$DEFAULT_SINCE}"
+SINCE="${DREAM_SINCE:-}"
 MCP_CONFIG=""
 NO_MCP="${DREAM_NO_MCP:-0}"
 APPLY=0
@@ -102,7 +103,7 @@ Configuration (highest priority first: CLI flag > env > config > default):
 
   --since WINDOW          Session lookback (e.g. 7d, 14d, 24h).
                           env: DREAM_SINCE
-                          default: 7d
+                          default: auto (resumes from <skill>/.last-run; 30d cap)
 
   --mcp-config PATH       Custom MCP config JSON.
                           default: <skill>/config/mcp-config.json (or .example.json)
@@ -202,6 +203,16 @@ trap 'rm -rf "$TMP"' EXIT
 
 DATE="$(date -u '+%Y-%m-%d')"
 OUTPUT_REPORT="$OUTPUT_DIR/dream-$DATE.md"
+LAST_RUN_FILE="$SKILL_DIR/.last-run"
+
+# Human-readable label for banner + reconcile prompt
+if [[ -n "$SINCE" ]]; then
+  WINDOW_LABEL="$SINCE"
+elif [[ -f "$LAST_RUN_FILE" ]]; then
+  WINDOW_LABEL="since last run ($(<"$LAST_RUN_FILE"))"
+else
+  WINDOW_LABEL="auto (no prior run, 30d cap)"
+fi
 
 echo "==============================================="
 echo "  dream-skill cycle — $DATE"
@@ -211,7 +222,7 @@ echo "  output:   $OUTPUT_REPORT"
 echo "  sources:  $CONVERSATION_SOURCES"
 echo "  claude:   $CLAUDE_SESSIONS_ROOT"
 echo "  codex:    $CODEX_SESSIONS_ROOT"
-echo "  window:   $SINCE"
+echo "  window:   $WINDOW_LABEL"
 echo "  model:    $MODEL"
 if [[ "$NO_MCP" == "1" ]]; then
   echo "  mcp:      (skipped via --no-mcp)"
@@ -252,15 +263,19 @@ fi
 # ============================================================
 
 echo "[1/4] preprocess conversations…"
-python3 "$SCRIPTS_DIR/preprocess.py" \
-  --sources "$CONVERSATION_SOURCES" \
-  --claude-sessions-root "$CLAUDE_SESSIONS_ROOT" \
-  --codex-sessions-root "$CODEX_SESSIONS_ROOT" \
-  --since "$SINCE" \
+PREPROCESS_ARGS=(
+  --sources "$CONVERSATION_SOURCES"
+  --claude-sessions-root "$CLAUDE_SESSIONS_ROOT"
+  --codex-sessions-root "$CODEX_SESSIONS_ROOT"
   --output "$TMP/sessions.md"
+)
+if [[ -n "$SINCE" ]]; then
+  PREPROCESS_ARGS+=(--since "$SINCE")
+fi
+python3 "$SCRIPTS_DIR/preprocess.py" "${PREPROCESS_ARGS[@]}"
 SESSIONS_BYTES=$(wc -c < "$TMP/sessions.md" | tr -d ' ')
-SIGNAL_COUNT=$(grep -c "\\[★\\]" "$TMP/sessions.md" 2>/dev/null || echo 0)
-echo "      conversations.md: ${SESSIONS_BYTES} bytes, ${SIGNAL_COUNT} star-marked messages"
+USER_MSG_COUNT=$(grep -c "^USER:" "$TMP/sessions.md" 2>/dev/null || echo 0)
+echo "      conversations.md: ${SESSIONS_BYTES} bytes, ${USER_MSG_COUNT} user messages"
 
 # ============================================================
 # Stage 2: snapshot vault state (no LLM)
@@ -299,7 +314,7 @@ SESSIONS_CONTENT="$(cat "$TMP/sessions.md")"
 VAULT_CONTENT="$(cat "$TMP/vault.md")"
 
 # Safe substitution via Python (avoids shell escaping hell on user content)
-PROMPT="$(WINDOW="$SINCE" \
+PROMPT="$(WINDOW="$WINDOW_LABEL" \
            TODAY="$DATE" \
            SESSIONS="$SESSIONS_CONTENT" \
            VAULT="$VAULT_CONTENT" \
@@ -357,7 +372,7 @@ RESPONSE_JSON="$RESPONSE_JSON" \
 USAGE_LOG="$USAGE_LOG" \
 DATE="$DATE" \
 MODEL="$MODEL" \
-SINCE="$SINCE" \
+SINCE="$WINDOW_LABEL" \
 VERBOSE="$VERBOSE" \
 python3 <<'PYEOF'
 import json
@@ -463,6 +478,15 @@ if verbose:
     print(f"  logged → {log_path}")
     print(f"  lifetime: {total_runs} runs, ${total_cost:.2f} total")
 PYEOF
+
+# ============================================================
+# Stamp .last-run so the next dream cycle resumes from this point.
+# Atomic write: tmp file → rename. Only reached when stages 1-4 succeed
+# (set -euo pipefail ensures any earlier failure aborts the script).
+# ============================================================
+LAST_RUN_TMP="$(mktemp "${LAST_RUN_FILE}.XXXXXX")"
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "$LAST_RUN_TMP"
+mv "$LAST_RUN_TMP" "$LAST_RUN_FILE"
 
 echo ""
 echo "==============================================="
