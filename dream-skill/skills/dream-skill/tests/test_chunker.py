@@ -232,6 +232,8 @@ def test_cli_writes_chunk_files_and_meta(tmp_path: Path, fixtures_dir: Path):
 
     meta = json.loads((out_dir / "chunks-meta.json").read_text())
     assert "chunks" in meta
+    assert "total_chunks" in meta
+    assert meta["total_chunks"] == len(chunk_files)
     assert len(meta["chunks"]) == len(chunk_files)
     for entry in meta["chunks"]:
         for key in ("chunk_id", "start", "end", "token_count", "session_count"):
