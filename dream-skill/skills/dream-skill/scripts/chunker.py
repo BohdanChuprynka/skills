@@ -72,6 +72,36 @@ def parse_sessions(content: str) -> list[Block]:
     return blocks
 
 
+def greedy_bucket(blocks: list[Block], target_tokens: int) -> list[list[Block]]:
+    """Greedy chronological bucketing.
+
+    Walks blocks in order, accumulating into the current chunk until adding the
+    next block would push its total over `target_tokens`. At that point, closes
+    the current chunk and starts a new one.
+
+    Never splits a block across chunks (so a single very-large block may produce
+    a chunk that exceeds target; the hard-max check in apply_bounds() catches
+    this).
+    """
+    if not blocks:
+        return []
+
+    chunks: list[list[Block]] = [[]]
+    current_tokens = 0
+
+    for block in blocks:
+        block_tokens, _ = count_tokens(block.text)
+        if chunks[-1] and current_tokens + block_tokens > target_tokens:
+            chunks.append([])
+            current_tokens = 0
+        chunks[-1].append(block)
+        current_tokens += block_tokens
+
+    # No empty-tail cleanup needed: the loop always appends the block before
+    # opening a new chunk, so the last chunk always contains at least one block.
+    return chunks
+
+
 def main(argv: list[str] | None = None) -> int:
     # Stub — will be expanded in later tasks
     print("chunker CLI not yet implemented", file=sys.stderr)
