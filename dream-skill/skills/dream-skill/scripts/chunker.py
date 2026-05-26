@@ -106,6 +106,63 @@ def greedy_bucket(blocks: list[Block], target_tokens: int) -> list[list[Block]]:
     return chunks
 
 
+def _chunk_tokens(chunk: list[Block]) -> int:
+    n, _ = count_tokens("\n".join(b.text for b in chunk))
+    return n
+
+
+def apply_bounds(
+    chunks: list[list[Block]],
+    *,
+    min_chunks: int,
+    max_chunks: int,
+    hard_max: int,
+) -> list[list[Block]]:
+    """Adjust chunk count into [min_chunks, max_chunks] and verify hard-max.
+
+    - If under min: repeatedly split the largest chunk in half (preserving
+      chronological order) until count reaches min, or until no chunk has
+      more than 1 block (cannot split further).
+    - If over max: repeatedly merge the smallest adjacent pair until count
+      reaches max.
+    - After bounds, raise ValueError if any chunk exceeds hard_max tokens.
+    """
+    chunks = [list(c) for c in chunks]  # defensive copy
+
+    # Split until min
+    while len(chunks) < min_chunks:
+        # Find largest chunk that has >= 2 blocks
+        candidates = [(i, _chunk_tokens(c)) for i, c in enumerate(chunks) if len(c) >= 2]
+        if not candidates:
+            break  # cannot split further
+        idx, _ = max(candidates, key=lambda x: x[1])
+        c = chunks[idx]
+        mid = len(c) // 2
+        chunks[idx] = c[:mid]
+        chunks.insert(idx + 1, c[mid:])
+
+    # Merge until max
+    while len(chunks) > max_chunks:
+        # Find smallest adjacent pair (smallest combined size)
+        pair_idx = min(
+            range(len(chunks) - 1),
+            key=lambda i: _chunk_tokens(chunks[i]) + _chunk_tokens(chunks[i + 1]),
+        )
+        chunks[pair_idx] = chunks[pair_idx] + chunks[pair_idx + 1]
+        del chunks[pair_idx + 1]
+
+    # Hard-max check (post-bounds)
+    for i, c in enumerate(chunks):
+        n = _chunk_tokens(c)
+        if n > hard_max:
+            raise ValueError(
+                f"chunker: chunk {i + 1} would have {n} tokens (> hard-max {hard_max}); "
+                "narrow --since or wait for a release that supports oversized windows"
+            )
+
+    return chunks
+
+
 def main(argv: list[str] | None = None) -> int:
     # Stub — will be expanded in later tasks
     print("chunker CLI not yet implemented", file=sys.stderr)

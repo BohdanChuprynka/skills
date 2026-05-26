@@ -110,3 +110,45 @@ def count_tokens_for_block(block):
     from count_tokens import count
     n, _ = count(block.text)
     return n
+
+
+def test_apply_bounds_enforces_min_chunks(fixtures_dir: Path):
+    content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
+    blocks = chunker.parse_sessions(content)
+    chunks = chunker.greedy_bucket(blocks, target_tokens=10_000_000)  # 1 chunk
+    bounded = chunker.apply_bounds(chunks, min_chunks=2, max_chunks=8, hard_max=10_000_000)
+    assert len(bounded) == 2  # split the single chunk in two
+
+
+def test_apply_bounds_enforces_max_chunks(fixtures_dir: Path):
+    content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
+    blocks = chunker.parse_sessions(content)
+    chunks = chunker.greedy_bucket(blocks, target_tokens=1)  # one block per chunk = 8 chunks
+    bounded = chunker.apply_bounds(chunks, min_chunks=2, max_chunks=3, hard_max=10_000_000)
+    assert len(bounded) == 3  # merged down to 3
+
+
+def test_apply_bounds_preserves_chronological_order(fixtures_dir: Path):
+    content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
+    blocks = chunker.parse_sessions(content)
+    chunks = chunker.greedy_bucket(blocks, target_tokens=1)
+    bounded = chunker.apply_bounds(chunks, min_chunks=2, max_chunks=3, hard_max=10_000_000)
+    flat = [b for c in bounded for b in c]
+    assert [b.start_ts for b in flat] == sorted([b.start_ts for b in flat])
+
+
+def test_apply_bounds_passthrough_when_in_range(fixtures_dir: Path):
+    content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
+    blocks = chunker.parse_sessions(content)
+    chunks = chunker.greedy_bucket(blocks, target_tokens=50)
+    if 2 <= len(chunks) <= 8:
+        bounded = chunker.apply_bounds(chunks, min_chunks=2, max_chunks=8, hard_max=10_000_000)
+        assert len(bounded) == len(chunks)
+
+
+def test_apply_bounds_raises_when_any_chunk_exceeds_hard_max(fixtures_dir: Path):
+    content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
+    blocks = chunker.parse_sessions(content)
+    chunks = chunker.greedy_bucket(blocks, target_tokens=10_000_000)
+    with pytest.raises(ValueError, match=r"hard-max"):
+        chunker.apply_bounds(chunks, min_chunks=1, max_chunks=1, hard_max=5)
