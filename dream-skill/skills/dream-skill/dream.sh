@@ -32,6 +32,25 @@ CONFIG_DIR="$SKILL_DIR/config"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
 # ============================================================
+# Timeout binary detection (GNU coreutils provides `timeout`/`gtimeout`;
+# macOS BSD userland has neither by default).
+# ============================================================
+
+if command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="gtimeout"
+elif command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_BIN="timeout"
+else
+  TIMEOUT_BIN=""
+fi
+
+if [[ -z "$TIMEOUT_BIN" ]]; then
+  echo "dream.sh: WARN  neither gtimeout nor timeout found on PATH." >&2
+  echo "             chunked map calls will run without per-call timeout." >&2
+  echo "             install via: brew install coreutils (provides gtimeout)" >&2
+fi
+
+# ============================================================
 # Defaults (lowest priority — overridden by env, then CLI flags)
 # ============================================================
 
@@ -466,7 +485,12 @@ print(t, end="")
 
     # Background launch; prompt via stdin (avoids ARG_MAX).
     (
-      printf '%s' "$MAP_PROMPT" | timeout 600 claude --print \
+      if [[ -n "$TIMEOUT_BIN" ]]; then
+        TIMEOUT_CMD=("$TIMEOUT_BIN" 600)
+      else
+        TIMEOUT_CMD=()
+      fi
+      printf '%s' "$MAP_PROMPT" | ${TIMEOUT_CMD[@]+"${TIMEOUT_CMD[@]}"} claude --print \
         --model "$MAP_MODEL_USE" \
         --bare \
         --no-session-persistence \
