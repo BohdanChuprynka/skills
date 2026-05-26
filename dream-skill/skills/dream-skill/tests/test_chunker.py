@@ -1,5 +1,7 @@
 """Tests for scripts/chunker.py — parsing, greedy bucketing, min/max enforcement, hard-max fail."""
 
+import json
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -205,3 +207,65 @@ def test_apply_bounds_rejects_invalid_bounds(fixtures_dir: Path):
         chunker.apply_bounds(chunks, min_chunks=0, max_chunks=8, hard_max=10_000_000)
     with pytest.raises(ValueError, match=r"max_chunks .+ must be >= min_chunks"):
         chunker.apply_bounds(chunks, min_chunks=5, max_chunks=2, hard_max=10_000_000)
+
+
+def test_cli_writes_chunk_files_and_meta(tmp_path: Path, fixtures_dir: Path):
+    out_dir = tmp_path / "chunks"
+    script = Path(__file__).resolve().parent.parent / "scripts" / "chunker.py"
+
+    result = subprocess.run(
+        [
+            "python3", str(script),
+            "--input", str(fixtures_dir / "sessions-medium.md"),
+            "--output-dir", str(out_dir),
+            "--target-tokens", "50",
+            "--min", "2",
+            "--max", "8",
+            "--hard-max", "10000000",
+        ],
+        capture_output=True, text=True, check=True,
+    )
+
+    chunk_files = sorted(out_dir.glob("chunk-*.md"))
+    assert len(chunk_files) >= 2
+    assert (out_dir / "chunks-meta.json").exists()
+
+    meta = json.loads((out_dir / "chunks-meta.json").read_text())
+    assert "chunks" in meta
+    assert len(meta["chunks"]) == len(chunk_files)
+    for entry in meta["chunks"]:
+        for key in ("chunk_id", "start", "end", "token_count", "session_count"):
+            assert key in entry
+
+
+def test_cli_chunk_files_contain_session_headers(tmp_path: Path, fixtures_dir: Path):
+    out_dir = tmp_path / "chunks"
+    script = Path(__file__).resolve().parent.parent / "scripts" / "chunker.py"
+    subprocess.run(
+        ["python3", str(script),
+         "--input", str(fixtures_dir / "sessions-medium.md"),
+         "--output-dir", str(out_dir),
+         "--target-tokens", "100"],
+        check=True, capture_output=True, text=True,
+    )
+    for chunk_file in sorted(out_dir.glob("chunk-*.md")):
+        text = chunk_file.read_text(encoding="utf-8")
+        assert "--- claude" in text or "--- codex" in text
+
+
+def test_cli_exits_nonzero_on_hard_max_violation(tmp_path: Path, fixtures_dir: Path):
+    out_dir = tmp_path / "chunks"
+    script = Path(__file__).resolve().parent.parent / "scripts" / "chunker.py"
+    result = subprocess.run(
+        ["python3", str(script),
+         "--input", str(fixtures_dir / "sessions-medium.md"),
+         "--output-dir", str(out_dir),
+         "--target-tokens", "10000000",
+         "--hard-max", "5",
+         "--max", "1", "--min", "1"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "hard-max" in result.stderr
+    # No partial output should have been written
+    assert not list(out_dir.glob("chunk-*.md"))

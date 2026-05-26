@@ -169,9 +169,61 @@ def apply_bounds(
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Stub — will be expanded in later tasks
-    print("chunker CLI not yet implemented", file=sys.stderr)
-    return 1
+    ap = argparse.ArgumentParser(description="Split sessions.md into N chunks via greedy token-bucketing.")
+    ap.add_argument("--input", required=True, help="Path to sessions.md")
+    ap.add_argument("--output-dir", required=True, help="Directory to write chunk-N.md files into")
+    ap.add_argument("--target-tokens", type=int, default=150_000)
+    ap.add_argument("--min", dest="min_chunks", type=int, default=2)
+    ap.add_argument("--max", dest="max_chunks", type=int, default=8)
+    ap.add_argument("--hard-max", type=int, default=180_000)
+    args = ap.parse_args(argv)
+
+    content = Path(args.input).read_text(encoding="utf-8", errors="ignore")
+    blocks = parse_sessions(content)
+    if not blocks:
+        print("chunker: no session blocks found in input", file=sys.stderr)
+        return 1
+
+    chunks = greedy_bucket(blocks, target_tokens=args.target_tokens)
+    try:
+        chunks = apply_bounds(
+            chunks,
+            min_chunks=args.min_chunks,
+            max_chunks=args.max_chunks,
+            hard_max=args.hard_max,
+        )
+    except ValueError as e:
+        print(f"chunker: {e}", file=sys.stderr)
+        return 2
+
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    meta_chunks = []
+    for i, chunk in enumerate(chunks, 1):
+        body = "\n".join(b.text for b in chunk) + "\n"
+        (out_dir / f"chunk-{i}.md").write_text(body, encoding="utf-8")
+        n_tokens, _ = count_tokens(body)
+        meta_chunks.append({
+            "chunk_id": i,
+            "start": chunk[0].start_ts.isoformat(),
+            "end": chunk[-1].start_ts.isoformat(),
+            "token_count": n_tokens,
+            "session_count": len(chunk),
+        })
+
+    meta = {"chunks": meta_chunks, "total_chunks": len(chunks)}
+    (out_dir / "chunks-meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    # Human-readable summary to stdout
+    print(f"chunker: wrote {len(chunks)} chunks to {out_dir}")
+    for entry in meta_chunks:
+        print(
+            f"  chunk-{entry['chunk_id']}.md: {entry['session_count']} sessions, "
+            f"{entry['token_count']} tokens, {entry['start']} -> {entry['end']}"
+        )
+
+    return 0
 
 
 if __name__ == "__main__":
