@@ -646,8 +646,12 @@ RESPONSE_JSON="$RESPONSE_JSON" \
 USAGE_LOG="$USAGE_LOG" \
 DATE="$DATE" \
 MODEL="$MODEL" \
+MAP_MODEL="${MAP_MODEL:-claude-haiku-4-5-20251001}" \
 SINCE="$WINDOW_LABEL" \
 VERBOSE="$VERBOSE" \
+ROUTE="$ROUTE" \
+TMP="$TMP" \
+TIKTOKEN_USED="$(python3 -c "import sys; sys.path.insert(0, '$SCRIPTS_DIR'); from count_tokens import count; _, used = count('test'); print(str(used).lower())" 2>/dev/null || echo unknown)" \
 python3 <<'PYEOF'
 import json
 import os
@@ -722,10 +726,14 @@ if verbose:
     print(f"  cost:   ${cost:.4f}    duration: {duration_ms/1000:.1f}s")
 
 row = {
+    "schema_version": 2,
     "ts": datetime.now(timezone.utc).isoformat(),
     "date": os.environ["DATE"],
     "model": os.environ["MODEL"],
+    "map_model": os.environ.get("MAP_MODEL", ""),
     "window": os.environ["SINCE"],
+    "chunked": os.environ["ROUTE"] == "chunked",
+    "tiktoken_used": os.environ.get("TIKTOKEN_USED", "unknown"),
     "input_tokens": in_tok,
     "output_tokens": out_tok,
     "cache_read_input_tokens": cache_read,
@@ -734,6 +742,51 @@ row = {
     "duration_ms": duration_ms,
     "report_bytes": report_bytes,
 }
+
+# When chunked, attach map-call metrics by scanning $TMP/responses/response-*.json.
+if row["chunked"]:
+    import glob
+    chunks_meta = {}
+    chunks_meta_path = Path(os.environ["TMP"]) / "chunks" / "chunks-meta.json"
+    if chunks_meta_path.is_file():
+        try:
+            chunks_meta = json.loads(chunks_meta_path.read_text())
+        except Exception:
+            chunks_meta = {}
+    map_metrics = []
+    map_totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+    for response_path in sorted(glob.glob(os.path.join(os.environ["TMP"], "responses", "response-*.json"))):
+        try:
+            d = json.loads(open(response_path).read())
+        except Exception:
+            continue
+        cid_str = Path(response_path).stem.replace("response-", "")
+        u = d.get("usage", {}) or {}
+        extract_path = Path(os.environ["TMP"]) / "extracts" / f"extract-{cid_str}.md"
+        extract_bytes = extract_path.stat().st_size if extract_path.is_file() else 0
+        map_metrics.append({
+            "chunk_id": int(cid_str) if cid_str.isdigit() else cid_str,
+            "wall_time_ms": d.get("duration_ms", 0),
+            "input_tokens": u.get("input_tokens", 0),
+            "output_tokens": u.get("output_tokens", 0),
+            "cache_read_input_tokens": u.get("cache_read_input_tokens", 0),
+            "cache_creation_input_tokens": u.get("cache_creation_input_tokens", 0),
+            "extract_bytes": extract_bytes,
+            "stop_reason": d.get("stop_reason", ""),
+            "model": d.get("modelUsage", {}).get(os.environ.get("MAP_MODEL", ""), {}).get("model", "") or os.environ.get("MAP_MODEL", ""),
+        })
+        for k in map_totals:
+            map_totals[k] += u.get(k, 0)
+    row["chunk_count"] = len(map_metrics)
+    row["map_token_totals"] = map_totals
+    row["map_call_metrics"] = map_metrics
+    row["reduce_token_totals"] = {
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "cache_read_input_tokens": cache_read,
+        "cache_creation_input_tokens": cache_create,
+    }
+
 log_path.parent.mkdir(parents=True, exist_ok=True)
 with log_path.open("a") as f:
     f.write(json.dumps(row) + "\n")
