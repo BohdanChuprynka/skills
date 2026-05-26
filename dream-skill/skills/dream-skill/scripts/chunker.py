@@ -178,7 +178,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--hard-max", type=int, default=180_000)
     args = ap.parse_args(argv)
 
-    content = Path(args.input).read_text(encoding="utf-8", errors="ignore")
+    input_path = Path(args.input)
+    try:
+        content = input_path.read_text(encoding="utf-8", errors="ignore")
+    except (FileNotFoundError, IsADirectoryError) as e:
+        print(f"chunker: cannot read {input_path}: {e}", file=sys.stderr)
+        return 1
     blocks = parse_sessions(content)
     if not blocks:
         print("chunker: no session blocks found in input", file=sys.stderr)
@@ -198,6 +203,14 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clear stale chunk-*.md files from previous runs. Preserve any unrelated files.
+    for stale in out_dir.glob("chunk-*.md"):
+        stale.unlink()
+    # Also clear stale chunks-meta.json to avoid mixing schemas
+    meta_path = out_dir / "chunks-meta.json"
+    if meta_path.exists():
+        meta_path.unlink()
 
     meta_chunks = []
     for i, chunk in enumerate(chunks, 1):

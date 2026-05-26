@@ -271,3 +271,48 @@ def test_cli_exits_nonzero_on_hard_max_violation(tmp_path: Path, fixtures_dir: P
     assert "hard-max" in result.stderr
     # No partial output should have been written
     assert not list(out_dir.glob("chunk-*.md"))
+
+
+def test_cli_missing_input_exits_cleanly(tmp_path: Path):
+    """Non-existent input should exit 1 with a clean stderr message, no traceback."""
+    script = Path(__file__).resolve().parent.parent / "scripts" / "chunker.py"
+    missing = tmp_path / "no-such-file.md"
+    result = subprocess.run(
+        ["python3", str(script),
+         "--input", str(missing),
+         "--output-dir", str(tmp_path / "chunks")],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "cannot read" in result.stderr.lower() or "no such" in result.stderr.lower()
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_clears_stale_chunk_files(tmp_path: Path, fixtures_dir: Path):
+    """Pre-existing chunk-*.md files in output dir must be removed before new run."""
+    out_dir = tmp_path / "chunks"
+    out_dir.mkdir()
+
+    # Plant a stale chunk and an unrelated file
+    stale = out_dir / "chunk-99.md"
+    stale.write_text("STALE", encoding="utf-8")
+    unrelated = out_dir / "important.txt"
+    unrelated.write_text("KEEP ME", encoding="utf-8")
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "chunker.py"
+    subprocess.run(
+        ["python3", str(script),
+         "--input", str(fixtures_dir / "sessions-medium.md"),
+         "--output-dir", str(out_dir),
+         "--target-tokens", "50",
+         "--min", "2", "--max", "8",
+         "--hard-max", "10000000"],
+        check=True, capture_output=True, text=True,
+    )
+
+    # Stale chunk gone
+    assert not stale.exists()
+    # Unrelated file preserved
+    assert unrelated.exists() and unrelated.read_text() == "KEEP ME"
+    # New chunks present
+    assert sorted(out_dir.glob("chunk-*.md"))
