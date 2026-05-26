@@ -199,7 +199,18 @@ mkdir -p "$OUTPUT_DIR"
 # ============================================================
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+
+# Custom EXIT handler: on non-zero exit, preserve worker error logs.
+on_exit() {
+  local rc=$?
+  if [[ "$rc" != "0" && -d "$TMP/responses" ]]; then
+    mkdir -p "$OUTPUT_DIR/dream-errors-$DATE" 2>/dev/null || true
+    cp "$TMP/responses/"*.log "$OUTPUT_DIR/dream-errors-$DATE/" 2>/dev/null || true
+  fi
+  rm -rf "$TMP"
+  exit $rc
+}
+trap on_exit EXIT
 
 DATE="$(date -u '+%Y-%m-%d')"
 OUTPUT_REPORT="$OUTPUT_DIR/dream-$DATE.md"
@@ -275,7 +286,8 @@ fi
 python3 "$SCRIPTS_DIR/preprocess.py" "${PREPROCESS_ARGS[@]}"
 SESSIONS_BYTES=$(wc -c < "$TMP/sessions.md" | tr -d ' ')
 USER_MSG_COUNT=$(grep -c "^USER:" "$TMP/sessions.md" 2>/dev/null || echo 0)
-echo "      conversations.md: ${SESSIONS_BYTES} bytes, ${USER_MSG_COUNT} user messages"
+SESSIONS_TOKENS=$(python3 "$SCRIPTS_DIR/count_tokens.py" "$TMP/sessions.md")
+echo "      conversations.md: ${SESSIONS_BYTES} bytes, ${USER_MSG_COUNT} user messages, ~${SESSIONS_TOKENS} tokens"
 
 # ============================================================
 # Stage 2: snapshot vault state (no LLM)
