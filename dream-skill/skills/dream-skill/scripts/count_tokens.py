@@ -2,7 +2,7 @@
 """count_tokens.py — count tokens in a file or stdin.
 
 Tries tiktoken first (cl100k_base, a reasonable proxy for Claude tokenization).
-Falls back to a byte estimate (len / 3.5) if tiktoken is not installed.
+Falls back to a byte estimate (len / 4.0) if tiktoken is not installed.
 
 CLI usage:
     python3 count_tokens.py path/to/file       # reads file
@@ -34,7 +34,7 @@ def count(text: str) -> tuple[int, bool]:
         global _TIKTOKEN_WARNED
         if not _TIKTOKEN_WARNED:
             print(
-                "count_tokens.py: WARN tiktoken not installed; using byte/3.5 estimate. "
+                "count_tokens.py: WARN tiktoken not installed; using byte/4.0 estimate. "
                 "Install with `pip install tiktoken` for accurate counts.",
                 file=sys.stderr,
             )
