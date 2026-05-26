@@ -8,6 +8,22 @@ The vault tracks **the user as a person**, not their work outputs. Filter accord
 === CONVERSATION SIGNALS (window: {WINDOW}) ===
 {SESSIONS}
 
+Note: when the conversation window is large, this CONVERSATION SIGNALS block
+contains per-chunk PRE-EXTRACTED signal lists rather than raw conversation
+transcripts, delimited by `=== CHUNK N (date_range) ===` markers. Treat them
+as already-filtered persona signal lists.
+
+Each extracted bullet already includes a verbatim source citation in the form
+`(Claude Session YYYY-MM-DD HH:MM)` or `(Codex Session YYYY-MM-DD HH:MM)`.
+When you write proposals into the dream report, you MUST preserve these
+citations VERBATIM in the proposal's Evidence: block — the downstream parser
+counts distinct channels by matching this exact prefix format. Do not
+paraphrase ("during a coding session") — copy the literal prefix.
+
+The `{WINDOW}` value above always refers to the FULL conversation window, not
+to any individual chunk's date range. Use it as such when phrasing dates and
+relative-time expressions.
+
 === VAULT STATE ===
 {VAULT}
 
