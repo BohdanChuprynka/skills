@@ -70,6 +70,8 @@ skills/dream-skill/.last-run
 .dream-cache/
 dream-reports/
 dream-reports/*.md
+dream-extracts-*/
+dream-errors-*/
 /tmp/
 tmp/
 
