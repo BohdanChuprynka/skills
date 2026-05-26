@@ -72,12 +72,16 @@ CLAUDE_SESSIONS_ROOT="${DREAM_CLAUDE_SESSIONS_ROOT:-${DREAM_SESSIONS_ROOT:-$DEFA
 CODEX_SESSIONS_ROOT="${DREAM_CODEX_SESSIONS_ROOT:-$DEFAULT_CODEX_SESSIONS_ROOT}"
 CONVERSATION_SOURCES="${DREAM_CONVERSATION_SOURCES:-$DEFAULT_CONVERSATION_SOURCES}"
 MODEL="${DREAM_MODEL:-$DEFAULT_MODEL}"
+MAP_MODEL="${DREAM_MAP_MODEL:-claude-haiku-4-5-20251001}"
 SINCE="${DREAM_SINCE:-}"
 MCP_CONFIG=""
 NO_MCP="${DREAM_NO_MCP:-0}"
 APPLY=0
 DRY_RUN=1   # default behavior: produce a report, do not apply
 VERBOSE=0
+FORCE_CHUNKED="${DREAM_FORCE_CHUNKED:-0}"
+FORCE_SINGLE="${DREAM_FORCE_SINGLE:-0}"
+MAX_BUDGET_USD="${DREAM_MAX_BUDGET_USD:-2.00}"
 
 # ============================================================
 # CLI arg parsing (priority 1)
@@ -135,6 +139,21 @@ Configuration (highest priority first: CLI flag > env > config > default):
 
   --verbose               Print token cost summary at end.
 
+  --map-model ID          Model used for parallel map calls (chunked path only).
+                          env: DREAM_MAP_MODEL
+                          default: claude-haiku-4-5-20251001
+
+  --force-chunked         Force map-reduce path regardless of token count.
+                          (For testing; useful with small windows.)
+
+  --force-single          Force single-call path regardless of token count.
+                          Will fail if Claude rejects the oversized prompt;
+                          --max-budget-usd caps the damage.
+
+  --max-budget-usd AMOUNT Safety cap on --force-single calls.
+                          env: DREAM_MAX_BUDGET_USD
+                          default: 2.00
+
   --help, -h              Show this message.
 
 Output:
@@ -166,6 +185,10 @@ while [[ $# -gt 0 ]]; do
     --dry-run)       DRY_RUN=1; APPLY=0; shift ;;
     --apply)         APPLY=1; DRY_RUN=0; shift ;;
     --verbose)       VERBOSE=1; shift ;;
+    --map-model)        MAP_MODEL="$2"; shift 2 ;;
+    --force-chunked)    FORCE_CHUNKED=1; shift ;;
+    --force-single)     FORCE_SINGLE=1; shift ;;
+    --max-budget-usd)   MAX_BUDGET_USD="$2"; shift 2 ;;
     --help|-h)       print_help; exit 0 ;;
     *) echo "dream.sh: unknown arg: $1" >&2; echo "Try --help" >&2; exit 1 ;;
   esac
@@ -257,6 +280,9 @@ echo "  claude:   $CLAUDE_SESSIONS_ROOT"
 echo "  codex:    $CODEX_SESSIONS_ROOT"
 echo "  window:   $WINDOW_LABEL"
 echo "  model:    $MODEL"
+echo "  map-model: $MAP_MODEL"
+if [[ "$FORCE_CHUNKED" == "1" ]]; then echo "  --force-chunked: on"; fi
+if [[ "$FORCE_SINGLE"  == "1" ]]; then echo "  --force-single:  on (budget cap \$${MAX_BUDGET_USD})"; fi
 if [[ "$NO_MCP" == "1" ]]; then
   echo "  mcp:      (skipped via --no-mcp)"
 elif [[ -n "$MCP_CONFIG" ]]; then
@@ -411,6 +437,10 @@ print(t, end="")
     --tools ""
     --permission-mode bypassPermissions
   )
+
+  if [[ "$FORCE_SINGLE" == "1" ]]; then
+    CLAUDE_ARGS+=(--max-budget-usd "$MAX_BUDGET_USD")
+  fi
 
   if [[ "$NO_MCP" != "1" ]] && [[ -n "$MCP_CONFIG" ]] && [[ -f "$MCP_CONFIG" ]]; then
     CLAUDE_ARGS+=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
