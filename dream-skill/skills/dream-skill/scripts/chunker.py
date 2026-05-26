@@ -82,7 +82,11 @@ def greedy_bucket(blocks: list[Block], target_tokens: int) -> list[list[Block]]:
     Never splits a block across chunks (so a single very-large block may produce
     a chunk that exceeds target; the hard-max check in apply_bounds() catches
     this).
+
+    Raises ValueError if target_tokens < 1.
     """
+    if target_tokens < 1:
+        raise ValueError(f"target_tokens must be >= 1, got {target_tokens}")
     if not blocks:
         return []
 

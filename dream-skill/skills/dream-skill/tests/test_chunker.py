@@ -54,15 +54,19 @@ def test_parse_sessions_empty_string_returns_empty_list():
 
 
 def test_greedy_bucket_keeps_chunks_under_target(fixtures_dir: Path):
+    """Each chunk should either stay <= target, OR contain exactly one block
+    (the case where a single block alone exceeds target — we don't split blocks).
+    """
     content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
     blocks = chunker.parse_sessions(content)
-    # Force tiny target to actually trigger bucketing on small fixture
-    chunks = chunker.greedy_bucket(blocks, target_tokens=20)
+    target = 20
+    chunks = chunker.greedy_bucket(blocks, target_tokens=target)
     for c in chunks:
         tokens = sum(count_tokens_for_block(b) for b in c)
-        # Each chunk MAY exceed target by at most one block (greedy doesn't split blocks)
-        # so we don't assert <= target strictly, but it should be in ballpark
-        assert tokens > 0
+        assert tokens <= target or len(c) == 1, (
+            f"chunk has {tokens} tokens (> target {target}) AND {len(c)} blocks "
+            f"(should be 1 for no-split overflow)"
+        )
 
 
 def test_greedy_bucket_preserves_chronological_order(fixtures_dir: Path):
@@ -91,6 +95,14 @@ def test_greedy_bucket_single_chunk_when_target_huge(fixtures_dir: Path):
 
 def test_greedy_bucket_empty_input_returns_empty_list():
     assert chunker.greedy_bucket([], target_tokens=100) == []
+
+
+def test_greedy_bucket_rejects_invalid_target():
+    """target_tokens must be >= 1; 0 and negative should raise ValueError."""
+    with pytest.raises(ValueError, match=r"target_tokens"):
+        chunker.greedy_bucket([], target_tokens=0)
+    with pytest.raises(ValueError, match=r"target_tokens"):
+        chunker.greedy_bucket([], target_tokens=-1)
 
 
 # Helper used in tests above:
