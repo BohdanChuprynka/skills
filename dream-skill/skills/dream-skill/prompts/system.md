@@ -10,7 +10,14 @@ The vault exists to give an LLM the best possible context about **the user as a 
 
 Three blocks in the user message, delimited by `=== HEADER ===` markers:
 
-1. **CONVERSATION SIGNALS** — cleaned excerpts from recent local Claude Code and/or Codex CLI conversations in the configured window. User messages are full; assistant turns appear only when they provide question/answer context. Messages flagged `[★]` matched a high-signal pattern. Source headers identify the local product, e.g. `--- claude session <id> ---` or `--- codex session <id> ---`.
+1. **CONVERSATION SIGNALS** — cleaned excerpts from recent local Claude Code and/or Codex CLI conversations in the configured window. User messages are full; assistant turns appear only when they provide question/answer context. Source headers identify the local product, e.g. `--- claude 2026-05-19 13:24 ---` or `--- codex 2026-05-19 13:24 ---`.
+
+   This reconcile call may run in one of two modes:
+
+   - **Single-call mode** — the SIGNALS block contains raw cleaned transcripts from preprocess.py. Treat them as primary evidence; cite each message by its session header (`Claude Session YYYY-MM-DD HH:MM`).
+   - **Chunked mode** — the SIGNALS block contains per-chunk pre-extracted signal summaries (with `## State changes`, `## Decisions`, etc. headers and `=== CHUNK N ===` separators). Each bullet already has a verbatim source citation embedded — copy that citation literally into your proposals' Evidence: blocks.
+
+   In both modes, MCP-tool probes (Notion / Calendar / Gmail / Filesystem) are your responsibility and run as today. The map step does NOT touch MCPs.
 2. **VAULT STATE** — current page titles, statuses, `updated:` dates, "Current Goals" / "Current Priorities" excerpts, and pages marked `needs_verification:` or stale.
 3. **TASK** — the reconciliation request for this cycle, including today's date and the active window.
 
