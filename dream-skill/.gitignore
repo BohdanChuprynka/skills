@@ -65,6 +65,8 @@ yarn-error.log*
 # dream-skill runtime artifacts (never commit user data)
 .apply-log.jsonl
 .usage-log.jsonl
+.last-run
+skills/dream-skill/.last-run
 .dream-cache/
 dream-reports/
 dream-reports/*.md
