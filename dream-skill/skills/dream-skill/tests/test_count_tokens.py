@@ -70,3 +70,29 @@ def test_cli_mode_reads_stdin():
     )
     n = int(result.stdout.strip())
     assert n > 0
+
+
+def test_count_empty_string_reports_correct_tiktoken_flag():
+    """Empty input should still report whether tiktoken is available, not always False."""
+    try:
+        import tiktoken  # noqa: F401
+        tiktoken_available = True
+    except ImportError:
+        tiktoken_available = False
+
+    _, used = count_tokens.count("")
+    assert used is tiktoken_available
+
+
+def test_cli_mode_missing_file_exits_with_clean_error(tmp_path: Path):
+    """Non-existent path should produce a clean stderr message + exit 1, not a traceback."""
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "count_tokens.py"
+    missing = tmp_path / "does-not-exist.txt"
+    result = subprocess.run(
+        ["python3", str(script_path), str(missing)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 1
+    assert "cannot read" in result.stderr.lower() or "no such file" in result.stderr.lower()
+    # Must NOT contain a Python traceback
+    assert "Traceback" not in result.stderr

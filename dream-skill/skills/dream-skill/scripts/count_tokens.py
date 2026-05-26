@@ -26,10 +26,9 @@ def _byte_estimate(text: str) -> int:
 
 def count(text: str) -> tuple[int, bool]:
     """Return (token_count, used_tiktoken_bool)."""
-    if not text:
-        return 0, False
     try:
         import tiktoken
+        used_tiktoken = True
     except ImportError:
         global _TIKTOKEN_WARNED
         if not _TIKTOKEN_WARNED:
@@ -39,10 +38,15 @@ def count(text: str) -> tuple[int, bool]:
                 file=sys.stderr,
             )
             _TIKTOKEN_WARNED = True
-        return _byte_estimate(text), False
+        used_tiktoken = False
 
-    enc = tiktoken.get_encoding("cl100k_base")
-    return len(enc.encode(text)), True
+    if not text:
+        return 0, used_tiktoken
+
+    if used_tiktoken:
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text)), True
+    return _byte_estimate(text), False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,7 +58,12 @@ def main(argv: list[str] | None = None) -> int:
     if args[0] == "-":
         text = sys.stdin.read()
     else:
-        text = Path(args[0]).read_text(encoding="utf-8", errors="ignore")
+        path = Path(args[0])
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except (FileNotFoundError, IsADirectoryError) as e:
+            print(f"count_tokens.py: cannot read {path}: {e}", file=sys.stderr)
+            return 1
 
     n, _ = count(text)
     print(n)
