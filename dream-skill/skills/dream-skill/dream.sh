@@ -306,6 +306,37 @@ VAULT_BYTES=$(wc -c < "$TMP/vault.md" | tr -d ' ')
 echo "      vault.md: ${VAULT_BYTES} bytes"
 
 # ============================================================
+# Stage 2.5: route decision (single-call vs chunked map-reduce)
+# ============================================================
+
+ROUTE_THRESHOLD_TOKENS="${DREAM_ROUTE_THRESHOLD:-130000}"
+VAULT_BYTES_NUM=$(wc -c < "$TMP/vault.md" | tr -d ' ')
+VAULT_TOKENS=$(python3 "$SCRIPTS_DIR/count_tokens.py" "$TMP/vault.md")
+# 10000 token overhead for prompt template + system prompt
+PROMPT_OVERHEAD=10000
+TOTAL_TOKENS=$((SESSIONS_TOKENS + VAULT_TOKENS + PROMPT_OVERHEAD))
+
+# Empty-vault first-run always single-call
+if [[ "$VAULT_BYTES_NUM" -lt 1024 ]]; then
+  ROUTE=single
+  ROUTE_REASON="empty vault (${VAULT_BYTES_NUM} bytes < 1KB)"
+elif [[ "${FORCE_CHUNKED:-0}" == "1" ]]; then
+  ROUTE=chunked
+  ROUTE_REASON="--force-chunked"
+elif [[ "${FORCE_SINGLE:-0}" == "1" ]]; then
+  ROUTE=single
+  ROUTE_REASON="--force-single"
+elif [[ "$TOTAL_TOKENS" -lt "$ROUTE_THRESHOLD_TOKENS" ]]; then
+  ROUTE=single
+  ROUTE_REASON="total ${TOTAL_TOKENS} tokens < threshold ${ROUTE_THRESHOLD_TOKENS}"
+else
+  ROUTE=chunked
+  ROUTE_REASON="total ${TOTAL_TOKENS} tokens >= threshold ${ROUTE_THRESHOLD_TOKENS}"
+fi
+
+echo "      route: $ROUTE ($ROUTE_REASON)"
+
+# ============================================================
 # Stage 3: reconcile via Claude (the only paid step)
 # ============================================================
 
@@ -317,24 +348,26 @@ if [[ "$DRY_RUN" == "1" ]] && [[ "${DREAM_SKIP_LLM:-0}" == "1" ]]; then
   exit 0
 fi
 
-echo "[3/4] reconcile via Claude ($MODEL)…"
+if [[ "$ROUTE" == "single" ]]; then
 
-if [[ ! -f "$PROMPTS_DIR/reconcile.md" ]]; then
-  echo "dream.sh: ERROR  reconcile prompt missing: $PROMPTS_DIR/reconcile.md" >&2
-  exit 1
-fi
+  echo "[3/4] reconcile via Claude ($MODEL)…"
 
-RECONCILE_TEMPLATE="$(cat "$PROMPTS_DIR/reconcile.md")"
-SESSIONS_CONTENT="$(cat "$TMP/sessions.md")"
-VAULT_CONTENT="$(cat "$TMP/vault.md")"
+  if [[ ! -f "$PROMPTS_DIR/reconcile.md" ]]; then
+    echo "dream.sh: ERROR  reconcile prompt missing: $PROMPTS_DIR/reconcile.md" >&2
+    exit 1
+  fi
 
-# Safe substitution via Python (avoids shell escaping hell on user content)
-PROMPT="$(WINDOW="$WINDOW_LABEL" \
-           TODAY="$DATE" \
-           SESSIONS="$SESSIONS_CONTENT" \
-           VAULT="$VAULT_CONTENT" \
-           TEMPLATE="$RECONCILE_TEMPLATE" \
-         python3 -c '
+  RECONCILE_TEMPLATE="$(cat "$PROMPTS_DIR/reconcile.md")"
+  SESSIONS_CONTENT="$(cat "$TMP/sessions.md")"
+  VAULT_CONTENT="$(cat "$TMP/vault.md")"
+
+  # Safe substitution via Python (avoids shell escaping hell on user content)
+  PROMPT="$(WINDOW="$WINDOW_LABEL" \
+             TODAY="$DATE" \
+             SESSIONS="$SESSIONS_CONTENT" \
+             VAULT="$VAULT_CONTENT" \
+             TEMPLATE="$RECONCILE_TEMPLATE" \
+           python3 -c '
 import os
 t = os.environ["TEMPLATE"]
 t = t.replace("{TODAY}",   os.environ["TODAY"])
@@ -344,34 +377,39 @@ t = t.replace("{VAULT}",    os.environ["VAULT"])
 print(t, end="")
 ')"
 
-SYSTEM_PROMPT=""
-if [[ -f "$PROMPTS_DIR/system.md" ]]; then
-  SYSTEM_PROMPT="$(cat "$PROMPTS_DIR/system.md")"
-fi
+  SYSTEM_PROMPT=""
+  if [[ -f "$PROMPTS_DIR/system.md" ]]; then
+    SYSTEM_PROMPT="$(cat "$PROMPTS_DIR/system.md")"
+  fi
 
-RESPONSE_JSON="$TMP/response.json"
-USAGE_LOG="$SKILL_DIR/.usage-log.jsonl"
+  RESPONSE_JSON="$TMP/response.json"
+  USAGE_LOG="$SKILL_DIR/.usage-log.jsonl"
 
-CLAUDE_ARGS=(
-  --model "$MODEL"
-  --print
-  --output-format json
-  --tools ""
-  --permission-mode bypassPermissions
-)
+  CLAUDE_ARGS=(
+    --model "$MODEL"
+    --print
+    --output-format json
+    --tools ""
+    --permission-mode bypassPermissions
+  )
 
-if [[ "$NO_MCP" != "1" ]] && [[ -n "$MCP_CONFIG" ]] && [[ -f "$MCP_CONFIG" ]]; then
-  CLAUDE_ARGS+=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
-fi
+  if [[ "$NO_MCP" != "1" ]] && [[ -n "$MCP_CONFIG" ]] && [[ -f "$MCP_CONFIG" ]]; then
+    CLAUDE_ARGS+=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
+  fi
 
-if [[ -n "$SYSTEM_PROMPT" ]]; then
-  CLAUDE_ARGS+=(--append-system-prompt "$SYSTEM_PROMPT")
-fi
+  if [[ -n "$SYSTEM_PROMPT" ]]; then
+    CLAUDE_ARGS+=(--append-system-prompt "$SYSTEM_PROMPT")
+  fi
 
-claude "${CLAUDE_ARGS[@]}" "$PROMPT" > "$RESPONSE_JSON"
+  claude "${CLAUDE_ARGS[@]}" "$PROMPT" > "$RESPONSE_JSON"
 
-if [[ ! -s "$RESPONSE_JSON" ]]; then
-  echo "dream.sh: ERROR  claude returned empty response" >&2
+  if [[ ! -s "$RESPONSE_JSON" ]]; then
+    echo "dream.sh: ERROR  claude returned empty response" >&2
+    exit 1
+  fi
+
+else
+  echo "dream.sh: chunked path not yet wired (stub); exiting." >&2
   exit 1
 fi
 
