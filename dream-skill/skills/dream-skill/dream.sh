@@ -409,8 +409,205 @@ print(t, end="")
   fi
 
 else
-  echo "dream.sh: chunked path not yet wired (stub); exiting." >&2
-  exit 1
+  # ============================================================
+  # Stage 3a: chunker
+  # ============================================================
+  echo "[3a/4] chunker — splitting sessions.md…"
+  mkdir -p "$TMP/chunks" "$TMP/responses" "$TMP/extracts"
+  python3 "$SCRIPTS_DIR/chunker.py" \
+    --input "$TMP/sessions.md" \
+    --output-dir "$TMP/chunks" \
+    --target-tokens "${DREAM_CHUNK_TARGET_TOKENS:-150000}" \
+    --min "${DREAM_CHUNK_MIN:-2}" \
+    --max "${DREAM_CHUNK_MAX:-8}" \
+    --hard-max "${DREAM_CHUNK_HARD_MAX:-180000}"
+
+  CHUNK_COUNT=$(ls "$TMP/chunks/chunk-"*.md 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "$CHUNK_COUNT" -lt 2 ]]; then
+    echo "dream.sh: ERROR  chunker produced $CHUNK_COUNT chunks; expected >= 2" >&2
+    exit 1
+  fi
+
+  # ============================================================
+  # Stage 3b: parallel map calls (Haiku)
+  # ============================================================
+  echo "[3b/4] launching $CHUNK_COUNT parallel map calls (model: ${MAP_MODEL:-claude-haiku-4-5-20251001})…"
+
+  MAP_MODEL_USE="${MAP_MODEL:-claude-haiku-4-5-20251001}"
+  MAP_SYSTEM_FILE="$PROMPTS_DIR/map-system.md"
+  MAP_USER_TEMPLATE_FILE="$PROMPTS_DIR/map.md"
+  declare -a MAP_PIDS=()
+
+  # Read chunks-meta.json for date ranges to substitute into the map prompt
+  for chunk_file in "$TMP/chunks/chunk-"*.md; do
+    chunk_id=$(basename "$chunk_file" .md | sed 's/chunk-//')
+
+    # Substitute {TODAY}, {CHUNK_RANGE}, {CHUNK_CONTENT} into map.md template.
+    # CHUNK_RANGE comes from chunks-meta.json.
+    CHUNK_RANGE=$(python3 -c '
+import json, sys
+meta = json.load(open(sys.argv[1]))
+entries = {str(e["chunk_id"]): e["start"] + " -> " + e["end"] for e in meta["chunks"]}
+print(entries.get(sys.argv[2], "unknown"))
+' "$TMP/chunks/chunks-meta.json" "$chunk_id")
+
+    MAP_PROMPT=$(TEMPLATE="$(cat "$MAP_USER_TEMPLATE_FILE")" \
+                 TODAY="$DATE" \
+                 CHUNK_RANGE="$CHUNK_RANGE" \
+                 CHUNK_CONTENT="$(cat "$chunk_file")" \
+                 python3 -c '
+import os
+t = os.environ["TEMPLATE"]
+t = t.replace("{TODAY}", os.environ["TODAY"])
+t = t.replace("{CHUNK_RANGE}", os.environ["CHUNK_RANGE"])
+t = t.replace("{CHUNK_CONTENT}", os.environ["CHUNK_CONTENT"])
+print(t, end="")
+')
+
+    # Background launch; prompt via stdin (avoids ARG_MAX).
+    (
+      printf '%s' "$MAP_PROMPT" | timeout 600 claude --print \
+        --model "$MAP_MODEL_USE" \
+        --bare \
+        --no-session-persistence \
+        --system-prompt-file "$MAP_SYSTEM_FILE" \
+        --output-format json \
+        --tools "" \
+        --permission-mode bypassPermissions \
+        > "$TMP/responses/response-${chunk_id}.json" \
+        2> "$TMP/responses/error-${chunk_id}.log"
+    ) &
+    MAP_PIDS+=("$!:${chunk_id}")
+  done
+
+  # Wait for all PIDs, collect failures.
+  FAILED_CHUNKS=()
+  for pid_id in "${MAP_PIDS[@]}"; do
+    pid="${pid_id%:*}"
+    cid="${pid_id##*:}"
+    if ! wait "$pid"; then
+      FAILED_CHUNKS+=("$cid")
+    fi
+  done
+
+  if [[ ${#FAILED_CHUNKS[@]} -gt 0 ]]; then
+    echo "dream.sh: ERROR  map calls failed (non-zero exit) for chunks: ${FAILED_CHUNKS[*]}" >&2
+    exit 1
+  fi
+
+  # Post-wait, check each response JSON for is_error / max_tokens.
+  for chunk_file in "$TMP/chunks/chunk-"*.md; do
+    chunk_id=$(basename "$chunk_file" .md | sed 's/chunk-//')
+    response_json="$TMP/responses/response-${chunk_id}.json"
+    python3 - "$response_json" "$chunk_id" <<'PYEOF' || exit 1
+import json, sys
+path, cid = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(path))
+except Exception as e:
+    print(f"dream.sh: ERROR  chunk {cid} response unparseable: {e}", file=sys.stderr)
+    sys.exit(1)
+if data.get("is_error"):
+    print(f"dream.sh: ERROR  chunk {cid} returned is_error=true: {data.get('result','')[:200]}", file=sys.stderr)
+    sys.exit(1)
+stop_reason = data.get("stop_reason") or ""
+if stop_reason in ("max_tokens", "refusal"):
+    print(f"dream.sh: ERROR  chunk {cid} stop_reason={stop_reason}", file=sys.stderr)
+    sys.exit(1)
+result = data.get("result", "")
+if not result.strip():
+    print(f"dream.sh: ERROR  chunk {cid} result empty", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+  done
+
+  # Extract each result into extracts/extract-N.md.
+  for chunk_file in "$TMP/chunks/chunk-"*.md; do
+    chunk_id=$(basename "$chunk_file" .md | sed 's/chunk-//')
+    response_json="$TMP/responses/response-${chunk_id}.json"
+    extract_md="$TMP/extracts/extract-${chunk_id}.md"
+    python3 - "$response_json" "$extract_md" <<'PYEOF'
+import json, sys
+data = json.load(open(sys.argv[1]))
+open(sys.argv[2], "w", encoding="utf-8").write(data.get("result", ""))
+PYEOF
+  done
+
+  # ============================================================
+  # Stage 3c: concatenate extracts with separators (chronological)
+  # ============================================================
+  echo "[3c/4] concatenating extracts…"
+  python3 - "$TMP" <<'PYEOF' > "$TMP/extracts-concat.md"
+import json, sys
+from pathlib import Path
+tmp = Path(sys.argv[1])
+meta = json.loads((tmp / "chunks" / "chunks-meta.json").read_text())
+parts = []
+for entry in sorted(meta["chunks"], key=lambda e: e["chunk_id"]):
+    cid = entry["chunk_id"]
+    rng = f"{entry['start']} -> {entry['end']}"
+    body = (tmp / "extracts" / f"extract-{cid}.md").read_text(encoding="utf-8").strip()
+    parts.append(f"=== CHUNK {cid} ({rng}) ===\n{body}\n")
+print("\n".join(parts))
+PYEOF
+
+  CONCAT_BYTES=$(wc -c < "$TMP/extracts-concat.md" | tr -d ' ')
+  echo "      extracts-concat.md: ${CONCAT_BYTES} bytes"
+
+  # ============================================================
+  # Stage 3d: reduce call (Sonnet, MCPs active)
+  # ============================================================
+  echo "[3d/4] reduce via Claude ($MODEL)…"
+
+  RECONCILE_TEMPLATE="$(cat "$PROMPTS_DIR/reconcile.md")"
+  SESSIONS_CONTENT="$(cat "$TMP/extracts-concat.md")"
+  VAULT_CONTENT="$(cat "$TMP/vault.md")"
+
+  PROMPT="$(WINDOW="$WINDOW_LABEL" \
+             TODAY="$DATE" \
+             SESSIONS="$SESSIONS_CONTENT" \
+             VAULT="$VAULT_CONTENT" \
+             TEMPLATE="$RECONCILE_TEMPLATE" \
+           python3 -c '
+import os
+t = os.environ["TEMPLATE"]
+t = t.replace("{TODAY}",   os.environ["TODAY"])
+t = t.replace("{WINDOW}",  os.environ["WINDOW"])
+t = t.replace("{SESSIONS}", os.environ["SESSIONS"])
+t = t.replace("{VAULT}",    os.environ["VAULT"])
+print(t, end="")
+')"
+
+  SYSTEM_PROMPT=""
+  if [[ -f "$PROMPTS_DIR/system.md" ]]; then
+    SYSTEM_PROMPT="$(cat "$PROMPTS_DIR/system.md")"
+  fi
+
+  RESPONSE_JSON="$TMP/response.json"
+  USAGE_LOG="$SKILL_DIR/.usage-log.jsonl"
+
+  CLAUDE_ARGS=(
+    --model "$MODEL"
+    --print
+    --output-format json
+    --tools ""
+    --permission-mode bypassPermissions
+  )
+  if [[ "$NO_MCP" != "1" ]] && [[ -n "$MCP_CONFIG" ]] && [[ -f "$MCP_CONFIG" ]]; then
+    CLAUDE_ARGS+=(--mcp-config "$MCP_CONFIG" --strict-mcp-config)
+  fi
+  if [[ -n "$SYSTEM_PROMPT" ]]; then
+    CLAUDE_ARGS+=(--append-system-prompt "$SYSTEM_PROMPT")
+  fi
+
+  printf '%s' "$PROMPT" | claude "${CLAUDE_ARGS[@]}" > "$RESPONSE_JSON"
+
+  if [[ ! -s "$RESPONSE_JSON" ]]; then
+    echo "dream.sh: ERROR  reduce returned empty response" >&2
+    exit 1
+  fi
+
+  # Continue to existing Stage 4 (save report + log usage)
 fi
 
 # ============================================================
