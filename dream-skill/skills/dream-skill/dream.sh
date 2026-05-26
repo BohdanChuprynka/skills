@@ -201,14 +201,17 @@ mkdir -p "$OUTPUT_DIR"
 TMP="$(mktemp -d)"
 
 # Custom EXIT handler: on non-zero exit, preserve worker error logs.
+# Robust to early exits where DATE/OUTPUT_DIR may not yet be set.
 on_exit() {
   local rc=$?
-  if [[ "$rc" != "0" && -d "$TMP/responses" ]]; then
-    mkdir -p "$OUTPUT_DIR/dream-errors-$DATE" 2>/dev/null || true
-    cp "$TMP/responses/"*.log "$OUTPUT_DIR/dream-errors-$DATE/" 2>/dev/null || true
+  local out_dir="${OUTPUT_DIR:-}"
+  local date_stamp="${DATE:-$(date -u '+%Y-%m-%d')}"
+  if [[ "$rc" != "0" && -d "${TMP:-}/responses" && -n "$out_dir" ]]; then
+    mkdir -p "$out_dir/dream-errors-$date_stamp" 2>/dev/null || true
+    cp "$TMP/responses/"*.log "$out_dir/dream-errors-$date_stamp/" 2>/dev/null || true
   fi
-  rm -rf "$TMP"
-  exit $rc
+  rm -rf "${TMP:-/nonexistent-fallback-no-rm}"
+  exit "$rc"
 }
 trap on_exit EXIT
 
