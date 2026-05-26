@@ -113,19 +113,62 @@ def count_tokens_for_block(block):
 
 
 def test_apply_bounds_enforces_min_chunks(fixtures_dir: Path):
+    """When count is below min, the LARGEST (by tokens) chunk gets split."""
     content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
     blocks = chunker.parse_sessions(content)
     chunks = chunker.greedy_bucket(blocks, target_tokens=10_000_000)  # 1 chunk
+    pre_tokens = sum(count_tokens_for_block(b) for b in chunks[0])
+
     bounded = chunker.apply_bounds(chunks, min_chunks=2, max_chunks=8, hard_max=10_000_000)
-    assert len(bounded) == 2  # split the single chunk in two
+    assert len(bounded) == 2
+
+    # The single original chunk was split — total tokens preserved across the two new chunks
+    post_tokens = sum(count_tokens_for_block(b) for c in bounded for b in c)
+    assert post_tokens == pre_tokens
+
+    # Sanity: each output chunk has at least one block
+    assert all(len(c) >= 1 for c in bounded)
 
 
 def test_apply_bounds_enforces_max_chunks(fixtures_dir: Path):
+    """When count is above max, smallest adjacent pair gets merged."""
     content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
     blocks = chunker.parse_sessions(content)
     chunks = chunker.greedy_bucket(blocks, target_tokens=1)  # one block per chunk = 8 chunks
+    pre_count = len(chunks)
+    pre_token_total = sum(count_tokens_for_block(b) for c in chunks for b in c)
+
     bounded = chunker.apply_bounds(chunks, min_chunks=2, max_chunks=3, hard_max=10_000_000)
-    assert len(bounded) == 3  # merged down to 3
+    assert len(bounded) == 3
+    assert pre_count > 3  # sanity: we actually merged
+
+    # Total tokens preserved across merge
+    post_token_total = sum(count_tokens_for_block(b) for c in bounded for b in c)
+    assert post_token_total == pre_token_total
+
+    # All blocks accounted for
+    assert sum(len(c) for c in bounded) == sum(len(c) for c in chunks)
+
+
+def test_apply_bounds_splits_the_largest_chunk_when_below_min(fixtures_dir: Path):
+    """Verify the split-largest selection: a 3-chunk input where chunk[1] is the largest
+    by tokens should see chunk[1] split (not chunk[0] or chunk[2])."""
+    content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
+    blocks = chunker.parse_sessions(content)
+
+    # Hand-craft 3 chunks where the middle one is largest:
+    # take chunks of sizes 1, 5, 2 blocks (middle has most blocks => most tokens given roughly equal block sizes)
+    assert len(blocks) >= 8  # sanity on fixture
+    handcrafted = [blocks[0:1], blocks[1:6], blocks[6:8]]
+
+    bounded = chunker.apply_bounds(handcrafted, min_chunks=4, max_chunks=8, hard_max=10_000_000)
+    assert len(bounded) == 4
+
+    # The first and last chunks should be unchanged (length 1 and 2 respectively).
+    # The middle chunk (originally 5 blocks) should have been split.
+    assert len(bounded[0]) == 1
+    # bounded[-1] is the trailing original chunk
+    assert bounded[-1] == handcrafted[-1]
 
 
 def test_apply_bounds_preserves_chronological_order(fixtures_dir: Path):
@@ -152,3 +195,13 @@ def test_apply_bounds_raises_when_any_chunk_exceeds_hard_max(fixtures_dir: Path)
     chunks = chunker.greedy_bucket(blocks, target_tokens=10_000_000)
     with pytest.raises(ValueError, match=r"hard-max"):
         chunker.apply_bounds(chunks, min_chunks=1, max_chunks=1, hard_max=5)
+
+
+def test_apply_bounds_rejects_invalid_bounds(fixtures_dir: Path):
+    content = (fixtures_dir / "sessions-medium.md").read_text(encoding="utf-8")
+    blocks = chunker.parse_sessions(content)
+    chunks = chunker.greedy_bucket(blocks, target_tokens=50)
+    with pytest.raises(ValueError, match=r"min_chunks and max_chunks"):
+        chunker.apply_bounds(chunks, min_chunks=0, max_chunks=8, hard_max=10_000_000)
+    with pytest.raises(ValueError, match=r"max_chunks .+ must be >= min_chunks"):
+        chunker.apply_bounds(chunks, min_chunks=5, max_chunks=2, hard_max=10_000_000)

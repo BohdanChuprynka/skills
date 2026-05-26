@@ -127,6 +127,11 @@ def apply_bounds(
       reaches max.
     - After bounds, raise ValueError if any chunk exceeds hard_max tokens.
     """
+    if min_chunks < 1 or max_chunks < 1:
+        raise ValueError(f"min_chunks and max_chunks must be >= 1, got {min_chunks}/{max_chunks}")
+    if max_chunks < min_chunks:
+        raise ValueError(f"max_chunks ({max_chunks}) must be >= min_chunks ({min_chunks})")
+
     chunks = [list(c) for c in chunks]  # defensive copy
 
     # Split until min
