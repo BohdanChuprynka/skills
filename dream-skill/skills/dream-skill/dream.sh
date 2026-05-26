@@ -762,6 +762,15 @@ LAST_RUN_TMP="$(mktemp "${LAST_RUN_FILE}.XXXXXX")"
 date -u '+%Y-%m-%dT%H:%M:%SZ' > "$LAST_RUN_TMP"
 mv "$LAST_RUN_TMP" "$LAST_RUN_FILE"
 
+# Preserve extracts when chunked
+if [[ "$ROUTE" == "chunked" ]]; then
+  EXTRACTS_DIR="$OUTPUT_DIR/dream-extracts-$DATE"
+  mkdir -p "$EXTRACTS_DIR"
+  cp "$TMP/extracts/"*.md "$EXTRACTS_DIR/" 2>/dev/null || true
+  cp "$TMP/chunks/chunks-meta.json" "$EXTRACTS_DIR/" 2>/dev/null || true
+  echo "      extracts preserved at $EXTRACTS_DIR"
+fi
+
 echo ""
 echo "==============================================="
 echo "  dream cycle complete."
