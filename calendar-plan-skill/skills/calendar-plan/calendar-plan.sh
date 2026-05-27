@@ -135,10 +135,15 @@ if [[ ! -f "$PROMPT_FILE" ]]; then
   fi
 fi
 
-PLANNING_PREFS="$CONFIG_DIR/planning-preferences.md"
+PLANNING_PREFS="${PLANNING_PREFS:-$HOME/.config/calendar-plan/preferences.md}"
 if [[ ! -f "$PLANNING_PREFS" ]]; then
-  echo "FATAL: $PLANNING_PREFS missing. Run setup.sh first." >&2
-  exit 1
+  # legacy fallback for installs that still keep prefs inside the skill repo
+  if [[ -f "$CONFIG_DIR/planning-preferences.md" ]]; then
+    PLANNING_PREFS="$CONFIG_DIR/planning-preferences.md"
+  else
+    echo "FATAL: $PLANNING_PREFS missing. Copy config/settings.example.conf, run setup.sh, or set PLANNING_PREFS=/path/to/preferences.md." >&2
+    exit 1
+  fi
 fi
 
 TMP_PROMPT="$(mktemp -t calendar-plan-prompt.XXXXXX.md)"

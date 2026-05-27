@@ -52,15 +52,19 @@ else
   report FAIL "settings.conf"        "missing — run setup.sh"
 fi
 
-# 5. planning-preferences.md
-if [[ -f "$CONFIG_DIR/planning-preferences.md" ]]; then
-  if grep -q "<REPLACE_WITH" "$CONFIG_DIR/planning-preferences.md" 2>/dev/null; then
-    report FAIL "planning-preferences.md" "still contains <REPLACE_WITH...> placeholders"
+# 5. preferences.md (personal config, lives outside skill repo by default)
+PREFS_PATH="${PLANNING_PREFS:-$HOME/.config/calendar-plan/preferences.md}"
+if [[ ! -f "$PREFS_PATH" ]] && [[ -f "$CONFIG_DIR/planning-preferences.md" ]]; then
+  PREFS_PATH="$CONFIG_DIR/planning-preferences.md"
+fi
+if [[ -f "$PREFS_PATH" ]]; then
+  if grep -q "<REPLACE_WITH" "$PREFS_PATH" 2>/dev/null; then
+    report FAIL "preferences.md" "$PREFS_PATH still contains <REPLACE_WITH...> placeholders"
   else
-    report PASS "planning-preferences.md" "exists, no placeholders left"
+    report PASS "preferences.md" "$PREFS_PATH ok"
   fi
 else
-  report FAIL "planning-preferences.md" "missing — run setup.sh"
+  report FAIL "preferences.md" "missing — expected at \$HOME/.config/calendar-plan/preferences.md (or set PLANNING_PREFS env var)"
 fi
 
 # 6. mcp-config.json
