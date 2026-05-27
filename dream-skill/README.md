@@ -178,6 +178,26 @@ This dir survives plugin updates and reinstalls.
 - The only network call is the spawned `claude -p` — identical to any normal Claude Code session.
 - No telemetry. No third-party services. Vault paths never leave your machine.
 
+## FAQ
+
+**Q: I closed the same chat in two windows (used `/resume`). Will my vault get polluted?**
+No. Three dedupe layers protect you: per-transcript dispatch lock, vault per-line idempotency (`grep -Fxq` exact match), and queue `(title, target)` dedupe. Each unique fact lands exactly once. Worst case: 2x cost on a wasted second headless run that produces zero vault changes.
+
+**Q: How much does each session close cost?**
+~$0.05–$0.30 per dispatch, depending on conversation length and model. Sessions with <10 user messages skip dispatch entirely (override via `DREAM_THRESHOLD`).
+
+**Q: Will it fire if I just open Claude and close without typing anything?**
+No. Threshold gate skips silently when user-message count is below `DREAM_THRESHOLD` (default 10).
+
+**Q: What if Claude Code crashes or I force-quit?**
+SessionEnd hook only fires on `/exit`, ⌘W, or normal quit — not on crash. The dropped session's facts are missed until you reopen and run `/dream-skill` manually (which sweeps the queue) or `/sync-wiki` (if you still have that skill).
+
+**Q: How do I disable temporarily?**
+Set `DREAM_THRESHOLD=99999` in your shell env, or comment out the SessionEnd entry in `~/.claude/settings.json` (or remove the plugin).
+
+**Q: Where do auto-writes go? How do I roll them back?**
+Confident facts append to your Obsidian vault pages (add-only). Every write is logged in `~/.claude/dream-skill/undo/<date>.jsonl`. Roll back a full day with `bash scripts/apply-undo.sh --date YYYY-MM-DD` — originals preserved.
+
 ## Roadmap
 
 - **v0.2** (current) — per-conversation auto-on-close, manual queue review
