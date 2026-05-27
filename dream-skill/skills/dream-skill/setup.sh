@@ -204,7 +204,7 @@ say "Choose any combination — or none. Skip any you don't want."
 MCP_SERVERS_JSON=""
 
 ask_mcp() {
-  local label="$1" prompt_text="$2"
+  local label="$1" prompt_text="${2:-}"
   read_yn "  add $label MCP?" "n"
   [[ "$REPLY" == "y" ]]
 }
