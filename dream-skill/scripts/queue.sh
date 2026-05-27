@@ -134,12 +134,79 @@ cmd_list() {
   cat "$QUEUE_FILE"
 }
 
+cmd_remove() {
+  local title="" target=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --title) title="$2"; shift 2 ;;
+      --target) target="$2"; shift 2 ;;
+      *) die "unknown arg: $1" ;;
+    esac
+  done
+
+  [ -n "$title" ]  || die "missing --title"
+  [ -n "$target" ] || die "missing --target"
+
+  ensure_queue_file
+  [ -s "$QUEUE_FILE" ] || return 0  # empty queue, nothing to remove
+
+  # Block-scan: read entry blocks (### TITLE ... --- terminator). Drop the
+  # block iff BOTH the title line AND the target line match. Keep all others.
+  awk -v target_title="### $title" -v target_target="**Target:** $target" '
+    function flush_block(   should_keep) {
+      if (in_block) {
+        should_keep = !(seen_title && seen_target)
+        if (should_keep) printf "%s", buffer
+        else removed_count++
+        buffer = ""
+        in_block = 0
+        seen_title = 0
+        seen_target = 0
+      }
+    }
+    /^### / {
+      flush_block()
+      in_block = 1
+      buffer = $0 "\n"
+      if ($0 == target_title) seen_title = 1
+      next
+    }
+    in_block {
+      buffer = buffer $0 "\n"
+      if ($0 == target_target) seen_target = 1
+      if ($0 == "---") {
+        flush_block()
+      }
+      next
+    }
+    { print }
+    END {
+      flush_block()
+      if (removed_count == 0) exit 2  # signal: no match
+    }
+  ' "$QUEUE_FILE" > "$QUEUE_FILE.tmp"
+  local rc=$?
+
+  if [ $rc -eq 0 ]; then
+    mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+    return 0
+  elif [ $rc -eq 2 ]; then
+    rm -f "$QUEUE_FILE.tmp"
+    echo "queue: no entry matched title='$title' target='$target'" >&2
+    return 1
+  else
+    rm -f "$QUEUE_FILE.tmp"
+    die "remove failed (awk rc=$rc)"
+  fi
+}
+
 # --- dispatch -----------------------------------------------------------
-[ $# -ge 1 ] || die "usage: queue.sh <append|list> [args]"
+[ $# -ge 1 ] || die "usage: queue.sh <append|list|remove> [args]"
 
 SUBCMD="$1"; shift
 case "$SUBCMD" in
   append) cmd_append "$@" ;;
   list)   cmd_list "$@" ;;
+  remove) cmd_remove "$@" ;;
   *) die "unknown subcommand: $SUBCMD" ;;
 esac
