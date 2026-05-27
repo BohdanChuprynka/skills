@@ -1,7 +1,7 @@
 {
   "name": "dream-skill",
-  "description": "Reconcile your Obsidian wiki against local Claude Code and Codex conversation signals — flag stale, missing, and contradicted facts for review.",
-  "version": "0.1.0",
+  "description": "Auto-record your Claude Code conversations to your Obsidian vault. Confident facts written on session close; uncertain or destructive edits queued for manual review.",
+  "version": "0.2.0",
   "author": {
     "name": "Bohdan Chuprynka",
     "url": "https://github.com/BohdanChuprynka"
@@ -9,15 +9,17 @@
   "homepage": "https://github.com/BohdanChuprynka/dream-skill",
   "repository": "https://github.com/BohdanChuprynka/dream-skill",
   "license": "MIT",
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills",
   "keywords": [
     "claude-code",
-    "codex",
     "skill",
     "obsidian",
     "knowledge-base",
     "personal-wiki",
     "llm",
     "memory",
-    "mcp"
+    "auto-capture",
+    "session-end"
   ]
 }

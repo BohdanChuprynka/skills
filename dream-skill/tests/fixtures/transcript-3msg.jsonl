@@ -1,0 +1,6 @@
+{"role":"user","content":"first message"}
+{"role":"assistant","content":"reply 1"}
+{"role":"user","content":"second message"}
+{"role":"assistant","content":"reply 2"}
+{"role":"user","content":"third message"}
+{"role":"assistant","content":"reply 3"}
