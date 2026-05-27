@@ -184,7 +184,7 @@ This dir survives plugin updates and reinstalls.
 No. Three dedupe layers protect you: per-transcript dispatch lock, vault per-line idempotency (`grep -Fxq` exact match), and queue `(title, target)` dedupe. Each unique fact lands exactly once. Worst case: 2x cost on a wasted second headless run that produces zero vault changes.
 
 **Q: How much does each session close cost?**
-~$0.05–$0.30 per dispatch, depending on conversation length and model. Sessions with <5 user messages skip dispatch entirely (override via `DREAM_THRESHOLD`).
+On a Claude Code subscription (Pro / Max / Team) it's covered — no extra bill. Each dispatch just consumes a small slice of your normal session quota. Approximate per-dispatch usage with the default Haiku 4.5 model: ~30–80K input tokens (preprocessed transcript + vault `CLAUDE.md` + `wiki/index.md`) + ~1–5K output tokens. Translates to roughly $0.01–$0.10 on API billing, or ~5–15% of a single Pro 5-hour window per dispatch. Sessions with <5 user messages skip entirely (override via `DREAM_THRESHOLD`). Switch model with `DREAM_MODEL=claude-sonnet-4-6` for higher-quality classification at ~5x the spend.
 
 **Q: Will it fire if I just open Claude and close without typing anything?**
 No. Threshold gate skips silently when user-message count is below `DREAM_THRESHOLD` (default 5).
