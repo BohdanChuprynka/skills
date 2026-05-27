@@ -1,84 +1,124 @@
-# dream-skill
+<div align="center">
 
-> Auto-record your Claude Code conversations to your Obsidian vault.
-> Confident facts written automatically on session close;
-> uncertain or destructive edits queued for your manual review.
+<h1>dream-skill</h1>
 
-## Why
+<p><strong>Your Obsidian vault auto-syncs to every Claude Code session you close. No manual /sync, no skipped updates, no stale persona.</strong></p>
 
-Your Obsidian persona vault — who you are, what you're working on, what
-you've decided — goes stale fast. Manually running `/sync-wiki` after
-every conversation is friction. Skipping it for a week means future
-Claude sessions don't know what's current about you, so they re-ask
-context you already gave.
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/BohdanChuprynka/skills?style=flat" alt="License"></a>
+  <a href="https://github.com/BohdanChuprynka/skills/stargazers"><img src="https://img.shields.io/github/stars/BohdanChuprynka/skills?style=flat&color=yellow" alt="Stars"></a>
+  <img src="https://img.shields.io/badge/version-0.2.0-blue?style=flat" alt="Version 0.2.0">
+  <img src="https://img.shields.io/badge/claude--code-plugin-orange?style=flat" alt="Claude Code plugin">
+</p>
 
-dream-skill fixes this by **firing automatically** every time you close
-Claude Code. A SessionEnd hook (installed automatically with the plugin)
-runs a script that:
+<p>
+  <a href="#install">Install</a> &middot;
+  <a href="#how-it-works">How it works</a> &middot;
+  <a href="#modes">Modes</a> &middot;
+  <a href="#configuration">Config</a> &middot;
+  <a href="#safety">Safety</a> &middot;
+  <a href="#roadmap">Roadmap</a>
+</p>
 
-1. Checks if the conversation was long enough to matter (≥10 user messages by default)
-2. Spawns a headless `claude -p` in the background to extract info-gain
-3. Writes confident facts directly to your vault (add-only)
-4. Queues uncertain, destructive, or brainstormed facts for your manual review
+</div>
 
-You never type `/sync-wiki` again. Your vault stays current. You review
-the queue when you want, fact-by-fact.
+---
+
+## The problem
+
+You close Claude Code. The conversation had decisions, preferences, new project context — gone unless you remembered to `/sync-wiki` first. Skip it for a week and future Claude sessions re-ask things you already told them.
+
+## What dream-skill does
+
+Every time you close a Claude Code session with **≥10 user messages**, a SessionEnd hook spawns a background `claude -p` invocation that:
+
+1. Reads the just-closed conversation transcript
+2. Strips noise (tool calls, MCP outputs, system reminders)
+3. Classifies each candidate fact by **info gain**
+4. **Writes confident facts directly** to your Obsidian vault (add-only, with index updates and a per-day undo log)
+5. **Queues** uncertain, destructive, or brainstormed facts for your manual review
+
+You never type `/sync-wiki` again. Your vault stays current. You review the queue when you want, fact-by-fact.
 
 ## How it works
 
 ```
-[You close Claude Code window]
-   │
-   ▼
-[SessionEnd hook fires]   (auto-installed; no settings.json edits)
-   │
-   ▼
-[scripts/trigger.sh]
-   ├── transcript < 10 user messages → SKIP silently
-   └── ≥10 user messages → spawn background `claude -p "/dream-skill --auto <transcript>"`
-                              │
-                              ▼
-                    [Headless Claude runs SKILL.md auto mode]
-                              │
-                              ▼
-              [scripts/preprocess.sh]  strip tool calls, MCP raw output,
-                                       system reminders, hook content
-                              │
-                              ▼
-              [LLM classifies each candidate fact]
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-   HIGH CONFIDENCE   DESTRUCTIVE/UNCERTAIN   GENERAL Q&A
-   + additive       /BRAINSTORMED            (drop unless
-        │                  │                  signal-bearing)
-        ▼                  ▼
-   [vault-writer.sh]   [queue.sh]
-   add-only append     append to bucket
-   + idempotent index  in pending.md
-   + undo log entry
-
-[Later, you run /dream-skill manually]
-   │
-   ▼
-   walk queue fact-by-fact:
-   [a]pprove / [e]dit / [s]kip / [d]iscard / [q]uit
+┌────────────────────────────────────────────────────────────────────┐
+│  You close Claude Code (⌘W, /exit, quit)                           │
+└────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  SessionEnd hook fires (auto-installed with the plugin)            │
+│  → scripts/trigger.sh                                              │
+│     - reads transcript path from stdin JSON                        │
+│     - counts user messages                                         │
+│     - <10 → SKIP silently                                          │
+│     - ≥10 → take dedupe lock, export DREAM_* env vars, spawn:      │
+│       nohup claude -p "/dream-skill --auto <transcript>" &         │
+└────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  Headless Claude runs SKILL.md auto-mode                           │
+│     - scripts/preprocess.sh strips noise                           │
+│     - reads $DREAM_CONFIG, vault CLAUDE.md, wiki/index.md          │
+│     - classifies each fact into one of 5 buckets                   │
+└────────────────────────────────────────────────────────────────────┘
+                                  │
+        ┌─────────────────────────┼─────────────────────────┐
+        ▼                         ▼                         ▼
+  HIGH CONFIDENCE          DESTRUCTIVE                  GENERAL Q&A
+  + additive               UNCERTAIN                    or pure code
+        │                  BRAINSTORMED                   │
+        ▼                         │                       ▼
+  vault-writer.sh                 ▼                   DROP (logged)
+  - add-only append         queue.sh
+  - idempotent index        - append by bucket
+  - undo log entry          - dedupe by title+target
+        │                         │
+        ▼                         ▼
+  Obsidian vault            ~/.claude/dream-skill/
+                            queue/pending.md
+                                  │
+                                  ▼
+                  Later: /dream-skill (manual)
+                  walks queue → [a]pprove / [e]dit / [s]kip / [d]iscard
 ```
+
+Three guarantees:
+- **Add-only auto writes.** Auto mode never overwrites vault content. Destructive edits go to the queue for your review.
+- **Per-day undo log.** `bash apply-undo.sh --date <YYYY-MM-DD>` reverses every auto-write from that day.
+- **Fire-and-forget.** The hook never blocks shutdown. Broken installs log to `error.log` and exit silently.
 
 ## Install
 
 ```bash
 /plugin marketplace add BohdanChuprynka/skills
-/plugin install dream-skill@dream-skill-marketplace
+/plugin install dream-skill@skills
 ```
 
-The plugin's `hooks/hooks.json` is auto-merged on install. No edits to
-`~/.claude/settings.json` required.
+That's it. The plugin's `hooks/hooks.json` is auto-merged on install — no `~/.claude/settings.json` edits required.
 
-On first run (manual mode), dream-skill prompts you for your vault root(s)
-and writes `~/.claude/dream-skill/config.toml`. In auto mode, if the
-config is missing, it logs an error and exits gracefully — never blocks
-your session close.
+**First run:** create `~/.claude/dream-skill/config.toml` pointing at your vault(s). Minimal example:
+
+```toml
+[vaults.me]
+root = "/path/to/your/Obsidian/vault"
+description = "Identity, projects, decisions"
+```
+
+Without a config, auto mode logs an error to `~/.claude/dream-skill/error.log` and exits gracefully — never blocks your session close.
+
+## Modes
+
+| Invocation | What it does |
+|---|---|
+| *(automatic — on session close)* | SessionEnd hook fires trigger.sh → headless `--auto` capture |
+| `/dream-skill` | Walk the queue fact-by-fact: `[a]pprove / [e]dit / [s]kip / [d]iscard / [q]uit` |
+| `/dream-skill --auto <transcript>` | Used by the hook. Don't call directly. |
+| `/dream-skill --reconcile` | v0.3 stub. Full-vault audit (planned). |
+| `/dream-skill --help` | Print modes, env vars, state paths. Exits without writing. |
 
 ## Configuration
 
@@ -86,95 +126,69 @@ your session close.
 
 ```toml
 [vaults.me]
-root = "/path/to/your/Obsidian/vault"
-description = "Identity, skills, experience, projects"
+root = "/path/to/me"
+description = "Identity, projects, career"
 
 [vaults.projects]
-root = "/path/to/your/projects/vault"
-description = "Repos, architecture, goals, gotchas"
+root = "/path/to/projects"
+description = "Repos, architecture, gotchas"
 ```
 
-Each vault root should contain a `CLAUDE.md` (the vault's schema/conventions
-that Claude reads) and a `wiki/index.md` (the catalog of pages). dream-skill
-auto-updates `wiki/index.md` with links to new pages (idempotent — won't
-re-link or clobber existing descriptions).
+Each vault root should have a `CLAUDE.md` (the schema Claude reads) and a `wiki/index.md` (the catalog of pages). dream-skill auto-updates the index, idempotently.
 
-Environment overrides:
+**Env overrides** (rarely needed):
 
 | Var | Default | Purpose |
 |---|---|---|
 | `DREAM_THRESHOLD` | `10` | Min user messages to trigger dispatch |
-| `DREAM_QUEUE_FILE` | `~/.claude/dream-skill/queue/pending.md` | Queue file location |
-| `DREAM_LOG` | `~/.claude/dream-skill/trigger.log` | Trigger decision log |
-
-## Usage
-
-### Auto (the default — no command needed)
-
-Just close Claude Code. The hook fires automatically.
-
-### Manual review of queued items
-
-```
-/dream-skill
-```
-
-Walks `pending.md` fact-by-fact. For each entry: `[a]pprove`, `[e]dit`,
-`[s]kip`, `[d]iscard`, `[q]uit`.
-
-### Undo auto-mode writes
-
-```bash
-~/.claude/plugins/.../dream-skill/scripts/apply-undo.sh --date 2026-05-27
-```
-
-Reverses every vault-writer write from that day. Originals preserved.
-Processed log moved to `<log>.applied-<timestamp>` so it can't double-apply.
+| `DREAM_LOCK_TTL_SEC` | `600` | Dedupe-lock TTL (suppress duplicate dispatch on multi-window close) |
+| `DREAM_HOME` | `~/.claude/dream-skill` | State root |
+| `DREAM_CONFIG` | `$DREAM_HOME/config.toml` | Vault config |
+| `DREAM_QUEUE_FILE` | `$DREAM_HOME/queue/pending.md` | Queue file |
 
 ## State layout
 
-All dream-skill runtime state lives under `~/.claude/dream-skill/`:
+All dream-skill state lives under `~/.claude/dream-skill/`:
 
 ```
 ~/.claude/dream-skill/
-├── trigger.log               # SessionEnd dispatch decisions
-├── headless.log              # stdout/stderr from spawned claude -p
-├── log/<YYYY-MM-DD>.md       # human-readable auto-write log per day
-├── undo/<YYYY-MM-DD>.jsonl   # rollback entries
-├── queue/pending.md          # deferred-decision facts
-└── config.toml               # vault roots
+├── config.toml              # vault roots (you create this)
+├── trigger.log              # SessionEnd dispatch decisions
+├── headless.log             # stdout/stderr from spawned claude -p
+├── error.log                # broken-install diagnostics
+├── log/<date>.md            # per-day human-readable activity log
+├── undo/<date>.jsonl        # per-write rollback entries
+└── queue/pending.md         # deferred-decision facts
 ```
 
 This dir survives plugin updates and reinstalls.
 
-## Privacy
-
-- Nothing leaves your machine except the headless `claude -p` invocation
-  (same network behavior as any normal Claude Code session)
-- Transcripts read directly from `~/.claude/projects/<slug>/*.jsonl`
-  that Claude Code already wrote
-- No telemetry, no third-party services
-- Vault paths are local-only; never sent anywhere
-
 ## Safety
 
-- **Add-only auto-writes:** auto mode never overwrites or deletes vault content.
-  Destructive edits go to the queue for your manual review.
-- **Undo log:** every auto-write recorded; full per-day rollback available.
-- **Threshold gate:** trivial conversations (<10 user messages) skipped.
-- **Fire-and-forget:** hook never blocks your session close. Errors logged silently.
+- **Add-only auto writes** to vault pages (auto mode never deletes or overwrites)
+- **Per-day undo log** — full rollback with `apply-undo.sh --date <YYYY-MM-DD>`
+- **Dedupe lock** — second close of the same conversation within 10 min is skipped
+- **Threshold gate** — sessions with <10 user messages skip dispatch entirely
+- **Fire-and-forget hook** — never blocks shutdown; errors stay in `error.log`
+- **Reason filter** — `clear` and `prompt_input_exit` skip dispatch (you're not actually done)
+
+## Privacy
+
+- All processing local. Transcripts read directly from `~/.claude/projects/<slug>/*.jsonl` that Claude Code already wrote.
+- The only network call is the spawned `claude -p` — identical to any normal Claude Code session.
+- No telemetry. No third-party services. Vault paths never leave your machine.
 
 ## Roadmap
 
-- **v0.2.0** (this release): per-conversation auto-on-close. Manual queue review.
-- **v0.3.0** (planned): `/dream-skill --reconcile` — full-vault audit against
-  accumulated session data; multi-source signals (Notion, Calendar, Gmail).
+- **v0.2** (current) — per-conversation auto-on-close, manual queue review
+- **v0.2.1** (next) — first-run setup wizard, cost guard via token counter, JSON-shaped headless log
+- **v0.3** — `/dream-skill --reconcile` for periodic full-vault audit against accumulated session data
 
-## Cross-references
+## Docs
 
-- `HARVEST.md` — patterns ported from v0.1
-- `PLAN.md` — v0.2 build plan
-- `skills/dream-skill/SKILL.md` — runtime instructions Claude reads
+- [SKILL.md](skills/dream-skill/SKILL.md) — runtime instructions Claude reads
+- [PLAN.md](PLAN.md) — original v0.2 build plan
+- [HARVEST.md](HARVEST.md) — patterns ported from v0.1
 
 ## License
 

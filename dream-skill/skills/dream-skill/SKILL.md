@@ -6,13 +6,52 @@ version: 0.2.0
 
 # dream-skill
 
-Persona-model sync for an Obsidian vault. Three modes:
+Persona-model sync for an Obsidian vault. Four modes:
 
 | Invocation | Mode | Trigger |
 |---|---|---|
 | `/dream-skill --auto <transcript.jsonl>` | **Auto (headless)** | SessionEnd hook fires this on close. No user interaction. |
 | `/dream-skill` (no args) | **Manual review** | User runs this anytime to walk the queue. |
 | `/dream-skill --reconcile` | **Reconcile (stub)** | Reserved for v0.3 full-vault audit. Prints "not yet implemented" and exits. |
+| `/dream-skill --help` | **Help** | Prints the mode table, env vars, state paths, and exits. Never writes anything. |
+
+### `--help` output
+
+When invoked with `--help` (or `-h`), print this verbatim and exit 0:
+
+```
+dream-skill v0.2 — auto-record Claude Code conversations to an Obsidian vault.
+
+USAGE
+  /dream-skill                          Manual queue review (interactive)
+  /dream-skill --auto <transcript.jsonl> Headless capture (used by SessionEnd hook)
+  /dream-skill --reconcile               v0.3 stub — prints not-implemented
+  /dream-skill --help                    Show this help
+
+STATE
+  ~/.claude/dream-skill/config.toml       Vault roots
+  ~/.claude/dream-skill/queue/pending.md  Deferred-decision facts (review with no-arg call)
+  ~/.claude/dream-skill/log/<date>.md     Daily human-readable activity log
+  ~/.claude/dream-skill/undo/<date>.jsonl Per-write rollback entries
+  ~/.claude/dream-skill/trigger.log       SessionEnd dispatch decisions
+  ~/.claude/dream-skill/error.log         Append on broken-install failures
+
+ENV VARS (set by trigger.sh before headless run)
+  DREAM_SCRIPTS_DIR   Resolved scripts/ dir (vault-writer.sh, queue.sh, ...)
+  DREAM_HOME          Defaults to ~/.claude/dream-skill
+  DREAM_CONFIG        Path to config.toml
+  DREAM_QUEUE_FILE    Path to queue/pending.md
+  DREAM_DAILY_LOG     Path to today's log file
+  DREAM_UNDO_LOG      Path to today's undo file
+  DREAM_ERROR_LOG     Path to error log
+  DREAM_TRANSCRIPT    Absolute path to the just-closed transcript
+
+ROLLBACK
+  bash $DREAM_SCRIPTS_DIR/apply-undo.sh --date <YYYY-MM-DD>
+
+DOCS
+  README.md, HARVEST.md, PLAN.md in the plugin root.
+```
 
 ---
 
