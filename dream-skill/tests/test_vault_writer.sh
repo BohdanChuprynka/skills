@@ -83,5 +83,30 @@ INDEX_LINES_AFTER=$(wc -l < "$VAULT/wiki/index.md")
 [ "$INDEX_LINES_BEFORE" -eq "$INDEX_LINES_AFTER" ] || fail "index double-linked existing page"
 echo "PASS: idempotent index (existing link)"
 
+# Test 7: concurrent writes — 5 parallel appends to same page should all land
+# (mkdir-lock serializes them; none get lost to read-modify-write race)
+TEST_VAULT=$(mktemp -d "/tmp/dream-vault-concurrent-XXXXXX")
+mkdir -p "$TEST_VAULT/wiki"
+cat > "$TEST_VAULT/wiki/concurrent.md" <<'EOF'
+# Concurrent
+
+## Notes
+EOF
+
+export DREAM_VAULT_LOCK_DIR=$(mktemp -d "/tmp/dream-vault-locks-test-XXXXXX")
+
+for i in 1 2 3 4 5; do
+  "$WRITER" --vault "$TEST_VAULT" --page "wiki/concurrent.md" --section "Notes" \
+    --content "parallel-line-$i" --undo-log "$TEST_VAULT/undo.jsonl" &
+done
+wait
+
+LINES_LANDED=$(grep -c "^- parallel-line-" "$TEST_VAULT/wiki/concurrent.md" 2>/dev/null || echo 0)
+[ "$LINES_LANDED" -eq 5 ] || fail "concurrent writes lost lines (landed=$LINES_LANDED, expected 5)"
+
+rm -rf "$TEST_VAULT" "$DREAM_VAULT_LOCK_DIR"
+unset DREAM_VAULT_LOCK_DIR
+echo "PASS: 5 parallel writes serialized — no lost-update race"
+
 echo
 echo "All vault-writer.sh tests passed."

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test: trigger.sh threshold-gated dispatch
+# Test: trigger.sh threshold gating + dedupe lock + stdin/env paths
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -11,49 +11,76 @@ TRIGGER="$SCRIPT_DIR/../scripts/trigger.sh"
 # Isolate test state
 export DREAM_DISPATCH_STUB=1
 export DREAM_LOG=/tmp/dream-test-trigger-$$.log
-trap 'rm -f "$DREAM_LOG"' EXIT
-rm -f "$DREAM_LOG"
+export DREAM_LOCK_DIR=/tmp/dream-test-locks-$$
+trap 'rm -rf "$DREAM_LOG" "$DREAM_LOCK_DIR"' EXIT
+rm -rf "$DREAM_LOG" "$DREAM_LOCK_DIR"
 
-fail() { echo "FAIL: $*"; exit 1; }
+fail() { echo "FAIL: $*"; echo "--- log was ---"; cat "$DREAM_LOG" 2>/dev/null; exit 1; }
+reset_log() { rm -f "$DREAM_LOG"; rm -rf "$DREAM_LOCK_DIR"; mkdir -p "$DREAM_LOCK_DIR"; }
 
-# Case 1: 3-message fixture (below threshold) → SKIP
+# === Case 1: 3-msg fixture → below threshold SKIP ===
+reset_log
 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-3msg.jsonl" "$TRIGGER"
 grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "3-msg fixture triggered DISPATCH"
-grep -q "SKIP" "$DREAM_LOG" 2>/dev/null || fail "3-msg fixture did not log SKIP"
-echo "PASS: 3-message fixture skipped dispatch"
+grep -q "below-threshold" "$DREAM_LOG" 2>/dev/null || fail "3-msg fixture did not log below-threshold"
+echo "PASS: 3-message fixture skipped (below-threshold)"
 
-# Reset log between cases
-rm -f "$DREAM_LOG"
-
-# Case 2: 15-message fixture (above threshold) → DISPATCH
+# === Case 2: 15-msg fixture → DISPATCH ===
+reset_log
 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
-grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "15-msg fixture did not log DISPATCH"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "15-msg fixture did not dispatch"
 echo "PASS: 15-message fixture dispatched"
 
-# Reset log
-rm -f "$DREAM_LOG"
+# === Case 3: empty path → SKIP no-path-provided ===
+reset_log
+CLAUDE_TRANSCRIPT_PATH="" "$TRIGGER" < /dev/null
+grep -q "no-path-provided" "$DREAM_LOG" 2>/dev/null || fail "empty path did not log no-path-provided"
+echo "PASS: empty path → no-path-provided"
 
-# Case 3: missing transcript path → SKIP (no error)
-CLAUDE_TRANSCRIPT_PATH="" "$TRIGGER"
-grep -q "no-transcript" "$DREAM_LOG" 2>/dev/null || fail "empty path did not log no-transcript skip"
-echo "PASS: empty transcript path handled gracefully"
+# === Case 4: nonexistent file → SKIP file-not-found (distinct from no-path) ===
+reset_log
+CLAUDE_TRANSCRIPT_PATH="/tmp/nonexistent-$$.jsonl" "$TRIGGER"
+grep -q "file-not-found" "$DREAM_LOG" 2>/dev/null || fail "nonexistent file did not log file-not-found"
+echo "PASS: nonexistent file → file-not-found"
 
-# Reset log
-rm -f "$DREAM_LOG"
-
-# Case 4: nonexistent transcript path → SKIP
-CLAUDE_TRANSCRIPT_PATH="/tmp/nonexistent-transcript-$$.jsonl" "$TRIGGER"
-grep -q "no-transcript" "$DREAM_LOG" 2>/dev/null || fail "nonexistent path did not log no-transcript skip"
-echo "PASS: nonexistent transcript path handled gracefully"
-
-# Reset log
-rm -f "$DREAM_LOG"
-
-# Case 5: transcript path supplied via stdin JSON (Claude Code's actual mechanism)
+# === Case 5: stdin JSON path triggers dispatch ===
+reset_log
 echo "{\"session_id\":\"test\",\"transcript_path\":\"$FIXTURE_DIR/transcript-15msg.jsonl\",\"cwd\":\"/tmp\",\"reason\":\"exit\"}" \
   | CLAUDE_TRANSCRIPT_PATH="" "$TRIGGER"
-grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "stdin-JSON path did not dispatch"
-echo "PASS: stdin-JSON transcript path triggers dispatch"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "stdin-JSON did not dispatch"
+echo "PASS: stdin-JSON dispatches"
+
+# === Case 6: per-transcript lock — second dispatch within TTL is suppressed ===
+reset_log
+CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
+DISPATCH_COUNT=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
+[ "$DISPATCH_COUNT" -eq 1 ] || fail "first call should DISPATCH once, got $DISPATCH_COUNT"
+
+CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
+DISPATCH_COUNT_AFTER=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
+[ "$DISPATCH_COUNT_AFTER" -eq 1 ] || fail "second call within TTL re-dispatched (count=$DISPATCH_COUNT_AFTER, expected 1)"
+
+grep -q "duplicate-dispatch" "$DREAM_LOG" 2>/dev/null || fail "second call did not log duplicate-dispatch"
+echo "PASS: per-transcript lock suppresses duplicate dispatch within TTL"
+
+# === Case 7: lock expires past TTL → re-dispatch allowed ===
+reset_log
+export DREAM_LOCK_TTL_SEC=1
+CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
+sleep 2
+CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
+DISPATCH_COUNT=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
+[ "$DISPATCH_COUNT" -eq 2 ] || fail "after TTL expiry, expected 2 dispatches, got $DISPATCH_COUNT"
+unset DREAM_LOCK_TTL_SEC
+echo "PASS: expired lock allows re-dispatch"
+
+# === Case 8: reason=clear → SKIP ===
+reset_log
+echo "{\"transcript_path\":\"$FIXTURE_DIR/transcript-15msg.jsonl\",\"reason\":\"clear\"}" \
+  | CLAUDE_TRANSCRIPT_PATH="" "$TRIGGER"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "reason=clear triggered dispatch"
+grep -q "reason=clear" "$DREAM_LOG" 2>/dev/null || fail "reason=clear not logged"
+echo "PASS: reason=clear skipped"
 
 echo
 echo "All trigger.sh tests passed."

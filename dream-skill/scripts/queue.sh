@@ -53,6 +53,16 @@ cmd_append() {
 
   ensure_queue_file
 
+  # Dedupe: skip if (title + target) already queued.
+  # Protects against duplicate dispatch (e.g., same chat closed from two
+  # windows after /resume) — same fact extracted twice would otherwise
+  # queue twice.
+  if grep -Fq -- "### $title" "$QUEUE_FILE" 2>/dev/null \
+     && grep -Fq -- "**Target:** $target" "$QUEUE_FILE" 2>/dev/null; then
+    echo "queue: skip duplicate title='$title' target='$target'" >&2
+    return 0
+  fi
+
   # Ensure the section header exists
   if ! grep -Fxq -- "$header" "$QUEUE_FILE"; then
     {

@@ -53,6 +53,29 @@ done
 PAGE_PATH="$VAULT/$PAGE"
 mkdir -p "$(dirname "$PAGE_PATH")"
 
+# --- per-page mutex (mkdir is atomic on POSIX) -----------------------------
+# Two concurrent runs (e.g., same chat closed in two windows) writing the
+# same page would race read-modify-write and clobber each other. Serialize
+# via mkdir lock. Up to ~2s wait, then bail safely.
+if command -v shasum >/dev/null 2>&1; then
+  PAGE_HASH=$(printf '%s' "$PAGE_PATH" | shasum -a 1 | awk '{print $1}')
+else
+  PAGE_HASH=$(printf '%s' "$PAGE_PATH" | cksum | awk '{print $1}')
+fi
+LOCK_PATH="${DREAM_VAULT_LOCK_DIR:-/tmp/dream-vault-locks}/$PAGE_HASH"
+mkdir -p "$(dirname "$LOCK_PATH")" 2>/dev/null || true
+
+LOCK_RETRIES=20
+while ! mkdir "$LOCK_PATH" 2>/dev/null; do
+  LOCK_RETRIES=$((LOCK_RETRIES - 1))
+  if [ "$LOCK_RETRIES" -le 0 ]; then
+    echo "vault-writer: lock timeout on $PAGE_PATH" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+trap 'rmdir "$LOCK_PATH" 2>/dev/null || true' EXIT
+
 # --- ensure page exists ----------------------------------------------------
 if [ ! -f "$PAGE_PATH" ]; then
   echo "# $(basename "$PAGE" .md | tr '-' ' ' | sed 's/.*/\u&/')" > "$PAGE_PATH"

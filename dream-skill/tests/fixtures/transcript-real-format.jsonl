@@ -1,0 +1,10 @@
+{"type":"last-prompt","leafUuid":"x","sessionId":"abc"}
+{"type":"permission-mode","permissionMode":"default","sessionId":"abc"}
+{"type":"user","message":{"role":"user","content":"Help me plan tomorrow"},"isMeta":false,"sessionId":"abc"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning that should not leak"},{"type":"text","text":"Sure. Calendar shows 3 events."},{"type":"tool_use","name":"calendar","id":"abc","input":{"date":"2026-05-28"}}]},"sessionId":"abc"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"abc","content":"BIG_MCP_DATA_BLOB_REAL line 1 line 2 line 3 line 4 line 5"}]},"sessionId":"abc"}
+{"type":"user","message":{"role":"user","content":"<local-command-caveat>caveat text should be skipped</local-command-caveat>"},"isMeta":true,"sessionId":"abc"}
+{"type":"user","message":{"role":"user","content":"<system-reminder>noise from hook</system-reminder>Schedule 9am block for project X."},"sessionId":"abc"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Locked in 9am block for project X."}]},"sessionId":"abc"}
+{"type":"attachment","attachment":{"hookName":"PostToolUse"},"sessionId":"abc"}
+{"type":"ai-title","title":"Plan tomorrow","sessionId":"abc"}
