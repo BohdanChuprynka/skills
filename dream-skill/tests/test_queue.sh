@@ -69,5 +69,29 @@ if "$QUEUE" append --bucket nonsense --title t --evidence e --confidence low --t
 fi
 echo "PASS: unknown bucket rejected"
 
+# Test 7: dedupe — same (title, target) appended twice should produce one entry
+"$QUEUE" append \
+  --bucket destructive \
+  --title "Update employer" \
+  --evidence "duplicate attempt" \
+  --confidence medium \
+  --target "me/wiki/Bio.md" 2>/dev/null
+
+OCCURRENCES=$(grep -c "### Update employer" "$QUEUE_FILE")
+[ "$OCCURRENCES" -eq 1 ] || fail "dedupe failed (count=$OCCURRENCES, expected 1)"
+echo "PASS: dedupe — same title+target queued only once"
+
+# Test 8: same title but different target → should NOT dedupe
+"$QUEUE" append \
+  --bucket destructive \
+  --title "Update employer" \
+  --evidence "different vault entry" \
+  --confidence medium \
+  --target "me/wiki/Work.md"
+
+OCCURRENCES2=$(grep -c "### Update employer" "$QUEUE_FILE")
+[ "$OCCURRENCES2" -eq 2 ] || fail "same title + different target wrongly deduped (count=$OCCURRENCES2)"
+echo "PASS: same title, different target → both entries kept"
+
 echo
 echo "All queue.sh tests passed."
