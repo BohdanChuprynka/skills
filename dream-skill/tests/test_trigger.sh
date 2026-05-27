@@ -46,5 +46,14 @@ CLAUDE_TRANSCRIPT_PATH="/tmp/nonexistent-transcript-$$.jsonl" "$TRIGGER"
 grep -q "no-transcript" "$DREAM_LOG" 2>/dev/null || fail "nonexistent path did not log no-transcript skip"
 echo "PASS: nonexistent transcript path handled gracefully"
 
+# Reset log
+rm -f "$DREAM_LOG"
+
+# Case 5: transcript path supplied via stdin JSON (Claude Code's actual mechanism)
+echo "{\"session_id\":\"test\",\"transcript_path\":\"$FIXTURE_DIR/transcript-15msg.jsonl\",\"cwd\":\"/tmp\",\"reason\":\"exit\"}" \
+  | CLAUDE_TRANSCRIPT_PATH="" "$TRIGGER"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "stdin-JSON path did not dispatch"
+echo "PASS: stdin-JSON transcript path triggers dispatch"
+
 echo
 echo "All trigger.sh tests passed."

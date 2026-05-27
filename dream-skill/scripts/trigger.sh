@@ -28,7 +28,18 @@ on_exit() {
 trap on_exit EXIT
 
 # --- resolve transcript -------------------------------------------------
+# Claude Code SessionEnd hooks pass JSON on stdin:
+#   {"session_id":"...","transcript_path":"...","cwd":"...","reason":"..."}
+# We also accept CLAUDE_TRANSCRIPT_PATH env var as a fallback (tests + manual).
 TRANSCRIPT="${CLAUDE_TRANSCRIPT_PATH:-}"
+
+# Try stdin JSON if env var empty AND stdin is piped (not a tty)
+if [ -z "$TRANSCRIPT" ] && [ ! -t 0 ]; then
+  STDIN_JSON=$(cat 2>/dev/null || true)
+  if [ -n "$STDIN_JSON" ] && command -v jq >/dev/null 2>&1; then
+    TRANSCRIPT=$(echo "$STDIN_JSON" | jq -r '.transcript_path // empty' 2>/dev/null || true)
+  fi
+fi
 
 if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
   log "SKIP no-transcript path='$TRANSCRIPT'"
