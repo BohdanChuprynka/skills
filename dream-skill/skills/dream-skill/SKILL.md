@@ -233,26 +233,24 @@ Never print to stdout in auto mode (headless invocation may discard it). All out
 
 ## Manual mode (no args)
 
-**Interactive. Walks the user through the queue fact-by-fact.**
+**Interactive. Walks the user through the queue fact-by-fact in the REPL.**
 
 ### Step 1 — Read queue
 
-Open `$DREAM_QUEUE_FILE`. Parse into entries (one per `### ` heading inside any `## <bucket>` section).
+Open `$DREAM_QUEUE_FILE`. Parse into entries (one per `### ` heading inside any `## <bucket>` section). Each entry has 5 fields: `bucket`, `title`, `evidence`, `confidence`, `target`.
 
-If empty: tell user "Queue is empty. Nothing to review." and exit.
+If empty: tell user `Queue is empty. Nothing to review.` and exit 0.
 
 ### Step 2 — Present each entry
 
-For each entry, show:
+Show the entry verbatim:
 
 ```
 [N/M] <bucket>: <title>
 
-Evidence:
-  "<quote>"
-
-Proposed target: <vault>/<page>
-Confidence: <high|medium|low>
+  Evidence:   "<quote>"
+  Target:     <vault-relative-path>
+  Confidence: <high|medium|low>
 
 [a]pprove  [e]dit  [s]kip  [d]iscard  [q]uit
 ```
@@ -261,23 +259,60 @@ Wait for user input.
 
 ### Step 3 — Act on choice
 
-- **approve**: call `vault-writer.sh` with the entry's params, append undo entry, remove entry from `$DREAM_QUEUE_FILE`.
-- **edit**: prompt user for new content (display current as default), then either re-classify (re-run through buckets) and apply, OR re-queue with updated text. Confirm before writing.
-- **skip**: leave in queue, advance to next entry.
-- **discard**: remove entry from queue without writing.
-- **quit**: stop walking; remaining entries stay queued.
+#### approve (`a`)
+
+1. Resolve `target` to a configured vault: look up `vaults.<name>.root` in `$DREAM_CONFIG` where `<name>` is the first path segment of `target` (e.g., `me/wiki/Bio.md` → `vaults.me`). If no match, prompt user to pick a vault.
+2. Ask user for two missing fields the queue entry doesn't carry:
+   - `section` (default: `Notes`)
+   - `content` (default: the entry's `title`)
+   Show both as a one-line preview: `Will write to <vault>/<page> under "## <section>": "- <content>"`. Wait for `[c]onfirm` or `[c]ancel`.
+3. On confirm: call `vault-writer.sh` with the resolved args + `--undo-log "$DREAM_UNDO_LOG"`. Then call `queue.sh remove --title "<title>" --target "<target>"` to clear the entry.
+4. Append `[APPROVED] <vault>/<page>: <content>` to `$DREAM_DAILY_LOG`.
+
+#### edit (`e`) — free-form field editor
+
+Prompt: `What to edit? Comma-separated field:value pairs. Valid fields: title, evidence, target, confidence, bucket. Example: title: Move to Acme, target: me/wiki/Work.md`
+
+Parse the user's input by splitting on `,` then on the first `:` per pair. Trim whitespace. Validate:
+- `bucket` must be one of `destructive`, `uncertain`, `brainstormed` (reject + re-prompt if not)
+- `confidence` must be one of `high`, `medium`, `low`
+- Unknown field names → tell user `unknown field: X (valid: title, evidence, target, confidence, bucket)` and re-prompt
+
+Apply edits to an in-memory copy of the entry. Re-show the FULL updated entry verbatim (same shape as Step 2, no diff highlighting — just the new values). Prompt: `[a]pply  [r]e-edit  [d]iscard`.
+
+- **apply (`a`)**: Persist the edits to the queue:
+  - `queue.sh remove --title "<original-title>" --target "<original-target>"` (use the ORIGINAL title/target, since those identify the entry)
+  - `queue.sh append --bucket "<new-bucket>" --title "<new-title>" --evidence "<new-evidence>" --confidence "<new-confidence>" --target "<new-target>"`
+  - This works whether the bucket changed or not — remove + append is the same primitive
+  - Then continue to the next entry (do NOT auto-approve after edit — user must explicitly approve a separately-edited entry on the next pass)
+- **re-edit (`r`)**: discard the current in-memory edits, re-prompt for changes from the original entry.
+- **discard (`d`)**: drop the edits, leave the entry untouched in queue, advance to next.
+
+#### skip (`s`)
+
+Leave the entry in queue. Advance.
+
+#### discard (`d`)
+
+Call `queue.sh remove --title "<title>" --target "<target>"`. Advance. Append `[DISCARDED] <title>` to `$DREAM_DAILY_LOG`.
+
+#### quit (`q`)
+
+Stop walking. Remaining entries stay queued. Jump to Step 4.
 
 ### Step 4 — Summary
 
-When walked through all entries (or user quits), print:
+Print:
 
 ```
 Dream queue review complete.
 - Approved: X
-- Edited: Y
+- Edited:   Y  (still queued; review again to approve)
 - Discarded: Z
 - Skipped (still queued): W
 ```
+
+Append a summary line to `$DREAM_DAILY_LOG`.
 
 ---
 

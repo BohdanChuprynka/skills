@@ -93,5 +93,36 @@ OCCURRENCES2=$(grep -c "### Update employer" "$QUEUE_FILE")
 [ "$OCCURRENCES2" -eq 2 ] || fail "same title + different target wrongly deduped (count=$OCCURRENCES2)"
 echo "PASS: same title, different target → both entries kept"
 
+# Test 9: remove — removes ONLY the matching (title, target) entry
+"$QUEUE" remove --title "Update employer" --target "me/wiki/Bio.md"
+OCCURRENCES3=$(grep -c "### Update employer" "$QUEUE_FILE")
+[ "$OCCURRENCES3" -eq 1 ] || fail "remove deleted wrong count (after=$OCCURRENCES3, expected 1)"
+grep -q "me/wiki/Work.md" "$QUEUE_FILE" || fail "remove deleted the wrong target"
+grep -q "me/wiki/Bio.md" "$QUEUE_FILE" && fail "remove did not delete me/wiki/Bio.md"
+echo "PASS: remove deletes only matching title+target"
+
+# Test 10: remove — non-matching pair returns error (rc != 0), queue untouched
+LINES_BEFORE=$(wc -l < "$QUEUE_FILE")
+if "$QUEUE" remove --title "Nonexistent" --target "nowhere/page.md" 2>/dev/null; then
+  fail "remove of non-matching entry should have errored"
+fi
+LINES_AFTER=$(wc -l < "$QUEUE_FILE")
+[ "$LINES_BEFORE" -eq "$LINES_AFTER" ] || fail "queue was mutated despite no-match remove"
+echo "PASS: remove of non-matching pair errors + leaves queue intact"
+
+# Test 11: remove last entry → queue stays parseable (no stray section header artifacts)
+"$QUEUE" remove --title "Maybe pivot to agency" --target "me/wiki/Career.md"
+"$QUEUE" remove --title "Possible new project" --target "projects/wiki/new.md"
+"$QUEUE" remove --title "Update employer" --target "me/wiki/Work.md"
+# Re-append something to verify the queue still works after removals
+"$QUEUE" append \
+  --bucket uncertain \
+  --title "post-removal sanity" \
+  --evidence "verify queue still works" \
+  --confidence low \
+  --target "test/page.md"
+grep -q "post-removal sanity" "$QUEUE_FILE" || fail "queue broken after batch removals"
+echo "PASS: queue survives full drain + re-append"
+
 echo
 echo "All queue.sh tests passed."
