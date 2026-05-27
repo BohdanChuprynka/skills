@@ -128,13 +128,22 @@ In **manual mode**: if `$DREAM_CONFIG` doesn't exist, prompt the user for at lea
 
 **Headless. Never asks user. Never blocks.**
 
-### Step 0 — Sanity check env vars
+### Step 0 — Sanity check env vars (literal file checks ONLY)
 
-Confirm `DREAM_SCRIPTS_DIR`, `DREAM_HOME`, `DREAM_CONFIG`, `DREAM_QUEUE_FILE` are all set and the paths exist (the dir for `DREAM_SCRIPTS_DIR` and `DREAM_HOME`, the file for `DREAM_CONFIG`).
+This is a **plain `test -f` / `test -d` check on shell env vars and paths**. It is NOT a check of which tools you have access to or which permissions you've been granted. Do not abort on tool-availability concerns or permission concerns. Run the checks via `Bash` tool only:
 
-Confirm `$DREAM_SCRIPTS_DIR/vault-writer.sh`, `$DREAM_SCRIPTS_DIR/queue.sh`, `$DREAM_SCRIPTS_DIR/preprocess.sh` all exist and are executable.
+```bash
+[ -n "$DREAM_SCRIPTS_DIR" ] && [ -d "$DREAM_SCRIPTS_DIR" ] || echo "MISSING DREAM_SCRIPTS_DIR" >> "$DREAM_ERROR_LOG"
+[ -n "$DREAM_HOME" ]        && [ -d "$DREAM_HOME" ]        || echo "MISSING DREAM_HOME"        >> "$DREAM_ERROR_LOG"
+[ -n "$DREAM_CONFIG" ]      && [ -f "$DREAM_CONFIG" ]      || echo "MISSING DREAM_CONFIG"      >> "$DREAM_ERROR_LOG"
+[ -x "$DREAM_SCRIPTS_DIR/vault-writer.sh" ] || echo "MISSING vault-writer.sh" >> "$DREAM_ERROR_LOG"
+[ -x "$DREAM_SCRIPTS_DIR/queue.sh" ]        || echo "MISSING queue.sh"        >> "$DREAM_ERROR_LOG"
+[ -x "$DREAM_SCRIPTS_DIR/preprocess.sh" ]   || echo "MISSING preprocess.sh"   >> "$DREAM_ERROR_LOG"
+```
 
-If any check fails: append one line to `$DREAM_ERROR_LOG` with the timestamp + which check failed, then exit 0.
+If — and ONLY if — any file/dir literally does not exist on disk: append the failure to `$DREAM_ERROR_LOG` and exit 0. Otherwise, proceed to Step 1.
+
+**You are running under `--dangerously-skip-permissions`. You will not be prompted for any tool call. Do not abort because you "might not have permission" — you do.**
 
 ### Step 1 — Preprocess transcript
 
@@ -149,15 +158,26 @@ For each vault, read `<root>/CLAUDE.md` and `<root>/wiki/index.md` (if they exis
 
 ### Step 3 — Extract candidate facts
 
-Scan `clean_transcript`. For each candidate fact, classify into one of these buckets:
+Scan `clean_transcript`. For each candidate fact, classify into one of these buckets.
+
+**Meta-session rule (important):** If the transcript is about building/debugging dream-skill itself, do NOT blanket-skip as "recursive." Look for concrete decisions the user made: architecture picks, file paths committed to, technical choices, version bumps, default values changed. Those ARE persona signal about their work and belong in vault (typically `projects/wiki/skills-monorepo.md` or similar). Only skip the literal back-and-forth ("yes", "do it", "looks good") as Bucket B execution-confirmations.
 
 #### Bucket A — HIGH CONFIDENCE, ADDITIVE → write to vault
 
-A fact qualifies if ALL of:
-- New information about the user (role, project, deadline, preference, decision, relationship, body/health, learning, schedule)
+**Default to WRITE, not queue.** Auto-mode's whole purpose is to keep the vault current without manual sync. Queue is an escape hatch for genuinely ambiguous facts, NOT the default. If you find yourself queuing 5+ facts in one run and writing 0, you are being too cautious — re-classify.
+
+A fact qualifies as Bucket A if ALL of:
+- New information about the user OR about a project/topic the user is working on (role, project, deadline, preference, decision, relationship, body/health, learning, schedule, technical choice, architecture pick)
 - Vault has no current fact that contradicts it (check the relevant `wiki/index.md` linked pages)
-- The user themselves stated it (not the assistant inferring)
-- Stated as fact, not hypothesis ("I'm doing X", not "maybe I'll do X")
+- The user themselves stated it OR the assistant stated it and the user confirmed (acceptance, "yes", "do it", building on it)
+- Stated as fact or decision, not pure hypothesis ("I'm doing X" / "let's go with X" qualifies; "maybe I'll do X" does not)
+
+**Concrete qualifying examples** (write these, don't queue):
+- User picks a tech stack ("we're using Postgres + Drizzle")
+- User commits to a project direction ("v0.2 will ship Haiku as default model")
+- User states a date or deadline ("Cycle 4 ends 2026-08-17")
+- User defines a workflow ("close session → SessionEnd → headless")
+- User makes an architecture call ("use add-only writes + queue for destructive")
 
 **Action:** call the helper script with absolute paths:
 

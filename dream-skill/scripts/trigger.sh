@@ -141,7 +141,10 @@ export DREAM_TRANSCRIPT="$TRANSCRIPT"
 # $DREAM_MODEL if you want Sonnet/Opus for higher-quality classification.
 MODEL="${DREAM_MODEL:-claude-haiku-4-5}"
 
-nohup claude -p --model "$MODEL" "/dream-skill --auto $TRANSCRIPT" \
+nohup claude -p \
+  --model "$MODEL" \
+  --dangerously-skip-permissions \
+  "/dream-skill --auto $TRANSCRIPT" \
   >> "$(dirname "$LOG_FILE")/headless.log" 2>&1 &
 disown
 log "SPAWNED pid=$! model=$MODEL scripts=$SCRIPTS_DIR"
