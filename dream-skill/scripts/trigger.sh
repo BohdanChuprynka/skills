@@ -11,7 +11,7 @@
 set -euo pipefail
 
 # --- config -------------------------------------------------------------
-THRESHOLD="${DREAM_THRESHOLD:-10}"
+THRESHOLD="${DREAM_THRESHOLD:-5}"
 LOG_FILE="${DREAM_LOG:-$HOME/.claude/dream-skill/trigger.log}"
 LOCK_DIR="${DREAM_LOCK_DIR:-$HOME/.claude/dream-skill/.locks}"
 LOCK_TTL_SEC="${DREAM_LOCK_TTL_SEC:-600}"  # 10 min — within window, suppress dup dispatch
@@ -135,8 +135,14 @@ export DREAM_UNDO_LOG="$DREAM_HOME/undo/$(date -u +%Y-%m-%d).jsonl"
 export DREAM_ERROR_LOG="$DREAM_HOME/error.log"
 export DREAM_TRANSCRIPT="$TRANSCRIPT"
 
-nohup claude -p "/dream-skill --auto $TRANSCRIPT" \
+# Pin model: Haiku 4.5 is sufficient for the dream-skill classifier+router
+# task (pattern matching + tool calls, no deep reasoning). ~30x cheaper
+# than Opus, ~10x cheaper than Sonnet at default effort. Override via
+# $DREAM_MODEL if you want Sonnet/Opus for higher-quality classification.
+MODEL="${DREAM_MODEL:-claude-haiku-4-5}"
+
+nohup claude -p --model "$MODEL" "/dream-skill --auto $TRANSCRIPT" \
   >> "$(dirname "$LOG_FILE")/headless.log" 2>&1 &
 disown
-log "SPAWNED pid=$! scripts=$SCRIPTS_DIR"
+log "SPAWNED pid=$! model=$MODEL scripts=$SCRIPTS_DIR"
 exit 0

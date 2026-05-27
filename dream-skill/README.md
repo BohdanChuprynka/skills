@@ -30,7 +30,7 @@ You close Claude Code. The conversation had decisions, preferences, new project 
 
 ## What dream-skill does
 
-Every time you close a Claude Code session with **≥10 user messages**, a SessionEnd hook spawns a background `claude -p` invocation that:
+Every time you close a Claude Code session with **≥5 user messages**, a SessionEnd hook spawns a background `claude -p` invocation that:
 
 1. Reads the just-closed conversation transcript
 2. Strips noise (tool calls, MCP outputs, system reminders)
@@ -53,8 +53,8 @@ You never type `/sync-wiki` again. Your vault stays current. You review the queu
 │  → scripts/trigger.sh                                              │
 │     - reads transcript path from stdin JSON                        │
 │     - counts user messages                                         │
-│     - <10 → SKIP silently                                          │
-│     - ≥10 → take dedupe lock, export DREAM_* env vars, spawn:      │
+│     - <5 → SKIP silently                                           │
+│     - ≥5 → take dedupe lock, export DREAM_* env vars, spawn:       │
 │       nohup claude -p "/dream-skill --auto <transcript>" &         │
 └────────────────────────────────────────────────────────────────────┘
                                   │
@@ -140,7 +140,7 @@ Each vault root should have a `CLAUDE.md` (the schema Claude reads) and a `wiki/
 
 | Var | Default | Purpose |
 |---|---|---|
-| `DREAM_THRESHOLD` | `10` | Min user messages to trigger dispatch |
+| `DREAM_THRESHOLD` | `5` | Min user messages to trigger dispatch |
 | `DREAM_LOCK_TTL_SEC` | `600` | Dedupe-lock TTL (suppress duplicate dispatch on multi-window close) |
 | `DREAM_HOME` | `~/.claude/dream-skill` | State root |
 | `DREAM_CONFIG` | `$DREAM_HOME/config.toml` | Vault config |
@@ -168,7 +168,7 @@ This dir survives plugin updates and reinstalls.
 - **Add-only auto writes** to vault pages (auto mode never deletes or overwrites)
 - **Per-day undo log** — full rollback with `apply-undo.sh --date <YYYY-MM-DD>`
 - **Dedupe lock** — second close of the same conversation within 10 min is skipped
-- **Threshold gate** — sessions with <10 user messages skip dispatch entirely
+- **Threshold gate** — sessions with <5 user messages skip dispatch entirely
 - **Fire-and-forget hook** — never blocks shutdown; errors stay in `error.log`
 - **Reason filter** — `clear` and `prompt_input_exit` skip dispatch (you're not actually done)
 
@@ -184,10 +184,10 @@ This dir survives plugin updates and reinstalls.
 No. Three dedupe layers protect you: per-transcript dispatch lock, vault per-line idempotency (`grep -Fxq` exact match), and queue `(title, target)` dedupe. Each unique fact lands exactly once. Worst case: 2x cost on a wasted second headless run that produces zero vault changes.
 
 **Q: How much does each session close cost?**
-~$0.05–$0.30 per dispatch, depending on conversation length and model. Sessions with <10 user messages skip dispatch entirely (override via `DREAM_THRESHOLD`).
+~$0.05–$0.30 per dispatch, depending on conversation length and model. Sessions with <5 user messages skip dispatch entirely (override via `DREAM_THRESHOLD`).
 
 **Q: Will it fire if I just open Claude and close without typing anything?**
-No. Threshold gate skips silently when user-message count is below `DREAM_THRESHOLD` (default 10).
+No. Threshold gate skips silently when user-message count is below `DREAM_THRESHOLD` (default 5).
 
 **Q: What if Claude Code crashes or I force-quit?**
 SessionEnd hook only fires on `/exit`, ⌘W, or normal quit — not on crash. The dropped session's facts are missed until you reopen and run `/dream-skill` manually (which sweeps the queue) or `/sync-wiki` (if you still have that skill).

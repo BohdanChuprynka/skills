@@ -6,7 +6,7 @@
 
 **Architecture:**
 1. **Plugin-shipped SessionEnd hook** (`hooks/hooks.json`) auto-installs on `/plugin install`. Fires on close.
-2. **Trigger script** counts user-turn messages in transcript. If ≥10, spawns headless `claude -p` in background.
+2. **Trigger script** counts user-turn messages in transcript. If ≥5, spawns headless `claude -p` in background.
 3. **Headless skill invocation** runs the same `dream-skill` SKILL.md in `--auto` mode: regex pre-strip transcript, LLM filters for info-gain, routes facts.
 4. **Confident facts** → appended to vault page via harvested target-file resolution + index update logic.
 5. **Uncertain/destructive/brainstormed facts** → appended to `~/.claude/dream-queue/pending.md`.
@@ -282,7 +282,7 @@ git add dream-skill/hooks/ dream-skill/scripts/trigger.sh dream-skill/tests/ dre
 git commit -m "feat(dream-skill): SessionEnd hook + trigger script with threshold gating
 
 Hook auto-installs via plugin manifest (.claude-plugin/plugin.json hooks
-field → hooks/hooks.json). Trigger script counts user messages; ≥10 →
+field → hooks/hooks.json). Trigger script counts user messages; ≥5 →
 dispatch headless claude -p. Tests cover below/above threshold."
 ```
 
