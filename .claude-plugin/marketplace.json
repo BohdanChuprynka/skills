@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "skills",
+  "description": "Bohdan's personal Claude Code skills monorepo. One marketplace, multiple plugins as subdirs.",
+  "owner": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "plugins": [
+    {
+      "name": "dream-skill",
+      "description": "Auto-record Claude Code conversations to your Obsidian vault. Confident facts written on session close; uncertain or destructive edits queued for manual review.",
+      "version": "0.2.0",
+      "source": "./dream-skill",
+      "category": "productivity",
+      "author": {
+        "name": "Bohdan Chuprynka",
+        "url": "https://github.com/BohdanChuprynka"
+      }
+    }
+  ]
+}

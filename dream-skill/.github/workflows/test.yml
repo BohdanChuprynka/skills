@@ -1,0 +1,65 @@
+name: dream-skill tests
+
+on:
+  push:
+    paths:
+      - 'dream-skill/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    paths:
+      - 'dream-skill/**'
+      - '.github/workflows/test.yml'
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Verify dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          jq --version
+          shasum --version
+
+      - name: Make scripts executable
+        run: |
+          chmod +x dream-skill/scripts/*.sh
+          chmod +x dream-skill/tests/test_*.sh
+
+      - name: Validate plugin manifests
+        run: |
+          jq . dream-skill/.claude-plugin/plugin.json
+          jq . dream-skill/.claude-plugin/marketplace.json
+          jq . dream-skill/hooks/hooks.json
+          jq . .claude-plugin/marketplace.json
+
+      - name: Run all test suites
+        working-directory: dream-skill
+        run: |
+          set -e
+          fail=0
+          for t in tests/test_*.sh; do
+            echo "::group::$t"
+            if bash "$t"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error file=$t::test suite failed"
+              fail=1
+            fi
+          done
+          exit "$fail"
