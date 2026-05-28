@@ -1,0 +1,3 @@
+2026-05-27T16:30:00Z DISPATCH count=15 threshold=5 transcript=/tmp/conv-D.jsonl
+2026-05-27T16:30:00Z SPAWNED pid=1004 model=claude-haiku-4-5 transcript=/tmp/conv-D.jsonl
+2026-05-27T17:00:00Z WARNING kind=orphan transcript=/tmp/conv-D.jsonl spawned-at=2026-05-27T16:30:00Z

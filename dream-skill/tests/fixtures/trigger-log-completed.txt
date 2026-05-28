@@ -1,0 +1,3 @@
+2026-05-27T16:30:00Z DISPATCH count=15 threshold=5 transcript=/tmp/conv-B.jsonl
+2026-05-27T16:30:00Z SPAWNED pid=1002 model=claude-haiku-4-5 transcript=/tmp/conv-B.jsonl
+2026-05-27T16:31:30Z COMPLETED source=skill reason=wrote-2 writes=2 queued=0 dropped=1 transcript=/tmp/conv-B.jsonl
