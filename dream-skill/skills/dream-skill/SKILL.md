@@ -83,6 +83,10 @@ Never use the `Write`/`Edit` tools directly to mutate vault files in auto mode. 
 
 If any required env var (`DREAM_SCRIPTS_DIR`, `DREAM_HOME`, `DREAM_CONFIG`, `DREAM_QUEUE_FILE`) is unset or the path it points to doesn't exist, append a structured error line to `$DREAM_ERROR_LOG` and exit 0. Do NOT try to find an alternative persistence layer. The SessionEnd hook is fire-and-forget; broken installs must surface in `error.log`, never crash, never write to the wrong place.
 
+### Rule 4 — Always close the trigger.log loop
+
+Every auto-mode invocation MUST end with a `COMPLETED` or `ERROR` line appended to `$DREAM_LOG` (see Step 6). trigger.sh logged a `SPAWNED` line right before invoking you; `check-pending.sh` treats unmatched `SPAWNED` lines as silent failures and writes a `WARNING kind=orphan` line. If you skip Step 6, the log gets spurious orphan warnings — which means YOU are the source of the noise the user sees on `tail trigger.log`.
+
 ---
 
 ## State layout (env-var sourced)
@@ -99,6 +103,7 @@ trigger.sh exports these BEFORE invoking the headless skill. **Always read them 
 | `DREAM_UNDO_LOG` | `$DREAM_HOME/undo/<YYYY-MM-DD>.jsonl` | Per-write rollback entries |
 | `DREAM_ERROR_LOG` | `$DREAM_HOME/error.log` | Append on broken-install failures |
 | `DREAM_TRANSCRIPT` | (set by trigger.sh) | Absolute path to the just-closed JSONL transcript |
+| `DREAM_LOG` | `$DREAM_HOME/trigger.log` | Append-only dispatch decisions + completion markers (Step 6) |
 
 If any are unset when you enter auto mode, fall through to Rule 3.
 
@@ -248,6 +253,34 @@ Summary: X writes, Y queued, Z dropped.
 ### Step 5 — Exit silently
 
 Never print to stdout in auto mode (headless invocation may discard it). All output goes to log files. Exit 0 even on partial failures so the SessionEnd hook stays fire-and-forget.
+
+### Step 6 — Record completion to $DREAM_LOG
+
+ALWAYS run this as the **final action** of auto mode, regardless of which exit branch you took. Without it, `check-pending.sh` will see your `SPAWNED` line as an orphan on the next session start and append a false-alarm `WARNING` line to the log.
+
+Append exactly ONE line to `$DREAM_LOG` (NOT to `$DREAM_DAILY_LOG` — that's a different file for human-readable summaries).
+
+**On successful or legitimate-skip completion** (Step 4 normal completion / Step 1 empty / Step 3 recursive / Step 3 no-info):
+
+```bash
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "$TS COMPLETED source=skill reason=<reason> writes=<N> queued=<N> dropped=<N> transcript=$DREAM_TRANSCRIPT" >> "$DREAM_LOG"
+```
+
+`<reason>` enum (pick one):
+- `wrote-N` — Step 4 normal completion (N is total `[WRITE]` count)
+- `empty-transcript` — Step 1 stripped output was <5 lines
+- `recursive-transcript` — Step 3 every line was a dream-skill discussion
+- `no-info-gain` — Step 3 candidates extracted but all dropped (Bucket B/C)
+
+**On internal ERROR** (Step 0 env validation failed, vault-writer.sh non-zero, any unhandled error):
+
+```bash
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "$TS ERROR source=skill code=1 msg=\"<short msg>\" transcript=$DREAM_TRANSCRIPT" >> "$DREAM_LOG"
+```
+
+This is the contract that lets the user see silent failures. If you skip Step 6, the next-session orphan scanner produces a spurious `WARNING` line. **Always close the loop.**
 
 ---
 

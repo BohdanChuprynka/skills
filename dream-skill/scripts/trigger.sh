@@ -134,6 +134,7 @@ export DREAM_DAILY_LOG="$DREAM_HOME/log/$(date -u +%Y-%m-%d).md"
 export DREAM_UNDO_LOG="$DREAM_HOME/undo/$(date -u +%Y-%m-%d).jsonl"
 export DREAM_ERROR_LOG="$DREAM_HOME/error.log"
 export DREAM_TRANSCRIPT="$TRANSCRIPT"
+export DREAM_LOG  # explicit export so the headless skill can append COMPLETED/ERROR markers
 
 # Pin model: Haiku 4.5 is sufficient for the dream-skill classifier+router
 # task (pattern matching + tool calls, no deep reasoning). ~30x cheaper
