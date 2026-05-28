@@ -26,7 +26,7 @@ log() {
 on_exit() {
   local rc=$?
   if [ $rc -ne 0 ]; then
-    log "ERROR rc=$rc"
+    log "ERROR source=trigger code=$rc msg=trap-fired"
   fi
   exit 0  # never propagate non-zero to Claude Code
 }
@@ -109,7 +109,7 @@ fi
 
 # --- spawn headless invocation (background, fire-and-forget) ------------
 if ! command -v claude >/dev/null 2>&1; then
-  log "ERROR claude-cli-missing"
+  log "ERROR source=trigger code=127 msg=claude-cli-missing"
   exit 0
 fi
 
@@ -141,11 +141,25 @@ export DREAM_TRANSCRIPT="$TRANSCRIPT"
 # $DREAM_MODEL if you want Sonnet/Opus for higher-quality classification.
 MODEL="${DREAM_MODEL:-claude-haiku-4-5}"
 
-nohup claude -p \
-  --model "$MODEL" \
-  --dangerously-skip-permissions \
-  "/dream-skill --auto $TRANSCRIPT" \
-  >> "$(dirname "$LOG_FILE")/headless.log" 2>&1 &
+# Background wrapper: spawn claude -p, await exit, append COMPLETED/ERROR
+# to trigger.log. Outer `nohup ... &` keeps trigger.sh fire-and-forget
+# (it returns immediately). Inner block is the wait-and-report logic.
+# No notifications anywhere — logs only.
+nohup bash -c "
+  claude -p \\
+    --model '$MODEL' \\
+    --dangerously-skip-permissions \\
+    '/dream-skill --auto $TRANSCRIPT' \\
+    >> '$(dirname "$LOG_FILE")/headless.log' 2>&1
+  RC=\$?
+  TS=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  if [ \$RC -ne 0 ]; then
+    echo \"\$TS ERROR source=claude-p code=\$RC transcript=$TRANSCRIPT\" >> '$LOG_FILE'
+  else
+    echo \"\$TS COMPLETED source=claude-p transcript=$TRANSCRIPT\" >> '$LOG_FILE'
+  fi
+" >/dev/null 2>&1 &
 disown
-log "SPAWNED pid=$! model=$MODEL scripts=$SCRIPTS_DIR"
+
+log "SPAWNED pid=$! model=$MODEL scripts=$SCRIPTS_DIR transcript=$TRANSCRIPT"
 exit 0

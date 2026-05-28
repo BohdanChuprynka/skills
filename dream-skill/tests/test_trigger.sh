@@ -82,5 +82,34 @@ grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "reason=clear triggered disp
 grep -q "reason=clear" "$DREAM_LOG" 2>/dev/null || fail "reason=clear not logged"
 echo "PASS: reason=clear skipped"
 
+# === Case 9: claude-p exit code captured by wrapper ===
+# Override `claude` with a stub that exits with code 7. Wrapper should log ERROR.
+reset_log
+STUB_DIR=$(mktemp -d "/tmp/dream-claude-stub-XXXXXX")
+cat > "$STUB_DIR/claude" <<'STUB'
+#!/usr/bin/env bash
+exit 7
+STUB
+chmod +x "$STUB_DIR/claude"
+
+# Disable stub mode so real spawn-wrapper runs (against our fake claude)
+unset DREAM_DISPATCH_STUB || true
+PATH="$STUB_DIR:$PATH" CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
+
+# Wait briefly for background wrapper (stub exits immediately, but log
+# append happens after disown → poll up to 3s)
+for i in 1 2 3 4 5 6; do
+  grep -q "ERROR source=claude-p code=7" "$DREAM_LOG" 2>/dev/null && break
+  sleep 0.5
+done
+
+grep -q "ERROR source=claude-p code=7" "$DREAM_LOG" \
+  || fail "wrapper did not log ERROR for claude-p exit 7"
+echo "PASS: wrapper captures claude-p non-zero exit + logs ERROR"
+
+# Cleanup + restore stub mode for any future cases
+rm -rf "$STUB_DIR"
+export DREAM_DISPATCH_STUB=1
+
 echo
 echo "All trigger.sh tests passed."
