@@ -153,7 +153,7 @@ All dream-skill state lives under `~/.claude/dream-skill/`:
 ```
 ~/.claude/dream-skill/
 ├── config.toml              # vault roots (you create this)
-├── trigger.log              # SessionEnd dispatch decisions
+├── trigger.log              # ALL dispatch outcomes: SKIP / DISPATCH / SPAWNED / COMPLETED / ERROR / WARNING
 ├── headless.log             # stdout/stderr from spawned claude -p
 ├── error.log                # broken-install diagnostics
 ├── log/<date>.md            # per-day human-readable activity log
@@ -171,6 +171,7 @@ This dir survives plugin updates and reinstalls.
 - **Threshold gate** — sessions with <5 user messages skip dispatch entirely
 - **Fire-and-forget hook** — never blocks shutdown; errors stay in `error.log`
 - **Reason filter** — `clear` and `prompt_input_exit` skip dispatch (you're not actually done)
+- **Failure logging** — every outcome (success, skip, error, silent abort) lands in `~/.claude/dream-skill/trigger.log`. Grep for `ERROR` or `WARNING` to see failures. Zero notifications, zero context pollution.
 
 ## Privacy
 
@@ -197,6 +198,24 @@ Set `DREAM_THRESHOLD=99999` in your shell env, or comment out the SessionEnd ent
 
 **Q: Where do auto-writes go? How do I roll them back?**
 Confident facts append to your Obsidian vault pages (add-only). Every write is logged in `~/.claude/dream-skill/undo/<date>.jsonl`. Roll back a full day with `bash scripts/apply-undo.sh --date YYYY-MM-DD` — originals preserved.
+
+**Q: How do I know if dream-skill failed silently?**
+Everything lands in `~/.claude/dream-skill/trigger.log`. Three failure types get distinct lines:
+
+| Line | Meaning |
+|---|---|
+| `ERROR source=trigger ...` | trigger.sh pre-flight failure (claude CLI missing, etc.) |
+| `ERROR source=claude-p code=N ...` | `claude -p` exited non-zero (API error, timeout, crash) |
+| `WARNING kind=orphan ...` | A spawn never reported completion — silent abort inside the headless skill |
+
+To inspect:
+
+```bash
+tail ~/.claude/dream-skill/trigger.log              # last 10 events
+grep -E "ERROR|WARNING" ~/.claude/dream-skill/trigger.log   # all failures
+```
+
+Legitimate skips (below threshold, duplicate dispatch, empty transcript) appear as `SKIP` lines — not failures. No popups, no Claude-context injection — pure log output.
 
 ## Roadmap
 
