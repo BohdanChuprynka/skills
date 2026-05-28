@@ -217,6 +217,79 @@ grep -E "ERROR|WARNING" ~/.claude/dream-skill/trigger.log   # all failures
 
 Legitimate skips (below threshold, duplicate dispatch, empty transcript) appear as `SKIP` lines — not failures. No popups, no Claude-context injection — pure log output.
 
+## Troubleshooting
+
+**Diagnostic-first checklist.** Run these three before assuming a bug:
+
+```bash
+tail ~/.claude/dream-skill/trigger.log         # most recent dispatches + outcomes
+cat ~/.claude/dream-skill/headless.log         # claude -p stdout/stderr
+cat ~/.claude/dream-skill/error.log            # broken-install diagnostics (Rule 3)
+```
+
+Then match symptom to fix.
+
+### Hard requirements (verify install)
+
+```bash
+claude --version            # any v1.x or v2.x works
+which jq                    # must return a path
+uname -s                    # Darwin or Linux (Windows: use WSL2 or Git Bash)
+ls ~/.claude/dream-skill/   # config.toml + queue/ + log/ + undo/ dirs must exist
+```
+
+If `jq` missing → `brew install jq` (Mac) or `apt install jq` (Debian/Ubuntu).
+
+### Tier 1 — Critical (blocks dispatch entirely)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Nothing happens on session close, trigger.log unchanged | Plugin hooks didn't auto-merge into `~/.claude/settings.json` | Manually add the SessionStart + SessionEnd entries from `hooks/hooks.json` |
+| `ERROR source=trigger code=127 msg=claude-cli-missing` | `claude` CLI not on PATH | Reinstall Claude Code; `which claude` to verify |
+| `ERROR source=claude-p code=N` immediate (<5s) | claude not authenticated (no API key / no subscription session) | `claude login` or set `ANTHROPIC_API_KEY` |
+| Scripts fail with `jq: command not found` | `jq` not installed | `brew install jq` / `apt install jq` |
+| Windows user — scripts won't run at all | Native cmd/PowerShell has no bash | Use WSL2 or Git Bash; dream-skill is bash-only |
+
+### Tier 2 — Functional but degraded
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ERROR source=skill code=1 msg=env-validation-failed` every run | No `~/.claude/dream-skill/config.toml` | Create it. Minimum: one `[vaults.X]` block with `root = "/path/to/vault"` |
+| Auto-mode runs (logs COMPLETED) but writes nothing useful | Vault has no `CLAUDE.md` or `wiki/index.md` — LLM can't route facts | Create both files in vault root, even empty stubs |
+| `WARNING kind=orphan` after every session | `claude -p` exits 0 but headless LLM aborts | Check `~/.claude/dream-skill/headless.log` for the reason (usually permission denial, model error, or SKILL.md prompt issue) |
+| `ERROR source=claude-p code=N` says "model not found" | Pinned `claude-haiku-4-5` not available on user's plan | Override: `export DREAM_MODEL=claude-sonnet-4-6` or earlier haiku build |
+| Subscription rate-limit hit mid-session | Pro/Max 5h quota exhausted | Raise `DREAM_THRESHOLD` so trivial sessions skip; or set cheaper `DREAM_MODEL` |
+| Multiple dispatches, all fast `COMPLETED` but zero queue/vault output | LLM dropping everything as recursive/no-info — may be over-firing | Tune SKILL.md Step 3 Bucket C/D rules (open issue if persistent) |
+
+### Tier 3 — Edge cases (rare)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Lockfile stuck after force-quit, dispatches silently skipped | Stale `~/.claude/dream-skill/.locks/<hash>` from killed process | `rm -rf ~/.claude/dream-skill/.locks/` (safe when no claude -p running) |
+| Hook fires from wrong cwd, paths break | `$CLAUDE_PLUGIN_ROOT` unset (rare for plugin install) | trigger.sh falls back to its own `dirname` — usually works. If not, hardcode absolute path in settings.json hook command |
+| Vault on iCloud Drive, write fails or corrupts | iCloud sync conflict / file open in another app | Move vault outside iCloud, or use Obsidian's local-only mode |
+| Vault has 1000+ pages, headless run slow | SKILL.md loads `wiki/index.md` — large indexes inflate context | Split into per-subdir indexes; trim main index |
+| Disk full — silent append failures | `>>` returns non-zero, swallowed by `|| true` guards | `df -h ~/.claude/` to verify; free disk |
+| Mixed-case path mismatch on Linux | macOS case-insensitive default vs Linux case-sensitive | Match case in `config.toml` `root = ...` exactly to actual directory name |
+| `tac` not on system, undo loop slow | macOS lacks `tac` (Linux-only) — awk fallback used | Already handled; only matters if awk also missing |
+
+### Tier 4 — Known limitations (won't fix in v0.2)
+
+| Limitation | Workaround |
+|---|---|
+| Claude Code crash → SessionEnd never fires | Manually run `/dream-skill --auto <transcript-path>` afterward |
+| Two simultaneous closes (same transcript, <100ms apart) | Per-transcript lock catches dup-dispatch within seconds; sub-100ms race acceptable. Vault-writer idempotency + queue dedup catch downstream duplicates anyway |
+| Plugin updated mid-session | Old hook config in memory stays active for current session; new sessions get new behavior |
+| Transcript .jsonl written async by Claude Code | If hook fires before file flushed, trigger.sh logs `SKIP file-not-found`. Acceptable — next session usually has the file |
+
+### Still stuck?
+
+Open an issue at <https://github.com/BohdanChuprynka/skills/issues> with:
+- Output of the diagnostic-first 3 commands above
+- `claude --version`
+- `uname -a`
+- Last ~50 lines of `~/.claude/dream-skill/trigger.log`
+
 ## Roadmap
 
 - **v0.2** (current) — per-conversation auto-on-close, manual queue review
