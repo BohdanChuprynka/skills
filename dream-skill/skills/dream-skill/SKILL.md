@@ -154,7 +154,7 @@ If — and ONLY if — any file/dir literally does not exist on disk: append the
 
 Run `$DREAM_SCRIPTS_DIR/preprocess.sh "$DREAM_TRANSCRIPT"` (or the path passed via `--auto`). Capture stdout as `clean_transcript`.
 
-If `clean_transcript` is empty or <5 lines, append `SKIP empty-transcript` to `$DREAM_DAILY_LOG` and exit 0.
+If `clean_transcript` is empty (no non-whitespace content after cleaning), append `SKIP empty-transcript` to `$DREAM_DAILY_LOG` and exit 0. Do **not** skip on length alone: a single short user message can be high persona signal (e.g. "I got into MIT", "quit my job today"). Process any session that has at least one real message.
 
 ### Step 2 — Load vault context
 
@@ -269,7 +269,7 @@ echo "$TS COMPLETED source=skill reason=<reason> writes=<N> queued=<N> dropped=<
 
 `<reason>` enum (pick one):
 - `wrote-N` — Step 4 normal completion (N is total `[WRITE]` count)
-- `empty-transcript` — Step 1 stripped output was <5 lines
+- `empty-transcript` — Step 1 stripped output was empty (no content after cleaning)
 - `recursive-transcript` — Step 3 every line was a dream-skill discussion
 - `no-info-gain` — Step 3 candidates extracted but all dropped (Bucket B/C)
 
@@ -278,6 +278,33 @@ echo "$TS COMPLETED source=skill reason=<reason> writes=<N> queued=<N> dropped=<
 ```bash
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "$TS ERROR source=skill code=1 msg=\"<short msg>\" transcript=$DREAM_TRANSCRIPT" >> "$DREAM_LOG"
+```
+
+**Then write the user-visible vault entry.** Same final action — this is what the user sees in Obsidian under `dream-reports/dream-<date>.md`. It uses `$DREAM_CHAT_LABEL` (exported by trigger.sh) and `$DREAM_SCRIPTS_DIR/report.sh`. Run exactly ONE branch, matching the `$DREAM_LOG` outcome you just recorded. It is best-effort: never let a report failure change your exit status.
+
+```bash
+LABEL="${DREAM_CHAT_LABEL:-$(basename "${DREAM_TRANSCRIPT%.jsonl}") (auto)}"
+```
+
+- **wrote** — pipe the SAME `[WRITE]/[QUEUE]/[DROP]` lines you appended to `$DREAM_DAILY_LOG` in Step 4 (omit the `## ...` header and the `Summary:` line):
+
+```bash
+"$DREAM_SCRIPTS_DIR/report.sh" --status wrote --chat "$LABEL" <<'BODY' 2>/dev/null || true
+- [WRITE] me/wiki/<page>.md: <short summary>
+- [DROP] <reason>
+BODY
+```
+
+- **noop** — nothing written; `<reason>` is `empty-transcript` | `recursive-transcript` | `no-info-gain`:
+
+```bash
+"$DREAM_SCRIPTS_DIR/report.sh" --status noop --chat "$LABEL" --reason "<reason>" 2>/dev/null || true
+```
+
+- **error**:
+
+```bash
+"$DREAM_SCRIPTS_DIR/report.sh" --status error --chat "$LABEL" --reason "see error.log" 2>/dev/null || true
 ```
 
 This is the contract that lets the user see silent failures. If you skip Step 6, the next-session orphan scanner produces a spurious `WARNING` line. **Always close the loop.**
