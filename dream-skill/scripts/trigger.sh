@@ -11,10 +11,23 @@
 set -euo pipefail
 
 # --- config -------------------------------------------------------------
-THRESHOLD="${DREAM_THRESHOLD:-5}"
+THRESHOLD="${DREAM_THRESHOLD:-1}"  # dispatch on any session with >=1 user message; raise via DREAM_THRESHOLD
 LOG_FILE="${DREAM_LOG:-$HOME/.claude/dream-skill/trigger.log}"
 LOCK_DIR="${DREAM_LOCK_DIR:-$HOME/.claude/dream-skill/.locks}"
 LOCK_TTL_SEC="${DREAM_LOCK_TTL_SEC:-600}"  # 10 min — within window, suppress dup dispatch
+RESOLVE_WINDOW_SEC="${DREAM_RESOLVE_WINDOW_SEC:-3600}"  # compaction-continuation → root recency guard (1h)
+
+# report.sh path (resolved early so the skip branches below can call it).
+REPORT_SH="${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/scripts}"
+REPORT_SH="${REPORT_SH:-$(cd "$(dirname "$0")" && pwd)}/report.sh"
+
+# Chat label "<first8 of uuid> (<project>)" for vault report entries.
+dream_chat_label() {
+  local tpath="$1" cwd="$2" id proj
+  id="$(basename "${tpath%.jsonl}")"; id="${id:0:8}"
+  if [ -n "$cwd" ]; then proj="$(basename "$cwd")"; else proj="$(basename "$(dirname "$tpath")")"; fi
+  printf '%s (%s)' "${id:-unknown}" "${proj:-?}"
+}
 
 # --- robust exit handling -----------------------------------------------
 mkdir -p "$(dirname "$LOG_FILE")" "$LOCK_DIR" 2>/dev/null || true
@@ -38,6 +51,7 @@ trap on_exit EXIT
 # We also accept CLAUDE_TRANSCRIPT_PATH env var as a fallback (tests + manual).
 TRANSCRIPT="${CLAUDE_TRANSCRIPT_PATH:-}"
 REASON=""
+CWD=""
 
 # Try stdin JSON if env var empty AND stdin is piped (not a tty)
 if [ -z "$TRANSCRIPT" ] && [ ! -t 0 ]; then
@@ -45,6 +59,7 @@ if [ -z "$TRANSCRIPT" ] && [ ! -t 0 ]; then
   if [ -n "$STDIN_JSON" ] && command -v jq >/dev/null 2>&1; then
     TRANSCRIPT=$(echo "$STDIN_JSON" | jq -r '.transcript_path // empty' 2>/dev/null || true)
     REASON=$(echo "$STDIN_JSON" | jq -r '.reason // empty' 2>/dev/null || true)
+    CWD=$(echo "$STDIN_JSON" | jq -r '.cwd // empty' 2>/dev/null || true)
   fi
 fi
 
@@ -55,7 +70,64 @@ if [ -z "$TRANSCRIPT" ]; then
 fi
 
 if [ ! -f "$TRANSCRIPT" ]; then
-  log "SKIP file-not-found path='$TRANSCRIPT'"
+  # The path may belong to a compaction/resume CONTINUATION. Claude Code gives
+  # each continuation a fresh session_id but keeps appending the conversation to
+  # the ROOT session's .jsonl, so the continuation's SessionEnd fires with a
+  # path that never materializes. Without recovery, every long conversation that
+  # compacts loses all signal added after its first dispatch. Resolve to the
+  # live root transcript instead.
+  RESOLVED=""
+  CONT_DIR="${TRANSCRIPT%.jsonl}"
+  CONT_UUID="$(basename "$CONT_DIR")"
+  PROJ_DIR="$(dirname "$TRANSCRIPT")"
+  # Compaction signature: a sibling per-session directory (holding tool-results)
+  # exists even though the .jsonl does not. Absent that directory there is
+  # genuinely nothing to recover — fall through to the original skip.
+  if [ -d "$CONT_DIR" ] && [ -d "$PROJ_DIR" ]; then
+    NOW=$(date +%s)
+    # Scan newest-first: the live root that just compacted is the most recently
+    # written .jsonl. Require both (a) recency and (b) that the candidate
+    # actually references this continuation's uuid, so concurrent unrelated
+    # sessions and stale incidental mentions are never mistaken for the root.
+    while IFS= read -r cand; do
+      [ -f "$cand" ] || continue
+      cand_mtime=$(stat -f %m "$cand" 2>/dev/null || stat -c %Y "$cand" 2>/dev/null || echo 0)
+      [ $((NOW - cand_mtime)) -le "$RESOLVE_WINDOW_SEC" ] || continue
+      if grep -qF "$CONT_UUID" "$cand" 2>/dev/null; then
+        RESOLVED="$cand"
+        break
+      fi
+    done < <(ls -t "$PROJ_DIR"/*.jsonl 2>/dev/null || true)
+  fi
+
+  if [ -n "$RESOLVED" ]; then
+    log "RESOLVED continuation=$CONT_UUID root=$(basename "$RESOLVED")"
+    TRANSCRIPT="$RESOLVED"
+  else
+    log "SKIP file-not-found path='$TRANSCRIPT'"
+    "$REPORT_SH" --status skipped --chat "$(dream_chat_label "$TRANSCRIPT" "${CWD:-}")" \
+                 --reason "no transcript found" 2>/dev/null || true
+    exit 0
+  fi
+fi
+
+# --- recursion guard: never re-process our own headless auto-runs -------
+# A headless `claude -p "/dream-skill --auto X"` spawns its OWN session. When
+# that session ends, Claude Code fires THIS hook again with the run's own
+# transcript — which would re-dispatch forever: a self-perpetuating cascade
+# that burns model quota every ~30s and even spreads across projects.
+# Two independent skips:
+#   1. DREAM_SKILL_HEADLESS env marker set on the spawned run (see below); its
+#      SessionEnd inherits it.
+#   2. The injected SKILL.md signature at the head of the transcript — a
+#      headless run's first message IS the skill prompt — as a fallback in
+#      case the hook does not inherit the spawned process's environment.
+if [ "${DREAM_SKILL_HEADLESS:-0}" = "1" ]; then
+  log "SKIP recursive-headless reason=env-marker transcript=$TRANSCRIPT"
+  exit 0
+fi
+if head -c 8000 "$TRANSCRIPT" 2>/dev/null | grep -qE 'Persona-model sync for an Obsidian vault|/dream-skill --auto'; then
+  log "SKIP recursive-headless reason=skill-signature transcript=$TRANSCRIPT"
   exit 0
 fi
 
@@ -68,10 +140,15 @@ case "$REASON" in
 esac
 
 # --- count user-turn messages -------------------------------------------
-USER_MSGS=$(grep -c '"role":"user"' "$TRANSCRIPT" 2>/dev/null || echo 0)
+# grep -c prints "0" AND exits 1 on zero matches; capturing through `|| echo 0`
+# would append a second line ("0\n0") and break the integer compare below.
+# Capture the count, then normalize a non-zero exit to a clean integer.
+USER_MSGS=$(grep -c '"role":"user"' "$TRANSCRIPT" 2>/dev/null) || USER_MSGS=0
 
 if [ "$USER_MSGS" -lt "$THRESHOLD" ]; then
   log "SKIP below-threshold count=$USER_MSGS threshold=$THRESHOLD"
+  "$REPORT_SH" --status skipped --chat "$(dream_chat_label "$TRANSCRIPT" "${CWD:-}")" \
+               --reason "below-threshold ($USER_MSGS user messages)" 2>/dev/null || true
   exit 0
 fi
 
@@ -134,7 +211,12 @@ export DREAM_DAILY_LOG="$DREAM_HOME/log/$(date -u +%Y-%m-%d).md"
 export DREAM_UNDO_LOG="$DREAM_HOME/undo/$(date -u +%Y-%m-%d).jsonl"
 export DREAM_ERROR_LOG="$DREAM_HOME/error.log"
 export DREAM_TRANSCRIPT="$TRANSCRIPT"
+export DREAM_CHAT_LABEL="$(dream_chat_label "$TRANSCRIPT" "${CWD:-}")"
 export DREAM_LOG  # explicit export so the headless skill can append COMPLETED/ERROR markers
+# Recursion marker: the spawned run's OWN SessionEnd fires this hook again.
+# This var lets that invocation recognize itself as a headless auto-run and
+# skip (see recursion guard above), belt-and-suspenders with the signature check.
+export DREAM_SKILL_HEADLESS=1
 
 # Pin model: Haiku 4.5 is sufficient for the dream-skill classifier+router
 # task (pattern matching + tool calls, no deep reasoning). ~30x cheaper
@@ -146,10 +228,19 @@ MODEL="${DREAM_MODEL:-claude-haiku-4-5}"
 # to trigger.log. Outer `nohup ... &` keeps trigger.sh fire-and-forget
 # (it returns immediately). Inner block is the wait-and-report logic.
 # No notifications anywhere — logs only.
+#
+# Hardening (defense-in-depth with the recursion guard above):
+#   --no-session-persistence : the headless run writes NO transcript to disk, so
+#       its SessionEnd has nothing to recurse on (kills the cascade at the source)
+#       and no junk transcripts pile up. Valid only with --print, which we use.
+#   --strict-mcp-config      : auto mode never calls MCP tools; don't load the
+#       user's Notion/Gmail/Calendar servers — faster run, smaller surface.
 nohup bash -c "
   claude -p \\
     --model '$MODEL' \\
     --dangerously-skip-permissions \\
+    --no-session-persistence \\
+    --strict-mcp-config \\
     '/dream-skill --auto $TRANSCRIPT' \\
     >> '$(dirname "$LOG_FILE")/headless.log' 2>&1
   RC=\$?

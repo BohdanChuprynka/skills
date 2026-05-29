@@ -18,12 +18,25 @@ rm -rf "$DREAM_LOG" "$DREAM_LOCK_DIR"
 fail() { echo "FAIL: $*"; echo "--- log was ---"; cat "$DREAM_LOG" 2>/dev/null; exit 1; }
 reset_log() { rm -f "$DREAM_LOG"; rm -rf "$DREAM_LOCK_DIR"; mkdir -p "$DREAM_LOCK_DIR"; }
 
-# === Case 1: 3-msg fixture → below threshold SKIP ===
+# === Case 1: explicit high threshold gates a small session (mechanism test) ===
+reset_log
+DREAM_THRESHOLD=5 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-3msg.jsonl" "$TRIGGER"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "3-msg fixture dispatched under threshold=5"
+grep -q "below-threshold" "$DREAM_LOG" 2>/dev/null || fail "3-msg fixture did not log below-threshold at threshold=5"
+echo "PASS: threshold=5 gates a 3-message session (below-threshold)"
+
+# === Case 1b: default threshold (1) dispatches any session with >=1 user message ===
 reset_log
 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-3msg.jsonl" "$TRIGGER"
-grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "3-msg fixture triggered DISPATCH"
-grep -q "below-threshold" "$DREAM_LOG" 2>/dev/null || fail "3-msg fixture did not log below-threshold"
-echo "PASS: 3-message fixture skipped (below-threshold)"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "3-msg fixture did not dispatch under default threshold"
+echo "PASS: default threshold dispatches a 3-message session"
+
+# === Case 1c: floor — 0 user messages skips even at default threshold ===
+reset_log
+CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-0msg.jsonl" "$TRIGGER"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "0-user-msg fixture triggered DISPATCH"
+grep -q "below-threshold" "$DREAM_LOG" 2>/dev/null || fail "0-user-msg fixture did not log below-threshold"
+echo "PASS: 0-user-message session skipped (below-threshold floor)"
 
 # === Case 2: 15-msg fixture → DISPATCH ===
 reset_log
@@ -110,6 +123,94 @@ echo "PASS: wrapper captures claude-p non-zero exit + logs ERROR"
 # Cleanup + restore stub mode for any future cases
 rm -rf "$STUB_DIR"
 export DREAM_DISPATCH_STUB=1
+
+# === Case 10: compaction-continuation → resolve to live root + DISPATCH ===
+# A continued conversation's SessionEnd fires with <uuid>.jsonl that never
+# materializes; Claude Code keeps appending the content to the ROOT .jsonl
+# (which references the continuation uuid). trigger.sh must recover the root.
+reset_log
+PROJ10=$(mktemp -d "/tmp/dream-proj10-XXXXXX")
+CONT10="aaaaaaaa-1111-2222-3333-444444444444"
+mkdir -p "$PROJ10/$CONT10/tool-results"   # compaction signature: sibling dir, no .jsonl
+ROOT10="$PROJ10/99990000-0000-0000-0000-000000000000.jsonl"
+cp "$FIXTURE_DIR/transcript-15msg.jsonl" "$ROOT10"
+echo "{\"type\":\"attachment\",\"sessionId\":\"99990000-0000-0000-0000-000000000000\",\"ref\":\"$PROJ10/$CONT10/tool-results/x.txt\"}" >> "$ROOT10"
+CLAUDE_TRANSCRIPT_PATH="$PROJ10/$CONT10.jsonl" "$TRIGGER"
+grep -q "RESOLVED continuation=$CONT10" "$DREAM_LOG" 2>/dev/null || fail "compaction-continuation not resolved to root"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "resolved root did not dispatch"
+rm -rf "$PROJ10"
+echo "PASS: compaction-continuation resolves to live root and dispatches"
+
+# === Case 11: sibling dir but NO root references the uuid → SKIP (linkage guard) ===
+# Prevents grabbing an unrelated concurrent transcript just because it is newest.
+reset_log
+PROJ11=$(mktemp -d "/tmp/dream-proj11-XXXXXX")
+CONT11="bbbbbbbb-1111-2222-3333-444444444444"
+mkdir -p "$PROJ11/$CONT11/tool-results"
+cp "$FIXTURE_DIR/transcript-15msg.jsonl" "$PROJ11/unrelated.jsonl"   # recent, but no uuid reference
+CLAUDE_TRANSCRIPT_PATH="$PROJ11/$CONT11.jsonl" "$TRIGGER"
+grep -q "RESOLVED" "$DREAM_LOG" 2>/dev/null && fail "resolved despite no uuid linkage"
+grep -q "file-not-found" "$DREAM_LOG" 2>/dev/null || fail "unlinked continuation did not skip file-not-found"
+rm -rf "$PROJ11"
+echo "PASS: continuation with no linked root → file-not-found (linkage guard)"
+
+# === Case 12: linked root but stale mtime → SKIP (recency guard) ===
+# A root referenced only incidentally long ago must not be mistaken for the
+# live conversation that just compacted.
+reset_log
+PROJ12=$(mktemp -d "/tmp/dream-proj12-XXXXXX")
+CONT12="cccccccc-1111-2222-3333-444444444444"
+mkdir -p "$PROJ12/$CONT12/tool-results"
+ROOT12="$PROJ12/12340000-0000-0000-0000-000000000000.jsonl"
+cp "$FIXTURE_DIR/transcript-15msg.jsonl" "$ROOT12"
+echo "incidental ref $CONT12" >> "$ROOT12"
+touch -t 202001010000 "$ROOT12"   # backdate far beyond the recency window
+CLAUDE_TRANSCRIPT_PATH="$PROJ12/$CONT12.jsonl" "$TRIGGER"
+grep -q "RESOLVED" "$DREAM_LOG" 2>/dev/null && fail "resolved a stale root beyond recency window"
+grep -q "file-not-found" "$DREAM_LOG" 2>/dev/null || fail "stale-root continuation did not skip"
+rm -rf "$PROJ12"
+echo "PASS: stale root beyond window → file-not-found (recency guard)"
+
+# === Case 13: headless auto-run transcript → SKIP recursive-headless (signature) ===
+# A headless `claude -p "/dream-skill --auto X"` run creates its OWN transcript,
+# which begins with the injected SKILL.md. Its SessionEnd must NOT re-dispatch,
+# or the system cascades (each run spawns the next) and burns model quota.
+reset_log
+HEADLESS13=$(mktemp "/tmp/dream-headless13-XXXXXX.jsonl")
+printf '%s\n' \
+  '{"role":"user","content":"Base directory for this skill: /x\n\n# dream-skill\n\nPersona-model sync for an Obsidian vault. Four modes:"}' \
+  '{"role":"assistant","content":"running auto mode"}' > "$HEADLESS13"
+CLAUDE_TRANSCRIPT_PATH="$HEADLESS13" "$TRIGGER"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "headless transcript re-dispatched (cascade risk!)"
+grep -q "recursive-headless" "$DREAM_LOG" 2>/dev/null || fail "headless transcript not skipped as recursive"
+rm -f "$HEADLESS13"
+echo "PASS: headless auto-run transcript skipped (recursive-headless signature)"
+
+# === Case 14: DREAM_SKILL_HEADLESS env marker → SKIP recursive-headless ===
+# Belt-and-suspenders: a spawned run's SessionEnd inherits this marker, so it is
+# skipped even if the transcript signature check is ever evaded.
+reset_log
+DREAM_SKILL_HEADLESS=1 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "env-marker run re-dispatched (cascade risk!)"
+grep -q "recursive-headless reason=env-marker" "$DREAM_LOG" 2>/dev/null || fail "env-marker not honored"
+echo "PASS: DREAM_SKILL_HEADLESS env marker skips (recursive-headless)"
+
+# === Case 15: below-threshold skip writes a vault report entry ===
+reset_log
+RD15="$(mktemp -d /tmp/dream-trig-rep15-XXXXXX)"
+DREAM_REPORTS_DIR="$RD15" CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-0msg.jsonl" "$TRIGGER"
+grep -q "^### .* — skipped$" "$RD15"/dream-*.md 2>/dev/null || fail "below-threshold skip wrote no vault entry"
+grep -q "below-threshold" "$RD15"/dream-*.md 2>/dev/null || fail "vault entry missing below-threshold reason"
+rm -rf "$RD15"
+echo "PASS: below-threshold skip produces a vault report entry"
+
+# === Case 16: successful dispatch writes NO vault entry (the skill owns that) ===
+reset_log
+RD16="$(mktemp -d /tmp/dream-trig-rep16-XXXXXX)"
+DREAM_REPORTS_DIR="$RD16" CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
+[ -z "$(ls -A "$RD16" 2>/dev/null)" ] || fail "dispatch should not write a vault entry (skill does)"
+rm -rf "$RD16"
+echo "PASS: successful dispatch writes no vault entry"
 
 echo
 echo "All trigger.sh tests passed."
