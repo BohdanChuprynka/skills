@@ -15,11 +15,12 @@
 
 set -uo pipefail   # deliberately NOT -e: best-effort, must always reach exit 0
 
-STATUS=""; CHAT=""; REASON=""; TIME_STR=""; REPORTS_DIR_ARG=""
+STATUS=""; CHAT=""; REASON=""; TIME_STR=""; REPORTS_DIR_ARG=""; TITLE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --status)      STATUS="${2:-}"; shift 2 ;;
     --chat)        CHAT="${2:-}"; shift 2 ;;
+    --title)       TITLE="${2:-}"; shift 2 ;;
     --reason)      REASON="${2:-}"; shift 2 ;;
     --time)        TIME_STR="${2:-}"; shift 2 ;;
     --reports-dir) REPORTS_DIR_ARG="${2:-}"; shift 2 ;;
@@ -78,6 +79,9 @@ esac
 # newline is a SEPARATOR. (Command substitution strips trailing newlines, so a
 # naive "$ENTRY$(printf 'reason...\n')" would glue lines together.)
 ENTRY="$(printf '\n### %s — %s\nchat: %s' "$TIME_STR" "$head_status" "${CHAT:-unknown}")"
+if [ -n "$TITLE" ]; then
+  ENTRY="$(printf '%s\ntitle: %s' "$ENTRY" "$TITLE")"
+fi
 if [ "$STATUS" = "wrote" ] && [ -n "$BODY" ]; then
   ENTRY="$(printf '%s\ncontents:\n%s' "$ENTRY" "$BODY")"
 elif [ -n "$REASON" ]; then

@@ -61,5 +61,17 @@ grep -q "^chat: bbb$" "$F2" || fail "concurrent: second entry missing"
 rm -rf "$RD2"
 echo "PASS: concurrent appends both land"
 
+# Case 8: --title emits a title: line directly under chat:
+"$REPORT" --status skipped --chat "zzz (Obsidian)" --title "can you check the dream skill" --reason "below-threshold (0 user messages)" --reports-dir "$RD"
+grep -q "^title: can you check the dream skill$" "$FILE" || fail "no title line for --title"
+grep -A2 "^chat: zzz" "$FILE" | grep -q "^title: can you check" || fail "title not directly under chat"
+echo "PASS: --title emits a title line under chat"
+
+# Case 9: no --title → no title line for that entry
+"$REPORT" --status noop --chat "notitle" --reason "x" --reports-dir "$RD"
+line_after="$(grep -A1 "^chat: notitle$" "$FILE" | tail -1)"
+case "$line_after" in title:*) fail "unexpected title line when --title omitted";; esac
+echo "PASS: no title line when --title omitted"
+
 echo
 echo "All report.sh tests passed."
