@@ -8,6 +8,7 @@ REPORT="$SCRIPT_DIR/../scripts/report.sh"
 
 RD="$(mktemp -d /tmp/dream-reports-test-XXXXXX)"
 export DREAM_ERROR_LOG="$RD/error.log"
+export DREAM_REPORTS_DIR="$RD"   # safety net: never fall through to the real vault config
 trap 'rm -rf "$RD"' EXIT
 fail() { echo "FAIL: $*"; echo "--- file ---"; cat "$RD"/dream-*.md 2>/dev/null; exit 1; }
 DATE="$(date +%Y-%m-%d)"

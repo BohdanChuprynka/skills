@@ -8,12 +8,16 @@ TRIGGER="$SCRIPT_DIR/../scripts/trigger.sh"
 
 [ -x "$TRIGGER" ] || { echo "FAIL: trigger.sh missing or not executable at $TRIGGER"; exit 1; }
 
-# Isolate test state
+# Isolate test state. DREAM_REPORTS_DIR MUST be set: otherwise report.sh (called
+# by trigger.sh on skip branches) falls through to the real config and writes
+# into the user's actual vault. Per-case overrides still win for the cases that
+# assert on a specific reports dir.
 export DREAM_DISPATCH_STUB=1
 export DREAM_LOG=/tmp/dream-test-trigger-$$.log
 export DREAM_LOCK_DIR=/tmp/dream-test-locks-$$
-trap 'rm -rf "$DREAM_LOG" "$DREAM_LOCK_DIR"' EXIT
-rm -rf "$DREAM_LOG" "$DREAM_LOCK_DIR"
+export DREAM_REPORTS_DIR=/tmp/dream-test-reports-$$
+trap 'rm -rf "$DREAM_LOG" "$DREAM_LOCK_DIR" "$DREAM_REPORTS_DIR"' EXIT
+rm -rf "$DREAM_LOG" "$DREAM_LOCK_DIR" "$DREAM_REPORTS_DIR"
 
 fail() { echo "FAIL: $*"; echo "--- log was ---"; cat "$DREAM_LOG" 2>/dev/null; exit 1; }
 reset_log() { rm -f "$DREAM_LOG"; rm -rf "$DREAM_LOCK_DIR"; mkdir -p "$DREAM_LOCK_DIR"; }
@@ -63,7 +67,7 @@ echo "{\"session_id\":\"test\",\"transcript_path\":\"$FIXTURE_DIR/transcript-15m
 grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "stdin-JSON did not dispatch"
 echo "PASS: stdin-JSON dispatches"
 
-# === Case 6: per-transcript lock — second dispatch within TTL is suppressed ===
+# === Case 6: re-closing the same chat with no new messages is suppressed ===
 reset_log
 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
 DISPATCH_COUNT=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
@@ -71,21 +75,24 @@ DISPATCH_COUNT=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
 
 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
 DISPATCH_COUNT_AFTER=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
-[ "$DISPATCH_COUNT_AFTER" -eq 1 ] || fail "second call within TTL re-dispatched (count=$DISPATCH_COUNT_AFTER, expected 1)"
+[ "$DISPATCH_COUNT_AFTER" -eq 1 ] || fail "second identical close re-dispatched (count=$DISPATCH_COUNT_AFTER, expected 1)"
 
-grep -q "duplicate-dispatch" "$DREAM_LOG" 2>/dev/null || fail "second call did not log duplicate-dispatch"
-echo "PASS: per-transcript lock suppresses duplicate dispatch within TTL"
+grep -q "no-new-messages" "$DREAM_LOG" 2>/dev/null || fail "second identical close did not log no-new-messages"
+echo "PASS: re-close with no new messages is suppressed (count-delta)"
 
-# === Case 7: lock expires past TTL → re-dispatch allowed ===
+# === Case 7: count-delta — re-dispatch only when new messages appear ===
 reset_log
-export DREAM_LOCK_TTL_SEC=1
-CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
-sleep 2
-CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.jsonl" "$TRIGGER"
-DISPATCH_COUNT=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
-[ "$DISPATCH_COUNT" -eq 2 ] || fail "after TTL expiry, expected 2 dispatches, got $DISPATCH_COUNT"
-unset DREAM_LOCK_TTL_SEC
-echo "PASS: expired lock allows re-dispatch"
+TMPD7="$(mktemp -d /tmp/dream-delta7-XXXXXX)"; TMPT7="$TMPD7/conv.jsonl"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"one"}}' > "$TMPT7"
+CLAUDE_TRANSCRIPT_PATH="$TMPT7" "$TRIGGER"                                 # count 1 > prev 0 -> dispatch
+CLAUDE_TRANSCRIPT_PATH="$TMPT7" "$TRIGGER"                                 # count 1 == prev 1 -> skip
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"two"}}' >> "$TMPT7"
+CLAUDE_TRANSCRIPT_PATH="$TMPT7" "$TRIGGER"                                 # count 2 > prev 1 -> dispatch
+DCOUNT=$(grep -c "DISPATCH" "$DREAM_LOG" 2>/dev/null || echo 0)
+[ "$DCOUNT" -eq 2 ] || fail "count-delta: expected 2 dispatches (initial + after new msg), got $DCOUNT"
+grep -q "no-new-messages" "$DREAM_LOG" 2>/dev/null || fail "count-delta: unchanged close did not log no-new-messages"
+rm -rf "$TMPD7"
+echo "PASS: count-delta re-dispatches only on new messages"
 
 # === Case 8: reason=clear → SKIP ===
 reset_log
@@ -211,6 +218,72 @@ DREAM_REPORTS_DIR="$RD16" CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-15msg.
 [ -z "$(ls -A "$RD16" 2>/dev/null)" ] || fail "dispatch should not write a vault entry (skill does)"
 rm -rf "$RD16"
 echo "PASS: successful dispatch writes no vault entry"
+
+# === Case 17: skip entry carries a title: line pulled from history.jsonl ===
+reset_log
+RD17="$(mktemp -d /tmp/dream-trig-rep17-XXXXXX)"
+HIST17="$(mktemp /tmp/dream-hist17-XXXXXX)"
+printf '%s\n' '{"sessionId":"transcript-0msg","display":"my opener prompt about dreams","project":"/x"}' > "$HIST17"
+DREAM_REPORTS_DIR="$RD17" DREAM_HISTORY_FILE="$HIST17" \
+  CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-0msg.jsonl" "$TRIGGER"
+grep -q "^title: my opener prompt about dreams$" "$RD17"/dream-*.md 2>/dev/null \
+  || fail "skip entry missing title pulled from history.jsonl"
+rm -rf "$RD17" "$HIST17"
+echo "PASS: skip entry carries title from history.jsonl"
+
+# === Case 18: title skips paste/image placeholders, uses first real prompt ===
+reset_log
+RD18="$(mktemp -d /tmp/dream-trig-rep18-XXXXXX)"
+HIST18="$(mktemp /tmp/dream-hist18-XXXXXX)"
+{
+  printf '%s\n' '{"sessionId":"transcript-0msg","display":"[Pasted text #1 +3 lines]"}'
+  printf '%s\n' '{"sessionId":"transcript-0msg","display":"real opener after the paste"}'
+} > "$HIST18"
+DREAM_REPORTS_DIR="$RD18" DREAM_HISTORY_FILE="$HIST18" \
+  CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-0msg.jsonl" "$TRIGGER"
+grep -q "^title: real opener after the paste$" "$RD18"/dream-*.md 2>/dev/null \
+  || fail "title did not skip the paste placeholder"
+grep -q "Pasted text" "$RD18"/dream-*.md 2>/dev/null && fail "title used the paste placeholder"
+rm -rf "$RD18" "$HIST18"
+echo "PASS: title skips paste/image placeholders"
+
+# === Case 19: count is GENUINE typed messages, not tool_results / meta / injections ===
+# transcript-real-format carries role:user on 4 records, but only 2 are messages the
+# user actually typed (1 is a tool_result, 1 an isMeta caveat). At threshold=3 the
+# genuine count (2) must fall BELOW threshold and skip. The old grep-based count (4)
+# would wrongly dispatch — so this pins the genuine-message-counting semantics.
+reset_log
+DREAM_THRESHOLD=3 CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-real-format.jsonl" "$TRIGGER"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "tool_result/meta records inflated count past threshold (dispatched)"
+grep -q "below-threshold count=2 threshold=3" "$DREAM_LOG" 2>/dev/null \
+  || fail "genuine count should be 2 (tool_result + isMeta excluded); got: $(grep below-threshold "$DREAM_LOG" 2>/dev/null | tail -1)"
+echo "PASS: count uses genuine typed messages (excludes tool_results/meta/injections)"
+
+# === Case 20: gate fires on count CHANGE, not just growth — heals a stale baseline ===
+# The stored seen-count can end up in a different SCALE than the live counter (e.g.
+# after the message-counting method changes, an old inflated count lingers). If the
+# new genuine count is LOWER than the stored value, the chat must still re-dispatch
+# once and re-baseline — not get stuck skipping forever. Gate compares != (not >),
+# so 2 != 15 -> dispatch, then prev becomes 2 and 2 == 2 -> skip.
+reset_log
+TMPD20="$(mktemp -d /tmp/dream-delta20-XXXXXX)"; TMPT20="$TMPD20/conv.jsonl"
+printf '%s\n' \
+  '{"type":"user","message":{"role":"user","content":"one"}}' \
+  '{"type":"user","message":{"role":"user","content":"two"}}' > "$TMPT20"
+if command -v shasum >/dev/null 2>&1; then
+  HASH20=$(printf '%s' "$TMPT20" | shasum -a 1 | awk '{print $1}')
+else
+  HASH20=$(printf '%s' "$TMPT20" | cksum | awk '{print $1}')
+fi
+echo 15 > "$DREAM_LOCK_DIR/$HASH20"   # simulate a stale, higher baseline (old grep counter)
+CLAUDE_TRANSCRIPT_PATH="$TMPT20" "$TRIGGER"                                # count 2 != prev 15 -> dispatch
+grep -q "DISPATCH count=2 prev=15" "$DREAM_LOG" 2>/dev/null \
+  || fail "lower-than-stale count did not re-dispatch (stuck-skip bug); got: $(grep -E 'DISPATCH|no-new' "$DREAM_LOG" | tail -1)"
+CLAUDE_TRANSCRIPT_PATH="$TMPT20" "$TRIGGER"                                # now prev=2, count 2 == 2 -> skip
+grep -q "no-new-messages count=2 prev=2" "$DREAM_LOG" 2>/dev/null \
+  || fail "did not re-baseline to genuine count after heal"
+rm -rf "$TMPD20"
+echo "PASS: count change (incl. downward) heals stale baseline, then re-baselines"
 
 echo
 echo "All trigger.sh tests passed."

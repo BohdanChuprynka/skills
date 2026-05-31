@@ -52,9 +52,9 @@ You never type `/sync-wiki` again. Your vault stays current. You review the queu
 │  SessionEnd hook fires (auto-installed with the plugin)            │
 │  → scripts/trigger.sh                                              │
 │     - reads transcript path from stdin JSON                        │
-│     - counts user messages                                         │
-│     - 0  → SKIP silently                                           │
-│     - ≥1 → take dedupe lock, export DREAM_* env vars, spawn:       │
+│     - counts genuine user messages (real typed turns)              │
+│     - 0 or unchanged since last close → SKIP                       │
+│     - new message → export DREAM_* env vars, spawn:                │
 │       nohup claude -p "/dream-skill --auto <transcript>" &         │
 └────────────────────────────────────────────────────────────────────┘
                                   │
@@ -140,8 +140,8 @@ Each vault root should have a `CLAUDE.md` (the schema Claude reads) and a `wiki/
 
 | Var | Default | Purpose |
 |---|---|---|
-| `DREAM_THRESHOLD` | `1` | Min user messages to trigger dispatch |
-| `DREAM_LOCK_TTL_SEC` | `600` | Dedupe-lock TTL (suppress duplicate dispatch on multi-window close) |
+| `DREAM_THRESHOLD` | `1` | Min genuine user messages to trigger dispatch |
+| `DREAM_MODEL` | `claude-haiku-4-5` | Model for the headless classifier run |
 | `DREAM_HOME` | `~/.claude/dream-skill` | State root |
 | `DREAM_CONFIG` | `$DREAM_HOME/config.toml` | Vault config |
 | `DREAM_QUEUE_FILE` | `$DREAM_HOME/queue/pending.md` | Queue file |
@@ -167,8 +167,8 @@ This dir survives plugin updates and reinstalls.
 
 - **Add-only auto writes** to vault pages (auto mode never deletes or overwrites)
 - **Per-day undo log** — full rollback with `apply-undo.sh --date <YYYY-MM-DD>`
-- **Dedupe lock** — second close of the same conversation within 10 min is skipped
-- **Threshold gate** — sessions with no user messages skip dispatch entirely (raise `DREAM_THRESHOLD` to require more)
+- **Count-delta gate** — re-closing a conversation with no new messages is skipped (resume and type nothing → skip; type anything → re-capture)
+- **Threshold gate** — sessions with no genuine user messages skip dispatch entirely (raise `DREAM_THRESHOLD` to require more)
 - **Fire-and-forget hook** — never blocks shutdown; errors stay in `error.log`
 - **Reason filter** — `clear` and `prompt_input_exit` skip dispatch (you're not actually done)
 - **Failure logging** — every outcome (success, skip, error, silent abort) lands in `~/.claude/dream-skill/trigger.log`. Grep for `ERROR` or `WARNING` to see failures. Zero notifications, zero context pollution.
@@ -182,13 +182,16 @@ This dir survives plugin updates and reinstalls.
 ## FAQ
 
 **Q: I closed the same chat in two windows (used `/resume`). Will my vault get polluted?**
-No. Three dedupe layers protect you: per-transcript dispatch lock, vault per-line idempotency (`grep -Fxq` exact match), and queue `(title, target)` dedupe. Each unique fact lands exactly once. Worst case: 2x cost on a wasted second headless run that produces zero vault changes.
+No. Three dedupe layers protect you: the per-transcript count-delta gate (re-dispatch only when you've added a message), vault per-line idempotency (`grep -Fxq` exact match), and queue `(title, target)` dedupe. Each unique fact lands exactly once. Worst case: 2x cost on a wasted second headless run that produces zero vault changes.
+
+**Q: How do I confirm it ran, from inside Obsidian?**
+Every run appends a one-line entry to a `dream-reports/dream-<date>.md` file alongside your vault: `wrote N` with the captured bullets, `ran, 0 writes` when nothing was persona-worthy, or `skipped` with the reason. Glance at today's file to see what each close captured — no leaving Obsidian.
 
 **Q: How much does each session close cost?**
 On a Claude Code subscription (Pro / Max / Team) it's covered — no extra bill. Each dispatch just consumes a small slice of your normal session quota. Approximate per-dispatch usage with the default Haiku 4.5 model: ~30–80K input tokens (preprocessed transcript + vault `CLAUDE.md` + `wiki/index.md`) + ~1–5K output tokens. Translates to roughly $0.01–$0.10 on API billing, or ~5–15% of a single Pro 5-hour window per dispatch. Sessions with no user messages skip entirely; raise `DREAM_THRESHOLD` if you want to gate out short throwaway sessions too. Switch model with `DREAM_MODEL=claude-sonnet-4-6` for higher-quality classification at ~5x the spend.
 
 **Q: Will it fire if I just open Claude and close without typing anything?**
-No. Threshold gate skips silently when user-message count is below `DREAM_THRESHOLD` (default 1, so only sessions with zero user messages skip).
+No. Threshold gate skips silently when the genuine user-message count is below `DREAM_THRESHOLD` (default 1, so only sessions with zero typed messages skip).
 
 **Q: What if Claude Code crashes or I force-quit?**
 SessionEnd hook only fires on `/exit`, ⌘W, or normal quit — not on crash. The dropped session's facts are missed until you reopen and run `/dream-skill` manually (which sweeps the queue) or `/sync-wiki` (if you still have that skill).
@@ -215,7 +218,7 @@ tail ~/.claude/dream-skill/trigger.log              # last 10 events
 grep -E "ERROR|WARNING" ~/.claude/dream-skill/trigger.log   # all failures
 ```
 
-Legitimate skips (below threshold, duplicate dispatch, empty transcript) appear as `SKIP` lines — not failures. No popups, no Claude-context injection — pure log output.
+Legitimate skips (below threshold, no new messages, empty transcript) appear as `SKIP` lines — not failures. No popups, no Claude-context injection — pure log output.
 
 ## Troubleshooting
 
@@ -265,7 +268,7 @@ If `jq` missing → `brew install jq` (Mac) or `apt install jq` (Debian/Ubuntu).
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Lockfile stuck after force-quit, dispatches silently skipped | Stale `~/.claude/dream-skill/.locks/<hash>` from killed process | `rm -rf ~/.claude/dream-skill/.locks/` (safe when no claude -p running) |
+| A chat won't re-capture even after you add messages | Stale seen-count in `~/.claude/dream-skill/.locks/<hash>` | Self-heals on the next close (gate re-dispatches on any count change). To force-reset all baselines: `rm -rf ~/.claude/dream-skill/.locks/` |
 | Hook fires from wrong cwd, paths break | `$CLAUDE_PLUGIN_ROOT` unset (rare for plugin install) | trigger.sh falls back to its own `dirname` — usually works. If not, hardcode absolute path in settings.json hook command |
 | Vault on iCloud Drive, write fails or corrupts | iCloud sync conflict / file open in another app | Move vault outside iCloud, or use Obsidian's local-only mode |
 | Vault has 1000+ pages, headless run slow | SKILL.md loads `wiki/index.md` — large indexes inflate context | Split into per-subdir indexes; trim main index |
@@ -278,7 +281,7 @@ If `jq` missing → `brew install jq` (Mac) or `apt install jq` (Debian/Ubuntu).
 | Limitation | Workaround |
 |---|---|
 | Claude Code crash → SessionEnd never fires | Manually run `/dream-skill --auto <transcript-path>` afterward |
-| Two simultaneous closes (same transcript, <100ms apart) | Per-transcript lock catches dup-dispatch within seconds; sub-100ms race acceptable. Vault-writer idempotency + queue dedup catch downstream duplicates anyway |
+| Two simultaneous closes (same transcript, <100ms apart) | Both reads see the same seen-count, so a sub-100ms race may double-dispatch. Vault-writer idempotency + queue dedup catch the downstream duplicates anyway |
 | Plugin updated mid-session | Old hook config in memory stays active for current session; new sessions get new behavior |
 | Transcript .jsonl written async by Claude Code | If hook fires before file flushed, trigger.sh logs `SKIP file-not-found`. Acceptable — next session usually has the file |
 
@@ -292,7 +295,7 @@ Open an issue at <https://github.com/BohdanChuprynka/skills/issues> with:
 
 ## Roadmap
 
-- **v0.2** (current) — per-conversation auto-on-close, manual queue review
+- **v0.2** (current) — per-conversation auto-on-close, manual queue review, in-vault progress reports
 - **v0.2.1** (next) — first-run setup wizard, cost guard via token counter, JSON-shaped headless log
 - **v0.3** — `/dream-skill --reconcile` for periodic full-vault audit against accumulated session data
 

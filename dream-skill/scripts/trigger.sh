@@ -13,8 +13,7 @@ set -euo pipefail
 # --- config -------------------------------------------------------------
 THRESHOLD="${DREAM_THRESHOLD:-1}"  # dispatch on any session with >=1 user message; raise via DREAM_THRESHOLD
 LOG_FILE="${DREAM_LOG:-$HOME/.claude/dream-skill/trigger.log}"
-LOCK_DIR="${DREAM_LOCK_DIR:-$HOME/.claude/dream-skill/.locks}"
-LOCK_TTL_SEC="${DREAM_LOCK_TTL_SEC:-600}"  # 10 min — within window, suppress dup dispatch
+LOCK_DIR="${DREAM_LOCK_DIR:-$HOME/.claude/dream-skill/.locks}"  # per-transcript seen-count state
 RESOLVE_WINDOW_SEC="${DREAM_RESOLVE_WINDOW_SEC:-3600}"  # compaction-continuation → root recency guard (1h)
 
 # report.sh path (resolved early so the skip branches below can call it).
@@ -27,6 +26,23 @@ dream_chat_label() {
   id="$(basename "${tpath%.jsonl}")"; id="${id:0:8}"
   if [ -n "$cwd" ]; then proj="$(basename "$cwd")"; else proj="$(basename "$(dirname "$tpath")")"; fi
   printf '%s (%s)' "${id:-unknown}" "${proj:-?}"
+}
+
+# First user prompt for a session id, from history.jsonl — the basis of the
+# title Claude Code shows in its resume picker. Single line, truncated. Empty
+# (no title line) when history/jq is unavailable or the id has no prompt.
+dream_chat_title() {
+  local sid="$1" hist title
+  hist="${DREAM_HISTORY_FILE:-$HOME/.claude/history.jsonl}"
+  [ -n "$sid" ] && [ -f "$hist" ] && command -v jq >/dev/null 2>&1 || return 0
+  # First prompt that is real typed text — skip Claude Code's paste/image
+  # placeholders ("[Pasted text #1 +3 lines]", "[Image #1]"); they make useless titles.
+  title=$(grep -F "\"sessionId\":\"$sid\"" "$hist" 2>/dev/null \
+          | jq -r 'select(((.display // "") | length) > 0 and ((.display // "") | test("^\\[(Pasted|Image)") | not)) | .display' 2>/dev/null \
+          | head -1 || true)
+  title=$(printf '%s' "$title" | tr '\n\t' '  ' | sed -E 's/  +/ /g; s/^ //; s/ $//')
+  [ "${#title}" -gt 70 ] && title="${title:0:70}…"
+  printf '%s' "$title"
 }
 
 # --- robust exit handling -----------------------------------------------
@@ -106,6 +122,7 @@ if [ ! -f "$TRANSCRIPT" ]; then
   else
     log "SKIP file-not-found path='$TRANSCRIPT'"
     "$REPORT_SH" --status skipped --chat "$(dream_chat_label "$TRANSCRIPT" "${CWD:-}")" \
+                 --title "$(dream_chat_title "$(basename "${TRANSCRIPT%.jsonl}")")" \
                  --reason "no transcript found" 2>/dev/null || true
     exit 0
   fi
@@ -139,45 +156,80 @@ case "$REASON" in
     ;;
 esac
 
-# --- count user-turn messages -------------------------------------------
-# grep -c prints "0" AND exits 1 on zero matches; capturing through `|| echo 0`
-# would append a second line ("0\n0") and break the integer compare below.
-# Capture the count, then normalize a non-zero exit to a clean integer.
-USER_MSGS=$(grep -c '"role":"user"' "$TRANSCRIPT" 2>/dev/null) || USER_MSGS=0
+# --- count GENUINE user-turn messages -----------------------------------
+# A plain `grep -c '"role":"user"'` badly overcounts: tool-call RESULTS and
+# system-injected records (task-notifications, /command stdout, caveats) are
+# ALSO stored with role:user, so a chat with 3 typed messages can report 15.
+# That inflates both the threshold check AND the count-delta gate below — a
+# system record appended on /resume (without the user typing) would look like
+# new content and wrongly re-dispatch. Count only what the user actually typed:
+# role:user, not isMeta/compactSummary, content is real text (a string or a
+# text block) that is neither a tool_result nor a bare system-tag injection.
+# Handles both the nested real Claude Code shape and the flat test-fixture shape.
+# A leading <system-reminder> is a harness PREFIX on a genuine turn, so it is
+# intentionally NOT in the skip list (standalone reminders are isMeta and drop out).
+# jq missing → fall back to the coarse grep (overcounts, but stays monotonic).
+if command -v jq >/dev/null 2>&1; then
+  USER_MSGS=$(jq -rR '
+    fromjson?
+    | (.message.content // .content) as $c
+    | ((.message.role // .role) // "") as $r
+    | ((.isMeta // false) or (.isCompactSummary // false)) as $meta
+    | select($r == "user" and ($meta | not) and (
+        ($c | type) as $t
+        | if $t == "string" then
+            (($c | gsub("[[:space:]]";"")) | length) > 0
+            and ($c | test("^[[:space:]]*<(task-notification|local-command|command-name|command-message|command-args|command-stdout|command-output)") | not)
+          elif $t == "array" then
+            ([ $c[] | select(.type? == "tool_result") ] | length) == 0
+            and ([ $c[] | select((.type? == "text")
+                     and ((.text // "") | gsub("[[:space:]]";"") | length) > 0
+                     and ((.text // "") | test("^[[:space:]]*<(task-notification|local-command|command-name|command-message|command-args|command-stdout|command-output)") | not)) ] | length) > 0
+          else false end))
+    | "x"' "$TRANSCRIPT" 2>/dev/null | grep -c 'x') || USER_MSGS=0
+else
+  USER_MSGS=$(grep -c '"role":"user"' "$TRANSCRIPT" 2>/dev/null) || USER_MSGS=0
+fi
+case "$USER_MSGS" in ''|*[!0-9]*) USER_MSGS=0 ;; esac
 
 if [ "$USER_MSGS" -lt "$THRESHOLD" ]; then
   log "SKIP below-threshold count=$USER_MSGS threshold=$THRESHOLD"
   "$REPORT_SH" --status skipped --chat "$(dream_chat_label "$TRANSCRIPT" "${CWD:-}")" \
+               --title "$(dream_chat_title "$(basename "${TRANSCRIPT%.jsonl}")")" \
                --reason "below-threshold ($USER_MSGS user messages)" 2>/dev/null || true
   exit 0
 fi
 
-# --- per-transcript dedupe lock -----------------------------------------
-# Hash the transcript path; if a recent lock exists for it, suppress dispatch.
-# Solves: user closes same chat from two windows (/resume scenario) → only
-# the first close triggers a real run.
+# --- per-transcript new-content gate ------------------------------------
+# Ingest only when the conversation CHANGED since the last dispatch. We store
+# the user-message count (keyed by the resolved transcript path) and compare on
+# the next close. Resuming a chat and closing it WITHOUT typing leaves the count
+# identical -> skip; typing any message (even "hello") changes it -> dispatch,
+# no matter how soon after the last run. Same content closed from two windows is
+# the same count -> one dispatch, which is what the old time-lock guarded.
+# Compare with != (not >): if the counting METHOD ever changes scale, a count
+# stored by the old method won't match the new one, so the chat re-dispatches
+# once and re-baselines instead of getting stuck skipping forever. Within a
+# single transcript the count only grows, so for normal use != behaves like >.
 if command -v shasum >/dev/null 2>&1; then
   TRANSCRIPT_HASH=$(printf '%s' "$TRANSCRIPT" | shasum -a 1 | awk '{print $1}')
 else
   TRANSCRIPT_HASH=$(printf '%s' "$TRANSCRIPT" | cksum | awk '{print $1}')
 fi
-LOCK_FILE="$LOCK_DIR/$TRANSCRIPT_HASH"
+SEEN_FILE="$LOCK_DIR/$TRANSCRIPT_HASH"
 
-if [ -f "$LOCK_FILE" ]; then
-  # Cross-platform mtime: BSD stat vs GNU stat
-  LOCK_MTIME=$(stat -f %m "$LOCK_FILE" 2>/dev/null || stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0)
-  NOW=$(date +%s)
-  AGE=$((NOW - LOCK_MTIME))
-  if [ "$AGE" -lt "$LOCK_TTL_SEC" ]; then
-    log "SKIP duplicate-dispatch age=${AGE}s ttl=${LOCK_TTL_SEC}s transcript=$TRANSCRIPT"
-    exit 0
-  fi
+PREV_MSGS=$(cat "$SEEN_FILE" 2>/dev/null || echo 0)
+case "$PREV_MSGS" in ''|*[!0-9]*) PREV_MSGS=0 ;; esac
+
+if [ "$USER_MSGS" -eq "$PREV_MSGS" ]; then
+  log "SKIP no-new-messages count=$USER_MSGS prev=$PREV_MSGS transcript=$TRANSCRIPT"
+  exit 0
 fi
 
-# Take the lock (touches the file with current timestamp)
-touch "$LOCK_FILE"
+# Record the count we are dispatching at, so the next close can compare.
+echo "$USER_MSGS" > "$SEEN_FILE"
 
-log "DISPATCH count=$USER_MSGS threshold=$THRESHOLD transcript=$TRANSCRIPT reason=${REASON:-unknown}"
+log "DISPATCH count=$USER_MSGS prev=$PREV_MSGS threshold=$THRESHOLD transcript=$TRANSCRIPT reason=${REASON:-unknown}"
 
 # --- test stub: skip the actual headless spawn --------------------------
 if [ "${DREAM_DISPATCH_STUB:-0}" = "1" ]; then
@@ -212,6 +264,7 @@ export DREAM_UNDO_LOG="$DREAM_HOME/undo/$(date -u +%Y-%m-%d).jsonl"
 export DREAM_ERROR_LOG="$DREAM_HOME/error.log"
 export DREAM_TRANSCRIPT="$TRANSCRIPT"
 export DREAM_CHAT_LABEL="$(dream_chat_label "$TRANSCRIPT" "${CWD:-}")"
+export DREAM_CHAT_TITLE="$(dream_chat_title "$(basename "${TRANSCRIPT%.jsonl}")")"
 export DREAM_LOG  # explicit export so the headless skill can append COMPLETED/ERROR markers
 # Recursion marker: the spawned run's OWN SessionEnd fires this hook again.
 # This var lets that invocation recognize itself as a headless auto-run and

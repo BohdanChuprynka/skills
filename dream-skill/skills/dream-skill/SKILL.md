@@ -284,12 +284,13 @@ echo "$TS ERROR source=skill code=1 msg=\"<short msg>\" transcript=$DREAM_TRANSC
 
 ```bash
 LABEL="${DREAM_CHAT_LABEL:-$(basename "${DREAM_TRANSCRIPT%.jsonl}") (auto)}"
+TITLE="${DREAM_CHAT_TITLE:-}"   # first-message title (empty → report.sh omits the title: line)
 ```
 
 - **wrote** — pipe the SAME `[WRITE]/[QUEUE]/[DROP]` lines you appended to `$DREAM_DAILY_LOG` in Step 4 (omit the `## ...` header and the `Summary:` line):
 
 ```bash
-"$DREAM_SCRIPTS_DIR/report.sh" --status wrote --chat "$LABEL" <<'BODY' 2>/dev/null || true
+"$DREAM_SCRIPTS_DIR/report.sh" --status wrote --chat "$LABEL" --title "$TITLE" <<'BODY' 2>/dev/null || true
 - [WRITE] me/wiki/<page>.md: <short summary>
 - [DROP] <reason>
 BODY
@@ -298,13 +299,13 @@ BODY
 - **noop** — nothing written; `<reason>` is `empty-transcript` | `recursive-transcript` | `no-info-gain`:
 
 ```bash
-"$DREAM_SCRIPTS_DIR/report.sh" --status noop --chat "$LABEL" --reason "<reason>" 2>/dev/null || true
+"$DREAM_SCRIPTS_DIR/report.sh" --status noop --chat "$LABEL" --title "$TITLE" --reason "<reason>" 2>/dev/null || true
 ```
 
 - **error**:
 
 ```bash
-"$DREAM_SCRIPTS_DIR/report.sh" --status error --chat "$LABEL" --reason "see error.log" 2>/dev/null || true
+"$DREAM_SCRIPTS_DIR/report.sh" --status error --chat "$LABEL" --title "$TITLE" --reason "see error.log" 2>/dev/null || true
 ```
 
 This is the contract that lets the user see silent failures. If you skip Step 6, the next-session orphan scanner produces a spurious `WARNING` line. **Always close the loop.**

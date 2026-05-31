@@ -34,6 +34,7 @@ fail() { echo "FAIL: $*"; exit 1; }
 export DREAM_DISPATCH_STUB=1
 export DREAM_LOG="$TRIGGER_LOG"
 export DREAM_LOCK_DIR="$WORK/locks"
+export DREAM_REPORTS_DIR="$WORK/reports"   # never touch the real vault
 mkdir -p "$DREAM_LOCK_DIR"
 CLAUDE_TRANSCRIPT_PATH="$FIXTURES/transcript-15msg.jsonl" "$SCRIPTS/trigger.sh"
 grep -q "DISPATCH" "$TRIGGER_LOG" || fail "trigger did not dispatch on 15-msg"

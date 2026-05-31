@@ -1,5 +1,7 @@
 # dream-skill v0.2 — Auto-on-close Implementation Plan
 
+> **Historical build record.** Describes the original v0.2 implementation. Current behavior lives in [README.md](README.md) and the scripts — some snippets below predate later changes (genuine-message counting, the count-delta dispatch gate). Kept for build narrative, not as current spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace v0.1's multi-source map-reduce reconciliation with a per-conversation auto-on-close architecture. SessionEnd hook fires when user closes Claude Code → headless `claude -p "/dream-skill --auto <transcript>"` extracts info-gain content → confident facts written to vault directly → uncertain/destructive/brainstormed facts queued for manual review.
