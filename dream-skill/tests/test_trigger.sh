@@ -285,5 +285,41 @@ grep -q "no-new-messages count=2 prev=2" "$DREAM_LOG" 2>/dev/null \
 rm -rf "$TMPD20"
 echo "PASS: count change (incl. downward) heals stale baseline, then re-baselines"
 
+# === Case 21: /dream-skill --ignore → SKIP private (no dispatch, titleless report) ===
+# A typed `/dream-skill --ignore` marks the chat private. trigger.sh must skip
+# dispatch BEFORE counting/spawning, log SKIP private, and write a skipped vault
+# entry WITHOUT a title: line (the first message is itself sensitive).
+reset_log
+RD21="$(mktemp -d /tmp/dream-trig-priv21-XXXXXX)"
+TPD21="$(mktemp -d /tmp/dream-priv21-XXXXXX)"; TP21="$TPD21/sess-priv21.jsonl"
+HIST21="$(mktemp /tmp/dream-hist21-XXXXXX)"
+printf '%s\n' '{"sessionId":"sess-priv21","display":"something private I typed"}' > "$HIST21"
+{
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"help me with a personal matter"}}'
+  printf '{"type":"user","message":{"role":"user","content":"<command-message>dream-skill</command-message>\\n<command-name>/dream-skill</command-name>\\n<command-args>--ignore</command-args>"}}\n'
+} > "$TP21"
+DREAM_REPORTS_DIR="$RD21" DREAM_HISTORY_FILE="$HIST21" CLAUDE_TRANSCRIPT_PATH="$TP21" "$TRIGGER"
+grep -q "SKIP private" "$DREAM_LOG" 2>/dev/null || fail "ignore chat did not log SKIP private"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null && fail "ignore chat dispatched (should skip private)"
+grep -q "^### .* — skipped$" "$RD21"/dream-*.md 2>/dev/null || fail "ignore chat wrote no skipped vault entry"
+grep -q "marked private" "$RD21"/dream-*.md 2>/dev/null || fail "ignore vault entry missing 'marked private' reason"
+grep -q "^title:" "$RD21"/dream-*.md 2>/dev/null && fail "ignore vault entry leaked a title: line (first message is sensitive)"
+rm -rf "$RD21" "$TPD21" "$HIST21"
+echo "PASS: /dream-skill --ignore → SKIP private, no dispatch, titleless skipped report"
+
+# === Case 22: --ignore then later --unignore → DISPATCH (latest-wins) ===
+reset_log
+TPD22="$(mktemp -d /tmp/dream-priv22-XXXXXX)"; TP22="$TPD22/sess-priv22.jsonl"
+{
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"normal stuff worth recording"}}'
+  printf '{"type":"user","message":{"role":"user","content":"<command-message>dream-skill</command-message>\\n<command-name>/dream-skill</command-name>\\n<command-args>--ignore</command-args>"}}\n'
+  printf '{"type":"user","message":{"role":"user","content":"<command-message>dream-skill</command-message>\\n<command-name>/dream-skill</command-name>\\n<command-args>--unignore</command-args>"}}\n'
+} > "$TP22"
+CLAUDE_TRANSCRIPT_PATH="$TP22" "$TRIGGER"
+grep -q "SKIP private" "$DREAM_LOG" 2>/dev/null && fail "unignored chat skipped as private (latest-wins broken)"
+grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "unignored chat did not dispatch"
+rm -rf "$TPD22"
+echo "PASS: --ignore then --unignore → dispatches (latest-wins)"
+
 echo
 echo "All trigger.sh tests passed."

@@ -19,6 +19,8 @@ RESOLVE_WINDOW_SEC="${DREAM_RESOLVE_WINDOW_SEC:-3600}"  # compaction-continuatio
 # report.sh path (resolved early so the skip branches below can call it).
 REPORT_SH="${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/scripts}"
 REPORT_SH="${REPORT_SH:-$(cd "$(dirname "$0")" && pwd)}/report.sh"
+# private-chat state resolver (sibling of report.sh).
+PRIVATE_STATE_SH="$(dirname "$REPORT_SH")/private-state.sh"
 
 # Chat label "<first8 of uuid> (<project>)" for vault report entries.
 dream_chat_label() {
@@ -155,6 +157,21 @@ case "$REASON" in
     exit 0
     ;;
 esac
+
+# --- private opt-out gate (latest-wins; see scripts/private-state.sh) ----
+# The user marks THIS chat private by typing `/dream-skill --ignore` (undo with
+# `--unignore`). A hard skip BEFORE counting/dispatch, so no model tokens are ever
+# spent on a private chat. Detection keys on the genuine typed-command record, so
+# prose that merely mentions the flag (help text, the skill description that rides
+# in every transcript, a Read of these files) can't trip it. No --title in the
+# report: the first message is itself sensitive. Fail-open if the resolver is
+# missing (broken install) so normal recording is never globally disabled.
+if [ -x "$PRIVATE_STATE_SH" ] && [ "$("$PRIVATE_STATE_SH" "$TRANSCRIPT")" = "ignore" ]; then
+  log "SKIP private transcript=$TRANSCRIPT"
+  "$REPORT_SH" --status skipped --chat "$(dream_chat_label "$TRANSCRIPT" "${CWD:-}")" \
+               --reason "marked private (/dream-skill --ignore)" 2>/dev/null || true
+  exit 0
+fi
 
 # --- count GENUINE user-turn messages -----------------------------------
 # A plain `grep -c '"role":"user"'` badly overcounts: tool-call RESULTS and

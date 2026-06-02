@@ -116,6 +116,7 @@ Without a config, auto mode logs an error to `~/.claude/dream-skill/error.log` a
 |---|---|
 | *(automatic — on session close)* | SessionEnd hook fires trigger.sh → headless `--auto` capture |
 | `/dream-skill` | Walk the queue fact-by-fact: `[a]pprove / [e]dit / [s]kip / [d]iscard / [q]uit` |
+| `/dream-skill --ignore` | Mark the current chat **private** — it's never recorded on close (undo: `/dream-skill --unignore`) |
 | `/dream-skill --auto <transcript>` | Used by the hook. Don't call directly. |
 | `/dream-skill --reconcile` | v0.3 stub. Full-vault audit (planned). |
 | `/dream-skill --help` | Print modes, env vars, state paths. Exits without writing. |
@@ -178,6 +179,8 @@ This dir survives plugin updates and reinstalls.
 - All processing local. Transcripts read directly from `~/.claude/projects/<slug>/*.jsonl` that Claude Code already wrote.
 - The only network call is the spawned `claude -p` — identical to any normal Claude Code session.
 - No telemetry. No third-party services. Vault paths never leave your machine.
+
+**Keeping a chat private.** Some conversations you just don't want in your vault. Type **`/dream-skill --ignore`** in that chat — when you close it, dream-skill skips it entirely: no headless run, no vault writes, no chat content or title recorded (just a `skipped — marked private` line in the day's `dream-reports` file so you can confirm it worked). Changed your mind? **`/dream-skill --unignore`** re-enables recording (latest one wins). The opt-out ships with the plugin — no global config or `CLAUDE.md` setup required.
 
 ## FAQ
 
