@@ -1,6 +1,6 @@
 ---
 name: dream-skill
-description: Auto-record Claude Code conversations to an Obsidian vault. Use when the user says "/dream-skill", "review dream queue", "process dream queue", "sweep dream queue", or asks to update wiki from a recent conversation. Also runs headlessly via SessionEnd hook in auto mode when invoked with `--auto <transcript-path>`. Manual no-arg invocation sweeps the queue of deferred-decision facts and walks the user through approve/edit/skip. `--reconcile` is a v0.3 stub.
+description: Auto-record Claude Code conversations to an Obsidian vault. Use when the user says "/dream-skill", "review dream queue", "process dream queue", "sweep dream queue", or asks to update wiki from a recent conversation. Also runs headlessly via SessionEnd hook in auto mode when invoked with `--auto <transcript-path>`. Manual no-arg invocation sweeps the queue of deferred-decision facts and walks the user through approve/edit/skip. `--reconcile` is a v0.3 stub. Type `/dream-skill --ignore` to mark the current chat private so it is never recorded into the vault (undo with `--unignore`).
 version: 0.2.0
 ---
 
@@ -12,6 +12,8 @@ Persona-model sync for an Obsidian vault. Four modes:
 |---|---|---|
 | `/dream-skill --auto <transcript.jsonl>` | **Auto (headless)** | SessionEnd hook fires this on close. No user interaction. |
 | `/dream-skill` (no args) | **Manual review** | User runs this anytime to walk the queue. |
+| `/dream-skill --ignore` | **Mark private** | User runs this in a chat they don't want recorded. Confirms; the SessionEnd hook then skips this chat on close. |
+| `/dream-skill --unignore` | **Unmark private** | Undo `--ignore` for this chat — recording resumes on close. |
 | `/dream-skill --reconcile` | **Reconcile (stub)** | Reserved for v0.3 full-vault audit. Prints "not yet implemented" and exits. |
 | `/dream-skill --help` | **Help** | Prints the mode table, env vars, state paths, and exits. Never writes anything. |
 
@@ -24,6 +26,8 @@ dream-skill v0.2 — auto-record Claude Code conversations to an Obsidian vault.
 
 USAGE
   /dream-skill                          Manual queue review (interactive)
+  /dream-skill --ignore                  Mark THIS chat private — never recorded
+  /dream-skill --unignore                Undo --ignore for this chat
   /dream-skill --auto <transcript.jsonl> Headless capture (used by SessionEnd hook)
   /dream-skill --reconcile               v0.3 stub — prints not-implemented
   /dream-skill --help                    Show this help
@@ -150,6 +154,26 @@ If — and ONLY if — any file/dir literally does not exist on disk: append the
 
 **You are running under `--dangerously-skip-permissions`. You will not be prompted for any tool call. Do not abort because you "might not have permission" — you do.**
 
+### Step 0.5 — Honor the private opt-out (belt-and-suspenders)
+
+`trigger.sh` already skips chats the user marked private *before* spawning you. In rare paths (e.g. compaction-continuation resolution) you may still be invoked on one — so re-check the **raw** transcript (not the preprocessed text; command records may be stripped):
+
+```bash
+"$DREAM_SCRIPTS_DIR/private-state.sh" "$DREAM_TRANSCRIPT"
+```
+
+If it prints `ignore`, the user typed `/dream-skill --ignore`: write NOTHING to the vault or queue. Close the loop and exit 0:
+
+```bash
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "$TS COMPLETED source=skill reason=marked-private writes=0 queued=0 dropped=0 transcript=$DREAM_TRANSCRIPT" >> "$DREAM_LOG"
+"$DREAM_SCRIPTS_DIR/report.sh" --status skipped \
+  --chat "${DREAM_CHAT_LABEL:-$(basename "${DREAM_TRANSCRIPT%.jsonl}") (auto)}" \
+  --reason "marked private" 2>/dev/null || true
+```
+
+Pass **no** `--title` — the first message is itself sensitive. Then stop (do not run Steps 1–6).
+
 ### Step 1 — Preprocess transcript
 
 Run `$DREAM_SCRIPTS_DIR/preprocess.sh "$DREAM_TRANSCRIPT"` (or the path passed via `--auto`). Capture stdout as `clean_transcript`.
@@ -272,6 +296,7 @@ echo "$TS COMPLETED source=skill reason=<reason> writes=<N> queued=<N> dropped=<
 - `empty-transcript` — Step 1 stripped output was empty (no content after cleaning)
 - `recursive-transcript` — Step 3 every line was a dream-skill discussion
 - `no-info-gain` — Step 3 candidates extracted but all dropped (Bucket B/C)
+- `marked-private` — Step 0.5 user marked this chat private (`/dream-skill --ignore`)
 
 **On internal ERROR** (Step 0 env validation failed, vault-writer.sh non-zero, any unhandled error):
 
@@ -414,6 +439,22 @@ Exit 0.
 
 ---
 
+## Private opt-out mode (`--ignore` / `--unignore`)
+
+**Interactive, confirmation-only. Writes nothing — the skip is enforced at close.**
+
+When invoked as `/dream-skill --ignore`: do NOT process the queue or touch the vault. Print exactly this, then exit 0:
+
+> 🔒 This chat is now private. dream-skill will **skip it** when you close it — nothing from this conversation will be written to your Obsidian vault. Undo anytime with `/dream-skill --unignore`.
+
+When invoked as `/dream-skill --unignore`: print exactly this, then exit 0:
+
+> 🔓 This chat is no longer private. dream-skill will record it on close as usual.
+
+**How it works:** typing the command leaves a record in the transcript. At close, the SessionEnd hook (`trigger.sh` → `private-state.sh`) reads the LATEST `--ignore`/`--unignore` and, when the chat is private, skips dispatch entirely — no model tokens are spent, and a `skipped — marked private` line (no chat content, no title) lands in your `dream-reports/dream-<date>.md`. Decision is latest-wins and covers the whole chat.
+
+---
+
 ## Cross-references
 
 - `HARVEST.md` — patterns ported from v0.1
@@ -423,5 +464,6 @@ Exit 0.
 - `scripts/preprocess.sh` — transcript noise stripper (handles real Claude Code nested format + flat format)
 - `scripts/vault-writer.sh` — add-only vault append + idempotent index update
 - `scripts/queue.sh` — queue file manager (append + list + dedupe by title+target)
+- `scripts/private-state.sh` — resolves a chat's private (`--ignore`) state from its transcript (used by trigger.sh + auto mode)
 - `scripts/apply-undo.sh` — rollback auto-mode writes
 - `scripts/count_tokens.py` — tiktoken counter (cost guard, future use)
