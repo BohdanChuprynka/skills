@@ -61,7 +61,7 @@ You never type `/sync-wiki` again. Your vault stays current. You review the queu
                                   ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │  Headless Claude runs SKILL.md auto-mode                           │
-│     - scripts/preprocess.sh strips noise                           │
+│     - preprocess-gate.sh: cleans + gates                           │
 │     - reads $DREAM_CONFIG, vault CLAUDE.md, wiki/index.md          │
 │     - classifies each fact into one of 5 buckets                   │
 └────────────────────────────────────────────────────────────────────┘
@@ -86,10 +86,11 @@ You never type `/sync-wiki` again. Your vault stays current. You review the queu
                   walks queue → [a]pprove / [e]dit / [s]kip / [d]iscard
 ```
 
-Three guarantees:
+Four guarantees:
 - **Add-only auto writes.** Auto mode never overwrites vault content. Destructive edits go to the queue for your review.
 - **Per-day undo log.** `bash apply-undo.sh --date <YYYY-MM-DD>` reverses every auto-write from that day.
 - **Fire-and-forget.** The hook never blocks shutdown. Broken installs log to `error.log` and exit silently.
+- **Deterministic content gate.** Whether a transcript has real content is a shell exit code from `preprocess-gate.sh` (`OK` / `EMPTY` / `ERROR`), never the model's guess — so a real session is never silently dropped as "empty", and an unreadable or corrupt transcript reports `error` instead of a false skip.
 
 ## Install
 
@@ -188,7 +189,7 @@ This dir survives plugin updates and reinstalls.
 No. Three dedupe layers protect you: the per-transcript count-delta gate (re-dispatch only when you've added a message), vault per-line idempotency (`grep -Fxq` exact match), and queue `(title, target)` dedupe. Each unique fact lands exactly once. Worst case: 2x cost on a wasted second headless run that produces zero vault changes.
 
 **Q: How do I confirm it ran, from inside Obsidian?**
-Every run appends a one-line entry to a `dream-reports/dream-<date>.md` file alongside your vault: `wrote N` with the captured bullets, `ran, 0 writes` when nothing was persona-worthy, or `skipped` with the reason. Glance at today's file to see what each close captured — no leaving Obsidian.
+Every run appends a one-line entry to a `dream-reports/dream-<date>.md` file alongside your vault: `wrote N` with the captured bullets, `ran, 0 writes` when nothing was persona-worthy, `skipped` with the reason, or `error` when the transcript was unreadable/corrupt. Glance at today's file to see what each close captured — no leaving Obsidian.
 
 **Q: How much does each session close cost?**
 On a Claude Code subscription (Pro / Max / Team) it's covered — no extra bill. Each dispatch just consumes a small slice of your normal session quota. Approximate per-dispatch usage with the default Haiku 4.5 model: ~30–80K input tokens (preprocessed transcript + vault `CLAUDE.md` + `wiki/index.md`) + ~1–5K output tokens. Translates to roughly $0.01–$0.10 on API billing, or ~5–15% of a single Pro 5-hour window per dispatch. Sessions with no user messages skip entirely; raise `DREAM_THRESHOLD` if you want to gate out short throwaway sessions too. Switch model with `DREAM_MODEL=claude-sonnet-4-6` for higher-quality classification at ~5x the spend.

@@ -321,7 +321,7 @@ echo "$TS COMPLETED source=skill reason=<reason> writes=<N> queued=<N> dropped=<
 - `no-info-gain` — Step 3 candidates extracted but all dropped (Bucket B/C)
 - `marked-private` — Step 0.5 user marked this chat private (`/dream-skill --ignore`)
 
-**On internal ERROR** (Step 0 env validation failed, vault-writer.sh non-zero, any unhandled error):
+**On internal ERROR** (Step 0 env validation failed, Step 1 gate returned ERROR — unreadable/corrupt transcript or `jq` missing, vault-writer.sh non-zero, any unhandled error):
 
 ```bash
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
