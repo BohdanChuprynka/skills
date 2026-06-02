@@ -111,7 +111,14 @@ if [ ! -f "$TRANSCRIPT" ]; then
     # sessions and stale incidental mentions are never mistaken for the root.
     while IFS= read -r cand; do
       [ -f "$cand" ] || continue
-      cand_mtime=$(stat -f %m "$cand" 2>/dev/null || stat -c %Y "$cand" 2>/dev/null || echo 0)
+      # GNU stat (-c) FIRST, BSD stat (-f) second. On Linux `stat -f %m` does not
+      # fail cleanly: it prints a "File: …" filesystem block to stdout AND exits
+      # non-zero, so a BSD-first order ran both and concatenated that blob into
+      # cand_mtime, breaking the arithmetic below under `set -u` (File: unbound
+      # variable). GNU-first is clean on Linux; on macOS `stat -c` fails with no
+      # stdout, so the BSD fallback still runs. Guard to digits either way.
+      cand_mtime=$(stat -c %Y "$cand" 2>/dev/null || stat -f %m "$cand" 2>/dev/null || echo 0)
+      case "$cand_mtime" in ''|*[!0-9]*) cand_mtime=0 ;; esac
       [ $((NOW - cand_mtime)) -le "$RESOLVE_WINDOW_SEC" ] || continue
       if grep -qF "$CONT_UUID" "$cand" 2>/dev/null; then
         RESOLVED="$cand"
