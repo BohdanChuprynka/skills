@@ -4,11 +4,11 @@ on:
   push:
     paths:
       - 'dream-skill/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/dream-skill-tests.yml'
   pull_request:
     paths:
       - 'dream-skill/**'
-      - '.github/workflows/test.yml'
+      - '.github/workflows/dream-skill-tests.yml'
 
 jobs:
   test:
