@@ -1,0 +1,59 @@
+name: transcribe-audio CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "transcribe-audio/**"
+      - ".github/workflows/transcribe-audio-ci.yml"
+  pull_request:
+    paths:
+      - "transcribe-audio/**"
+
+defaults:
+  run:
+    working-directory: transcribe-audio
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install ffmpeg (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install ffmpeg (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install ffmpeg
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install package + dev deps
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+
+      - name: Lint with ruff
+        run: |
+          source .venv/bin/activate
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Run pytest
+        run: |
+          source .venv/bin/activate
+          pytest -v
