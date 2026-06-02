@@ -1,0 +1,5 @@
+{"type":"attachment","content":"attachment metadata, not conversation"}
+{"type":"permission-mode","mode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"BLOB_SHOULD_BE_STRIPPED"}]},"isMeta":false}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning only, no user-facing text"}]}}
+{"type":"ai-title","title":"Some Title"}

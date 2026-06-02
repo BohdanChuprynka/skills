@@ -21,6 +21,8 @@ REPORT_SH="${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/scripts}"
 REPORT_SH="${REPORT_SH:-$(cd "$(dirname "$0")" && pwd)}/report.sh"
 # private-chat state resolver (sibling of report.sh).
 PRIVATE_STATE_SH="$(dirname "$REPORT_SH")/private-state.sh"
+# preprocess.sh path (clean-content byte count for the DISPATCH audit trail).
+PREPROCESS_SH="$(dirname "$REPORT_SH")/preprocess.sh"
 
 # Chat label "<first8 of uuid> (<project>)" for vault report entries.
 dream_chat_label() {
@@ -246,7 +248,25 @@ fi
 # Record the count we are dispatching at, so the next close can compare.
 echo "$USER_MSGS" > "$SEEN_FILE"
 
-log "DISPATCH count=$USER_MSGS prev=$PREV_MSGS threshold=$THRESHOLD transcript=$TRANSCRIPT reason=${REASON:-unknown}"
+# Clean-content byte count: a durable audit trail. The headless run uses
+# --no-session-persistence, so this DISPATCH line is the only record of how much
+# real content the session held. If a later "empty-transcript" is ever logged for
+# a session whose DISPATCH says bytes>0, that contradiction is now visible.
+# Best-effort + fail-open: never changes the dispatch decision (the genuine-count
+# gate already proved there is >=1 user message worth ingesting).
+# 'NA' (not 0) when we cannot measure — jq/preprocess.sh absent, or the pipeline
+# errored. That keeps bytes=0 meaning unambiguously "measured: no content", so a
+# future false "empty-transcript" on a bytes=<nonzero> session is a visible
+# contradiction (a bytes=NA session is simply "audit unavailable", not "empty").
+CLEAN_BYTES=NA
+if command -v jq >/dev/null 2>&1 && [ -f "$PREPROCESS_SH" ]; then
+  # tr after wc strips wc's own leading padding (macOS) so the value is pure digits.
+  if _cb=$(bash "$PREPROCESS_SH" "$TRANSCRIPT" 2>/dev/null | tr -d '[:space:]' | wc -c | tr -d '[:space:]'); then
+    case "$_cb" in ''|*[!0-9]*) CLEAN_BYTES=NA ;; *) CLEAN_BYTES="$_cb" ;; esac
+  fi
+fi
+
+log "DISPATCH count=$USER_MSGS prev=$PREV_MSGS threshold=$THRESHOLD bytes=$CLEAN_BYTES transcript=$TRANSCRIPT reason=${REASON:-unknown}"
 
 # --- test stub: skip the actual headless spawn --------------------------
 if [ "${DREAM_DISPATCH_STUB:-0}" = "1" ]; then

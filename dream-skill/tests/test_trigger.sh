@@ -321,5 +321,16 @@ grep -q "DISPATCH" "$DREAM_LOG" 2>/dev/null || fail "unignored chat did not disp
 rm -rf "$TPD22"
 echo "PASS: --ignore then --unignore → dispatches (latest-wins)"
 
+# === Case 23: DISPATCH line carries a clean-content byte count (audit trail) ===
+# So a future false "empty-transcript" is detectable even though the headless run
+# uses --no-session-persistence: trigger.log says bytes=N, the daily log would say
+# empty-transcript — a visible contradiction. bytes= must be > 0 for a rich
+# transcript (the v0.2 bug silently skipped a 5.8 KB session as empty).
+reset_log
+CLAUDE_TRANSCRIPT_PATH="$FIXTURE_DIR/transcript-real-format.jsonl" "$TRIGGER"
+grep -qE "DISPATCH.*bytes=[1-9][0-9]*" "$DREAM_LOG" 2>/dev/null \
+  || fail "DISPATCH did not record a non-zero clean-content byte count (bytes=)"
+echo "PASS: DISPATCH records clean-content byte count (bytes=N audit trail)"
+
 echo
 echo "All trigger.sh tests passed."

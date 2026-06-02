@@ -148,6 +148,7 @@ This is a **plain `test -f` / `test -d` check on shell env vars and paths**. It 
 [ -x "$DREAM_SCRIPTS_DIR/vault-writer.sh" ] || echo "MISSING vault-writer.sh" >> "$DREAM_ERROR_LOG"
 [ -x "$DREAM_SCRIPTS_DIR/queue.sh" ]        || echo "MISSING queue.sh"        >> "$DREAM_ERROR_LOG"
 [ -x "$DREAM_SCRIPTS_DIR/preprocess.sh" ]   || echo "MISSING preprocess.sh"   >> "$DREAM_ERROR_LOG"
+[ -x "$DREAM_SCRIPTS_DIR/preprocess-gate.sh" ] || echo "MISSING preprocess-gate.sh" >> "$DREAM_ERROR_LOG"
 ```
 
 If — and ONLY if — any file/dir literally does not exist on disk: append the failure to `$DREAM_ERROR_LOG` and exit 0. Otherwise, proceed to Step 1.
@@ -174,11 +175,33 @@ echo "$TS COMPLETED source=skill reason=marked-private writes=0 queued=0 dropped
 
 Pass **no** `--title` — the first message is itself sensitive. Then stop (do not run Steps 1–6).
 
-### Step 1 — Preprocess transcript
+### Step 1 — Preprocess transcript (deterministic content gate)
 
-Run `$DREAM_SCRIPTS_DIR/preprocess.sh "$DREAM_TRANSCRIPT"` (or the path passed via `--auto`). Capture stdout as `clean_transcript`.
+Run the content gate and decide OK/EMPTY/ERROR **from its exit code alone**. **You MUST NOT inspect the cleaned text's length or content to judge whether the transcript is "empty."** That exact judgment call is the v0.2 bug: a rich 5.8 KB session was eyeballed, called "empty after preprocessing," and silently dropped. `preprocess-gate.sh` makes emptiness a deterministic byte-count decided in-shell, surfaced as an exit code:
 
-If `clean_transcript` is empty (no non-whitespace content after cleaning), append `SKIP empty-transcript` to `$DREAM_DAILY_LOG` and exit 0. Do **not** skip on length alone: a single short user message can be high persona signal (e.g. "I got into MIT", "quit my job today"). Process any session that has at least one real message.
+- exit `0` = **OK** — real content; the cleaned text is on stdout (your `clean_transcript`)
+- exit `3` = **EMPTY** — valid transcript, but nothing survives cleaning
+- exit `2` = **ERROR** — missing / unreadable / corrupt transcript, or `jq` unavailable
+
+Bind `T` to the transcript path: **it is the path in your `--auto` argument** — e.g. if you were invoked as `/dream-skill --auto /Users/me/.claude/projects/x/abc.jsonl`, set `T=/Users/me/.claude/projects/x/abc.jsonl` (substitute the real path; do not leave a placeholder). `$DREAM_TRANSCRIPT` holds the same path as a fallback. Then capture **set-e-safely** — a bare `clean=$(…); rc=$?` aborts before `rc=$?` under `set -e`:
+
+```bash
+T="/absolute/path/from/your/--auto/argument.jsonl"   # the real path; $DREAM_TRANSCRIPT is the same value
+[ -f "$T" ] || T="$DREAM_TRANSCRIPT"
+if clean_transcript=$("$DREAM_SCRIPTS_DIR/preprocess-gate.sh" "$T" 2>>"$DREAM_ERROR_LOG"); then
+  :   # OK (exit 0): real content is in $clean_transcript → go to Step 2
+else
+  rc=$?   # 3 = EMPTY, 2 (or any other non-zero) = ERROR
+fi
+```
+
+Then branch on the result:
+
+- **OK** → proceed to Step 2 with `$clean_transcript`.
+- **EMPTY (`rc` = 3)** → genuinely nothing to ingest. Append `[SKIP] empty-transcript` to `$DREAM_DAILY_LOG`, then close the loop via **Step 6** with `reason=empty-transcript` (report `--status noop --reason empty-transcript`). Exit 0.
+- **ERROR (`rc` ≠ 0 and ≠ 3)** → the transcript is missing/unreadable/corrupt. Do **not** report it as empty. Append the failure to `$DREAM_ERROR_LOG`, then close the loop via **Step 6** ERROR branch (`--status error`). Exit 0.
+
+Do **not** skip on length alone: a single short user message can be high persona signal (e.g. "I got into MIT", "quit my job today"). If the gate says OK, there is content — process it.
 
 ### Step 2 — Load vault context
 
