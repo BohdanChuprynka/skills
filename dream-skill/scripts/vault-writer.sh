@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # dream-skill vault-writer.
-# Add-only writes: appends content under a section heading; creates the
-# section if absent; never overwrites or deletes existing content.
-# Idempotent: identical content in the same section is not re-appended.
-# Optionally updates the vault's wiki/index.md with an idempotent link
-# and records every change to an undo log (JSONL) for apply-undo.sh.
+# Writes a fact to a vault page in one of three modes (--mode, default "append"):
+#   append  — add "- <content>" under a section heading; create the section if
+#             absent; idempotent (identical line not re-appended). Never alters
+#             or deletes existing lines.
+#   replace — swap an exact existing line "- <old-content>" for "- <content>".
+#   stale   — strike through an exact existing line and mark it superseded:
+#             "- ~~<old-content>~~ <!-- superseded <YYYY-MM-DD> -->".
+# replace and stale require --old-content. Only append updates wiki/index.md
+# (idempotent link). Every change is recorded to an undo log (JSONL) for
+# apply-undo.sh.
 #
 # Usage:
 #   vault-writer.sh \
@@ -12,6 +17,8 @@
 #     --page <relative-path> \
 #     --section <header-text> \
 #     --content <text> \
+#     [--mode append|replace|stale] \
+#     [--old-content <text>] \
 #     [--undo-log <path>] \
 #     [--index-label <text>] \
 #     [--index-desc <text>] \
