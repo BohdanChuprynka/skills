@@ -158,15 +158,21 @@ fi
 if [ -n "$UNDO_LOG" ]; then
   mkdir -p "$(dirname "$UNDO_LOG")"
   TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  # JSON-escape content (basic: backslash + double-quote)
-  ESC_CONTENT=$(printf '%s' "$CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g')
   ESC_SECTION=$(printf '%s' "$SECTION" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '{"timestamp":"%s","vault":"%s","page":"%s","section":"%s","content":"%s","action":"append"}\n' \
-    "$TS" "$VAULT" "$PAGE" "$ESC_SECTION" "$ESC_CONTENT" >> "$UNDO_LOG"
+  if [ "$MODE" = "append" ]; then
+    ESC_CONTENT=$(printf '%s' "$CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"timestamp":"%s","vault":"%s","page":"%s","section":"%s","content":"%s","action":"append"}\n' \
+      "$TS" "$VAULT" "$PAGE" "$ESC_SECTION" "$ESC_CONTENT" >> "$UNDO_LOG"
+  else
+    ESC_OLD=$(printf '%s' "$OLD_CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    ESC_NEW=$(printf '%s' "$FINAL_CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    printf '{"timestamp":"%s","vault":"%s","page":"%s","section":"%s","old_content":"%s","content":"%s","action":"replace"}\n' \
+      "$TS" "$VAULT" "$PAGE" "$ESC_SECTION" "$ESC_OLD" "$ESC_NEW" >> "$UNDO_LOG"
+  fi
 fi
 
-# --- index update (idempotent) ---------------------------------------------
-if [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ]; then
+# --- index update (idempotent, append mode only) ---------------------------
+if [ "$MODE" = "append" ] && [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ]; then
   # Resolve index file: prefer <subdir>/wiki/index.md, fallback <subdir>/index.md
   PAGE_DIR=$(dirname "$PAGE")
   INDEX_FILE=""

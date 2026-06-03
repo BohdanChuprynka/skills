@@ -140,5 +140,26 @@ if "$WRITER" --vault "$VAULT" --page "wiki/replace.md" --section "Status" \
 fi
 echo "PASS: replace fails when old content missing"
 
+# Test 11: replace is reversible via apply-undo
+UNDO_RT="$VAULT/undo-roundtrip.jsonl"
+cat > "$VAULT/wiki/roundtrip.md" <<'EOF'
+# Roundtrip
+
+## Status
+- status alpha
+EOF
+
+"$WRITER" --vault "$VAULT" --page "wiki/roundtrip.md" --section "Status" \
+  --mode replace --old-content "status alpha" \
+  --content "status beta" --undo-log "$UNDO_RT"
+
+grep -q "replace" "$UNDO_RT" || fail "replace: undo entry not action=replace"
+
+bash "$SCRIPT_DIR/../scripts/apply-undo.sh" "$UNDO_RT" >/dev/null
+
+grep -q "^- status alpha$" "$VAULT/wiki/roundtrip.md" || fail "undo did not restore old line"
+grep -q "status beta" "$VAULT/wiki/roundtrip.md" && fail "undo did not remove the replacement line"
+echo "PASS: replace round-trips through apply-undo"
+
 echo
 echo "All vault-writer.sh tests passed."

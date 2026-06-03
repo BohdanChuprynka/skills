@@ -56,6 +56,21 @@ while IFS= read -r line; do
         SKIPPED=$((SKIPPED + 1))
       fi
       ;;
+    replace)
+      VAULT=$(echo "$line" | jq -r '.vault')
+      PAGE=$(echo "$line" | jq -r '.page')
+      OLD=$(echo "$line" | jq -r '.old_content')
+      NEW=$(echo "$line" | jq -r '.content')
+      PAGE_PATH="$VAULT/$PAGE"
+      if [ -f "$PAGE_PATH" ]; then
+        awk -v old="- $NEW" -v new="- $OLD" '
+          { if ($0 == old) print new; else print }
+        ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"
+        REVERTED=$((REVERTED + 1))
+      else
+        SKIPPED=$((SKIPPED + 1))
+      fi
+      ;;
     index_append)
       INDEX_FILE=$(echo "$line" | jq -r '.index_file')
       LINE_TEXT=$(echo "$line" | jq -r '.line')
