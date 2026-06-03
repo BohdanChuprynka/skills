@@ -124,5 +124,21 @@ grep -q "lives in Munich" "$VAULT/wiki/replace.md" || fail "replace: new content
 grep -q "lives in Berlin" "$VAULT/wiki/replace.md" && fail "replace: old content still present"
 echo "PASS: replace swaps an existing line"
 
+# Test 9: replace is idempotent (re-running the same replace is a no-op)
+"$WRITER" --vault "$VAULT" --page "wiki/replace.md" --section "Status" \
+  --mode replace --old-content "lives in Berlin" \
+  --content "lives in Munich (moved 2026-06)" --undo-log "$UNDO_LOG"
+COUNT=$(grep -c "lives in Munich" "$VAULT/wiki/replace.md")
+[ "$COUNT" -eq 1 ] || fail "replace not idempotent (count=$COUNT, expected 1)"
+echo "PASS: replace is idempotent"
+
+# Test 10: replace fails loudly when neither old nor new content is present
+if "$WRITER" --vault "$VAULT" --page "wiki/replace.md" --section "Status" \
+     --mode replace --old-content "nonexistent fact" \
+     --content "whatever" --undo-log "$UNDO_LOG" 2>/dev/null; then
+  fail "replace should exit non-zero when old content is absent"
+fi
+echo "PASS: replace fails when old content missing"
+
 echo
 echo "All vault-writer.sh tests passed."
