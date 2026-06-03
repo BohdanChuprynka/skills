@@ -108,5 +108,21 @@ rm -rf "$TEST_VAULT" "$DREAM_VAULT_LOCK_DIR"
 unset DREAM_VAULT_LOCK_DIR
 echo "PASS: 5 parallel writes serialized — no lost-update race"
 
+# Test 8: replace mode swaps an existing line for new content
+cat > "$VAULT/wiki/replace.md" <<'EOF'
+# Replace
+
+## Status
+- lives in Berlin
+EOF
+
+"$WRITER" --vault "$VAULT" --page "wiki/replace.md" --section "Status" \
+  --mode replace --old-content "lives in Berlin" \
+  --content "lives in Munich (moved 2026-06)" --undo-log "$UNDO_LOG"
+
+grep -q "lives in Munich" "$VAULT/wiki/replace.md" || fail "replace: new content not written"
+grep -q "lives in Berlin" "$VAULT/wiki/replace.md" && fail "replace: old content still present"
+echo "PASS: replace swaps an existing line"
+
 echo
 echo "All vault-writer.sh tests passed."

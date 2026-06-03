@@ -27,6 +27,8 @@ UNDO_LOG=""
 INDEX_LABEL=""
 INDEX_DESC=""
 UPDATE_INDEX=1
+MODE="append"
+OLD_CONTENT=""
 
 die() { echo "vault-writer: $*" >&2; exit 1; }
 
@@ -40,6 +42,8 @@ while [ $# -gt 0 ]; do
     --index-label) INDEX_LABEL="$2"; shift 2 ;;
     --index-desc) INDEX_DESC="$2"; shift 2 ;;
     --no-index-update) UPDATE_INDEX=0; shift ;;
+    --mode) MODE="$2"; shift 2 ;;
+    --old-content) OLD_CONTENT="$2"; shift 2 ;;
     *) die "unknown arg: $1" ;;
   esac
 done
@@ -49,6 +53,14 @@ done
 [ -n "$SECTION" ] || die "missing --section"
 [ -n "$CONTENT" ] || die "missing --content"
 [ -d "$VAULT" ]   || die "vault dir not found: $VAULT"
+
+case "$MODE" in
+  append|replace|stale) ;;
+  *) die "invalid --mode: $MODE (expected append|replace|stale)" ;;
+esac
+if [ "$MODE" != "append" ]; then
+  [ -n "$OLD_CONTENT" ] || die "--mode $MODE requires --old-content"
+fi
 
 PAGE_PATH="$VAULT/$PAGE"
 mkdir -p "$(dirname "$PAGE_PATH")"
@@ -85,39 +97,60 @@ fi
 # Idempotency: skip if exact line already present in the page (any section).
 APPEND_LINE="- $CONTENT"
 
-if grep -Fxq -- "$APPEND_LINE" "$PAGE_PATH"; then
-  : # already present, no-op
-else
-  if grep -Fxq -- "## $SECTION" "$PAGE_PATH"; then
-    # Section exists → append immediately under it, before next ## or EOF.
-    # awk: emit lines as-is; after finding our section, on the NEXT blank
-    # line or next ## or EOF, insert the new line.
-    awk -v section="## $SECTION" -v newline="$APPEND_LINE" '
-      BEGIN { inserted = 0; in_section = 0 }
-      {
-        if ($0 == section) { print; in_section = 1; next }
-        if (in_section && !inserted && /^## / && $0 != section) {
-          print newline
-          print ""
-          inserted = 1
-          in_section = 0
-        }
-        print
-      }
-      END {
-        if (in_section && !inserted) {
-          print newline
-        }
-      }
-    ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"
+if [ "$MODE" = "append" ]; then
+  if grep -Fxq -- "$APPEND_LINE" "$PAGE_PATH"; then
+    : # already present, no-op
   else
-    # Section doesn't exist → append new section to end of page.
-    {
-      echo ""
-      echo "## $SECTION"
-      echo ""
-      echo "$APPEND_LINE"
-    } >> "$PAGE_PATH"
+    if grep -Fxq -- "## $SECTION" "$PAGE_PATH"; then
+      # Section exists → append immediately under it, before next ## or EOF.
+      # awk: emit lines as-is; after finding our section, on the NEXT blank
+      # line or next ## or EOF, insert the new line.
+      awk -v section="## $SECTION" -v newline="$APPEND_LINE" '
+        BEGIN { inserted = 0; in_section = 0 }
+        {
+          if ($0 == section) { print; in_section = 1; next }
+          if (in_section && !inserted && /^## / && $0 != section) {
+            print newline
+            print ""
+            inserted = 1
+            in_section = 0
+          }
+          print
+        }
+        END {
+          if (in_section && !inserted) {
+            print newline
+          }
+        }
+      ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"
+    else
+      # Section doesn't exist → append new section to end of page.
+      {
+        echo ""
+        echo "## $SECTION"
+        echo ""
+        echo "$APPEND_LINE"
+      } >> "$PAGE_PATH"
+    fi
+  fi
+else
+  # replace / stale: edit an existing exact line "- $OLD_CONTENT"
+  OLD_LINE="- $OLD_CONTENT"
+  if [ "$MODE" = "stale" ]; then
+    FINAL_CONTENT="~~${OLD_CONTENT}~~ <!-- superseded $(date +%F) -->"
+  else
+    FINAL_CONTENT="$CONTENT"
+  fi
+  NEW_LINE="- $FINAL_CONTENT"
+
+  if grep -Fxq -- "$OLD_LINE" "$PAGE_PATH"; then
+    awk -v old="$OLD_LINE" -v new="$NEW_LINE" '
+      { if ($0 == old) print new; else print }
+    ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"
+  elif grep -Fxq -- "$NEW_LINE" "$PAGE_PATH"; then
+    : # already in target state — idempotent no-op
+  else
+    die "replace: old content not found in $PAGE: $OLD_CONTENT"
   fi
 fi
 
