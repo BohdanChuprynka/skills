@@ -3,6 +3,7 @@
 # Reverses vault-writer.sh actions recorded in an undo log (JSONL).
 # Reads entries in reverse order; for each:
 #   action=append      → remove "- <content>" from <vault>/<page>
+#   action=replace     → swap "- <content>" back to "- <old_content>" in <vault>/<page>
 #   action=index_append → remove the inserted line from the index file
 # Prints summary of reverted entries.
 #
@@ -62,7 +63,9 @@ while IFS= read -r line; do
       OLD=$(echo "$line" | jq -r '.old_content')
       NEW=$(echo "$line" | jq -r '.content')
       PAGE_PATH="$VAULT/$PAGE"
-      if [ -f "$PAGE_PATH" ]; then
+      # undo: find the current (post-replace) line "- $NEW" and write the original
+      # "- $OLD" back. If it isn't present (already reverted / page changed), skip.
+      if [ -f "$PAGE_PATH" ] && grep -Fxq -- "- $NEW" "$PAGE_PATH"; then
         awk -v old="- $NEW" -v new="- $OLD" '
           { if ($0 == old) print new; else print }
         ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"

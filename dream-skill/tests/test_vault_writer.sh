@@ -182,5 +182,18 @@ bash "$SCRIPT_DIR/../scripts/apply-undo.sh" "$VAULT/undo-stale.jsonl" >/dev/null
 grep -q "^- current internship at Aximon$" "$VAULT/wiki/stale.md" || fail "stale: undo did not restore original"
 echo "PASS: stale round-trips through apply-undo"
 
+# Test 13: apply-undo skips a replace whose target line is already gone (no overcount, no corruption)
+cat > "$VAULT/wiki/gone.md" <<'EOF'
+# Gone
+
+## Status
+- unrelated line
+EOF
+printf '{"timestamp":"t","vault":"%s","page":"wiki/gone.md","section":"Status","old_content":"orig","content":"already-gone","action":"replace"}\n' "$VAULT" > "$VAULT/undo-gone.jsonl"
+OUT=$(bash "$SCRIPT_DIR/../scripts/apply-undo.sh" "$VAULT/undo-gone.jsonl")
+echo "$OUT" | grep -q "skipped: 1" || fail "apply-undo should skip a replace whose forward line is absent (got: $OUT)"
+grep -q "^- unrelated line$" "$VAULT/wiki/gone.md" || fail "apply-undo corrupted an unrelated page"
+echo "PASS: apply-undo skips already-reverted replace"
+
 echo
 echo "All vault-writer.sh tests passed."
