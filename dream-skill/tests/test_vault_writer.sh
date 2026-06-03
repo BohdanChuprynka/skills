@@ -161,5 +161,26 @@ grep -q "^- status alpha$" "$VAULT/wiki/roundtrip.md" || fail "undo did not rest
 grep -q "status beta" "$VAULT/wiki/roundtrip.md" && fail "undo did not remove the replacement line"
 echo "PASS: replace round-trips through apply-undo"
 
+# Test 12: stale mode strikes through the old line and marks it superseded
+cat > "$VAULT/wiki/stale.md" <<'EOF'
+# Stale
+
+## Priorities
+- current internship at Aximon
+EOF
+
+"$WRITER" --vault "$VAULT" --page "wiki/stale.md" --section "Priorities" \
+  --mode stale --old-content "current internship at Aximon" \
+  --content "n/a" --undo-log "$VAULT/undo-stale.jsonl"
+
+grep -q "~~current internship at Aximon~~" "$VAULT/wiki/stale.md" || fail "stale: line not struck through"
+grep -q "superseded" "$VAULT/wiki/stale.md" || fail "stale: superseded marker missing"
+echo "PASS: stale annotates the old line"
+
+# And it reverses cleanly
+bash "$SCRIPT_DIR/../scripts/apply-undo.sh" "$VAULT/undo-stale.jsonl" >/dev/null
+grep -q "^- current internship at Aximon$" "$VAULT/wiki/stale.md" || fail "stale: undo did not restore original"
+echo "PASS: stale round-trips through apply-undo"
+
 echo
 echo "All vault-writer.sh tests passed."
