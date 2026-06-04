@@ -316,5 +316,22 @@ fi
 rm -f "$VAULT/wiki/leaf-escape.md"; rm -rf "$OUTL"
 echo "PASS: refuses a symlinked leaf page target (no escape)"
 
+# Test 20: a symlinked index.md must NOT be written through — index update skipped
+# (escape #5: echo >> $INDEX_FILE follows leaf symlinks out of the vault)
+IDX_OUTSIDE=$(mktemp -d "/tmp/dream-idxout-XXXXXX")
+printf '# Outside Index\n' > "$IDX_OUTSIDE/index.md"
+IDX_VAULT=$(mktemp -d "/tmp/dream-idxvault-XXXXXX")
+mkdir -p "$IDX_VAULT/wiki"
+printf '# Page\n\n## Notes\n' > "$IDX_VAULT/wiki/page.md"
+ln -s "$IDX_OUTSIDE/index.md" "$IDX_VAULT/wiki/index.md"
+# The page write itself should succeed; only the index update must be skipped
+"$WRITER" --vault "$IDX_VAULT" --page "wiki/page.md" --section "Notes" \
+  --content "safe entry" --undo-log "$IDX_VAULT/undo.jsonl" \
+  --index-label "Page" --index-desc "test" 2>/dev/null
+grep -q "safe entry" "$IDX_VAULT/wiki/page.md" || { rm -rf "$IDX_OUTSIDE" "$IDX_VAULT"; fail "index-symlink: page write failed"; }
+grep -q "safe entry" "$IDX_OUTSIDE/index.md" && { rm -rf "$IDX_OUTSIDE" "$IDX_VAULT"; fail "index-symlink: appended through symlinked index to outside file"; }
+rm -rf "$IDX_OUTSIDE" "$IDX_VAULT"
+echo "PASS: skips index update when index.md is a leaf symlink (no outside write)"
+
 echo
 echo "All vault-writer.sh tests passed."

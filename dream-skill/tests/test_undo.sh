@@ -100,5 +100,22 @@ grep -q "attacker line" "$OUT_DIR2/victim.md" || fail "apply-undo mutated an out
 rm -rf "$OUT_DIR2"
 echo "PASS: skips a vault-less index_append entry (mandatory confinement)"
 
+# ── test 6: index_append with a symlinked INDEX_FILE → SKIPPED (defense-in-depth) ──
+# apply-undo's mv semantics already prevent the outside write, but the explicit
+# [ -L ] belt must reject it before reaching the write path.
+OUT_DIR3=$(mktemp -d "/tmp/dream-undo-symidx-XXXXXX")
+printf 'KEEPME\n' > "$OUT_DIR3/outside-index.md"
+SYMIDX_VAULT=$(mktemp -d "/tmp/dream-undo-symidxvlt-XXXXXX")
+mkdir -p "$SYMIDX_VAULT/wiki"
+ln -s "$OUT_DIR3/outside-index.md" "$SYMIDX_VAULT/wiki/index.md"
+SYMIDX_LOG="$VAULT/symidx-index.jsonl"
+printf '{"timestamp":"t","vault":"%s","index_file":"%s/wiki/index.md","line":"- attacker","action":"index_append"}\n' \
+  "$SYMIDX_VAULT" "$SYMIDX_VAULT" > "$SYMIDX_LOG"
+OUT=$(bash "$UNDO" "$SYMIDX_LOG" 2>/dev/null)
+echo "$OUT" | grep -q "skipped: 1" || fail "apply-undo should skip index_append whose index_file is a leaf symlink (got: $OUT)"
+grep -q "attacker" "$OUT_DIR3/outside-index.md" && fail "apply-undo modified outside file via symlinked index"
+rm -rf "$OUT_DIR3" "$SYMIDX_VAULT"
+echo "PASS: skips index_append whose index_file is a leaf symlink ([ -L ] belt)"
+
 echo
 echo "All apply-undo.sh tests passed."

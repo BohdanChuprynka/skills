@@ -212,21 +212,37 @@ if [ "$MODE" = "append" ] && [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ];
   done
 
   if [ -n "$INDEX_FILE" ]; then
-    BASENAME=$(basename "$PAGE")
-    # Idempotent: skip if any reference to the page filename already exists
-    # (either markdown link or Obsidian wikilink)
-    if grep -q "$BASENAME" "$INDEX_FILE" || grep -q "\[\[${BASENAME%.md}\]\]" "$INDEX_FILE"; then
-      : # already linked
+    # Confine: reject leaf-symlink index files and any that resolve outside the vault.
+    # Skip the update rather than die — page write already succeeded.
+    _IDX_SAFE=1
+    if [ -L "$INDEX_FILE" ]; then
+      echo "vault-writer: skipping index update — index file is a leaf symlink" >&2
+      _IDX_SAFE=0
     else
-      LINE="- [$INDEX_LABEL]($BASENAME)"
-      [ -n "$INDEX_DESC" ] && LINE="$LINE — $INDEX_DESC"
-      echo "$LINE" >> "$INDEX_FILE"
+      _IVREAL="$(cd "$VAULT" 2>/dev/null && pwd -P || true)"
+      _IDXDIR="$(cd "$(dirname "$INDEX_FILE")" 2>/dev/null && pwd -P || true)"
+      case "$_IDXDIR/" in
+        "$_IVREAL"/*) ;;
+        *) echo "vault-writer: skipping index update — index file outside vault root" >&2; _IDX_SAFE=0 ;;
+      esac
+    fi
+    if [ "$_IDX_SAFE" = "1" ]; then
+      BASENAME=$(basename "$PAGE")
+      # Idempotent: skip if any reference to the page filename already exists
+      # (either markdown link or Obsidian wikilink)
+      if grep -q "$BASENAME" "$INDEX_FILE" || grep -q "\[\[${BASENAME%.md}\]\]" "$INDEX_FILE"; then
+        : # already linked
+      else
+        LINE="- [$INDEX_LABEL]($BASENAME)"
+        [ -n "$INDEX_DESC" ] && LINE="$LINE — $INDEX_DESC"
+        echo "$LINE" >> "$INDEX_FILE"
 
-      # Log the index edit too
-      if [ -n "$UNDO_LOG" ]; then
-        ESC_LABEL=$(printf '%s' "$INDEX_LABEL" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        printf '{"timestamp":"%s","vault":"%s","index_file":"%s","line":"%s","action":"index_append"}\n' \
-          "$TS" "$VAULT" "$INDEX_FILE" "$LINE" >> "$UNDO_LOG"
+        # Log the index edit too
+        if [ -n "$UNDO_LOG" ]; then
+          ESC_LABEL=$(printf '%s' "$INDEX_LABEL" | sed 's/\\/\\\\/g; s/"/\\"/g')
+          printf '{"timestamp":"%s","vault":"%s","index_file":"%s","line":"%s","action":"index_append"}\n' \
+            "$TS" "$VAULT" "$INDEX_FILE" "$LINE" >> "$UNDO_LOG"
+        fi
       fi
     fi
   fi

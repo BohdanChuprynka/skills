@@ -104,6 +104,10 @@ while IFS= read -r line; do
         "$IDX_VROOT"/*) ;;
         *) echo "apply-undo: skipping index entry outside its vault: $INDEX_FILE" >&2; SKIPPED=$((SKIPPED + 1)); continue ;;
       esac
+      if [ -L "$INDEX_FILE" ]; then
+        echo "apply-undo: skipping index entry — index file is a leaf symlink: $INDEX_FILE" >&2
+        SKIPPED=$((SKIPPED + 1)); continue
+      fi
       LINE_TEXT=$(echo "$line" | jq -r '.line')
       if [ -f "$INDEX_FILE" ]; then
         grep -Fxv -- "$LINE_TEXT" "$INDEX_FILE" > "$INDEX_FILE.tmp" && mv "$INDEX_FILE.tmp" "$INDEX_FILE"
