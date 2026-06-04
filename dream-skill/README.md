@@ -2,22 +2,23 @@
 
 <h1>dream-skill</h1>
 
-<p><strong>Your Obsidian vault auto-syncs to every Claude Code session you close. No manual /sync, no skipped updates, no stale persona.</strong></p>
+<p><strong>One observable command sweeps every Claude Code chat since you last ran it, and syncs the durable facts into your Obsidian vault — with a per-run receipt so you can <em>see</em> exactly what it did.</strong></p>
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/BohdanChuprynka/skills?style=flat" alt="License"></a>
   <a href="https://github.com/BohdanChuprynka/skills/stargazers"><img src="https://img.shields.io/github/stars/BohdanChuprynka/skills?style=flat&color=yellow" alt="Stars"></a>
-  <img src="https://img.shields.io/badge/version-0.2.0-blue?style=flat" alt="Version 0.2.0">
+  <img src="https://img.shields.io/badge/version-0.3.1-blue?style=flat" alt="Version 0.3.1">
   <img src="https://img.shields.io/badge/claude--code-plugin-orange?style=flat" alt="Claude Code plugin">
 </p>
 
 <p>
-  <a href="#install">Install</a> &middot;
   <a href="#how-it-works">How it works</a> &middot;
+  <a href="#install">Install</a> &middot;
   <a href="#modes">Modes</a> &middot;
-  <a href="#configuration">Config</a> &middot;
+  <a href="#observability">Observability</a> &middot;
+  <a href="#dry-run-vs-full-run">Dry-run vs full run</a> &middot;
   <a href="#safety">Safety</a> &middot;
-  <a href="#roadmap">Roadmap</a>
+  <a href="#faq">FAQ</a>
 </p>
 
 </div>
@@ -26,71 +27,43 @@
 
 ## The problem
 
-You close Claude Code. The conversation had decisions, preferences, new project context — gone unless you remembered to `/sync-wiki` first. Skip it for a week and future Claude sessions re-ask things you already told them.
+You close Claude Code. The conversation had decisions, preferences, new project context — gone unless you remembered to `/sync-wiki` first. Skip it for a week and future sessions re-ask things you already told them.
+
+The earlier auto-on-close design (v0.2) tried to fix this by firing a headless capture on every `SessionEnd`. It worked, but it was **invisible and hard to trust**: a per-session hook spawning an LLM in the background, no single artifact showing what happened, and context that ballooned when a session was large.
+
+**v0.3 inverts that.** Capture is decoupled from extraction. Nothing runs on close. Instead you run **`/dream-skill`** when you want, and it sweeps every chat since the last run as one observable batch — fan out a subagent per chat, merge, route, reconcile against the vault, let you review the uncertain ones, write, and drop a **receipt** you can read in Obsidian.
 
 ## What dream-skill does
 
-Every time you close a Claude Code session with **≥1 user message**, a SessionEnd hook spawns a background `claude -p` invocation that:
-
-1. Reads the just-closed conversation transcript
-2. Strips noise (tool calls, MCP outputs, system reminders)
-3. Classifies each candidate fact by **info gain**
-4. **Writes confident facts directly** to your Obsidian vault (add-only, with index updates and a per-day undo log)
-5. **Queues** uncertain, destructive, or brainstormed facts for your manual review
-
-You never type `/sync-wiki` again. Your vault stays current. You review the queue when you want, fact-by-fact.
+- **On-demand, not automatic.** You run it. No background hook firing on every session close.
+- **Batch, not per-session.** One run covers every unprocessed chat in the window (default: last 7 days, tracked by a `last-run` marker).
+- **Map-reduce over chats.** One isolated subagent per transcript — so a giant session can't blow up the context of the whole run.
+- **Reconciles, doesn't just append.** Each candidate fact is compared against the actual target page: is it new, a duplicate, a newer version that supersedes an old line, or a contradiction?
+- **Observable.** Every run writes a dated **receipt** (`Written · Superseded · Queued · Skipped`) to a `dream-reports/` folder inside Obsidian. That artifact is the point.
+- **Reviewable.** Destructive or low-confidence facts go to a queue you walk fact-by-fact in the terminal (`approve / edit / skip / discard`).
+- **Reversible.** Every write is logged; `apply-undo.sh --date <YYYY-MM-DD>` rolls back a day.
+- **Safe to re-run.** Idempotent writes + a marker that only advances on success mean re-running never double-writes.
 
 ## How it works
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│  You close Claude Code (⌘W, /exit, quit)                           │
-└────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  SessionEnd hook fires (auto-installed with the plugin)            │
-│  → scripts/trigger.sh                                              │
-│     - reads transcript path from stdin JSON                        │
-│     - counts genuine user messages (real typed turns)              │
-│     - 0 or unchanged since last close → SKIP                       │
-│     - new message → export DREAM_* env vars, spawn:                │
-│       nohup claude -p "/dream-skill --auto <transcript>" &         │
-└────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  Headless Claude runs SKILL.md auto-mode                           │
-│     - preprocess-gate.sh: cleans + gates                           │
-│     - reads $DREAM_CONFIG, vault CLAUDE.md, wiki/index.md          │
-│     - classifies each fact into one of 5 buckets                   │
-└────────────────────────────────────────────────────────────────────┘
-                                  │
-        ┌─────────────────────────┼─────────────────────────┐
-        ▼                         ▼                         ▼
-  HIGH CONFIDENCE          DESTRUCTIVE                  GENERAL Q&A
-  + additive               UNCERTAIN                    or pure code
-        │                  BRAINSTORMED                   │
-        ▼                         │                       ▼
-  vault-writer.sh                 ▼                   DROP (logged)
-  - add-only append         queue.sh
-  - idempotent index        - append by bucket
-  - undo log entry          - dedupe by title+target
-        │                         │
-        ▼                         ▼
-  Obsidian vault            ~/.claude/dream-skill/
-                            queue/pending.md
-                                  │
-                                  ▼
-                  Later: /dream-skill (manual)
-                  walks queue → [a]pprove / [e]dit / [s]kip / [d]iscard
-```
+![dream-skill architecture — on-demand batch sync pipeline](docs/architecture.png)
 
-Four guarantees:
-- **Add-only auto writes.** Auto mode never overwrites vault content. Destructive edits go to the queue for your review.
-- **Per-day undo log.** `bash apply-undo.sh --date <YYYY-MM-DD>` reverses every auto-write from that day.
-- **Fire-and-forget.** The hook never blocks shutdown. Broken installs log to `error.log` and exit silently.
-- **Deterministic content gate.** Whether a transcript has real content is a shell exit code from `preprocess-gate.sh` (`OK` / `EMPTY` / `ERROR`), never the model's guess — so a real session is never silently dropped as "empty", and an unreadable or corrupt transcript reports `error` instead of a false skip.
+<sub>Diagram source: [`docs/architecture.mmd`](docs/architecture.mmd) (Mermaid). Regenerate with `mmdc -i docs/architecture.mmd -o docs/architecture.png -b white -s 3`.</sub>
+
+The orchestrator (`SKILL.md`, Steps 0–9) runs a nine-stage pipeline. The shape that matters: a **fan-out → fan-in**, then strictly **one decision per candidate fact**.
+
+| Stage | Owner | What happens |
+|---|---|---|
+| **0 · Pre-flight** | SKILL.md | Resolve the scripts dir; parse `config.toml` (vault roots + `reports_dir`). Handle `--ignore`/`--dry-run`. |
+| **1 · FIND** | `find-chats.sh` | `last-run` marker + window → batches of transcript paths. Default **last 7 days**; `--since` / `--all` (weekly-batched). Private (`--ignore`d) chats excluded. Empty window → receipt "0 chats" and advance. |
+| **2 · MAP** | one subagent per chat | Each isolated subagent reads one transcript, applies the A/B/C/D/E taxonomy (A = write-candidate, B/C = drop, D/E = queue), and emits a JSON array of **candidate facts**. |
+| **3 · REDUCE** | SKILL.md (structural) | Merge all candidate arrays; dedup exact `(content, section)`; count distinct source chats → may **promote a confidence label**. Never clears `needs_review`, never auto-approves. |
+| **4 · ROUTE** | `build-nav-context.sh` + `ROUTING.md` | Per candidate → `{status, vault, page, section}`. `status ∈ routed | ambiguous | gap`. Ambiguous/gap → routing-gaps log + review queue (never a silent guess). |
+| **5 · RECONCILE** | reconciliation prompt | Read the routed target page, then classify the candidate against it: `action ∈ new | duplicate | supersede | contradict`. |
+| **6 · REVIEW** | `queue.sh` | Everything `needs_review` (all destructive edits, all low/medium-confidence news) is walked fact-by-fact in the terminal. |
+| **7 · APPLY** | `apply-decision.sh` → `vault-writer.sh` | Owns `action → mode`: `new`→append, `supersede`→replace (old line preserved in undo), `contradict`→mark old line stale + queue the new one, `duplicate`→skip. |
+| **8 · RECEIPT** | `write-receipt.sh` | Assemble the run summary → `reports_dir/<date>.md` + index line. Buckets: **Written · Superseded · Queued · Skipped**. |
+| **9 · MARKER** | SKILL.md | Advance `last-run` to the batch end date — **only** if APPLY succeeded. A failed write leaves the marker put, so the next run safely retries. |
 
 ## Install
 
@@ -99,214 +72,158 @@ Four guarantees:
 /plugin install dream-skill@skills
 ```
 
-That's it. The plugin's `hooks/hooks.json` is auto-merged on install — no `~/.claude/settings.json` edits required.
+**No `SessionEnd` hook** — nothing runs when you close a session; capture happens only when you run `/dream-skill`. (The plugin still registers a legacy `SessionStart → check-pending.sh` script from v0.2. It is silent — it scans the old `trigger.log` and writes nothing to stdout — so on a clean v0.3 install it is effectively a no-op. A real "N chats since last run" nudge is a planned follow-up.)
 
-**First run:** create `~/.claude/dream-skill/config.toml` pointing at your vault(s). Minimal example:
+**First run:** create `~/.claude/dream-skill/config.toml` pointing at your vault(s):
 
 ```toml
+# Where per-run receipts go (a sibling folder of your vaults, visible in Obsidian).
+reports_dir = "/path/to/Obsidian/dream-reports"
+
 [vaults.me]
-root = "/path/to/your/Obsidian/vault"
-description = "Identity, projects, decisions"
+root = "/path/to/Obsidian/me"
+description = "Identity, skills, experience, projects, career, goals"
+
+[vaults.projects]
+root = "/path/to/Obsidian/projects"
+description = "Repos, architecture, tech stack, current goals, known issues"
 ```
 
-Without a config, auto mode logs an error to `~/.claude/dream-skill/error.log` and exits gracefully — never blocks your session close.
+Each vault root should have a `CLAUDE.md` (the schema Claude reads) and a `wiki/index.md` (the page catalog). `vault-writer.sh` keeps the index updated idempotently. If `config.toml` is missing or empty, dream-skill prompts you to configure it before doing anything.
 
 ## Modes
 
 | Invocation | What it does |
 |---|---|
-| *(automatic — on session close)* | SessionEnd hook fires trigger.sh → headless `--auto` capture |
-| `/dream-skill` | Walk the queue fact-by-fact: `[a]pprove / [e]dit / [s]kip / [d]iscard / [q]uit` |
-| `/dream-skill --ignore` | Mark the current chat **private** — it's never recorded on close (undo: `/dream-skill --unignore`) |
-| `/dream-skill --auto <transcript>` | Used by the hook. Don't call directly. |
-| `/dream-skill --reconcile` | v0.3 stub. Full-vault audit (planned). |
-| `/dream-skill --help` | Print modes, env vars, state paths. Exits without writing. |
+| `/dream-skill` | Run the on-demand pipeline over every chat since `last-run`, then open the terminal review. |
+| `/dream-skill --dry-run` | Run the **entire** pipeline but write nothing — receipt prints to stdout. See [below](#dry-run-vs-full-run). |
+| `/dream-skill --since <YYYY-MM-DD>` | Override the window start. |
+| `/dream-skill --all` | Full-history backfill, weekly-batched. Use only once the pipeline is trusted. |
+| `/dream-skill --ignore` | Mark the **current** chat private — it's excluded from the next run (undo: `--unignore`). |
+| `/dream-skill --unignore` | Re-include a previously ignored chat (latest wins). |
+| `/dream-skill --help` | Print the modes, env vars, and state paths. Exits without writing. |
 
-## Configuration
+> Removed in v0.3: `--auto` (the headless on-close entry point) and `--reconcile` (the earlier v0.2 audit stub). Reconciliation is no longer a separate mode — it's Step 5 of every run.
 
-`~/.claude/dream-skill/config.toml`:
+## Observability
 
-```toml
-[vaults.me]
-root = "/path/to/me"
-description = "Identity, projects, career"
+The thing v0.2 lacked. After every run you have four places to look, all local:
 
-[vaults.projects]
-root = "/path/to/projects"
-description = "Repos, architecture, gotchas"
-```
+- **Receipt** — `reports_dir/<YYYY-MM-DD>.md`, plus a one-line entry in `reports_dir/index.md`. Bucketed `Written / Superseded / Queued / Skipped`, with the source chats and the exact lines. This is the "I can see it worked" artifact — glance at it inside Obsidian, no leaving the editor.
+- **Queue** — `~/.claude/dream-skill/queue/pending.md`. Anything that needed your judgment, still waiting.
+- **Routing-gaps log** (`~/.claude/dream-skill/routing-gaps.log`) — facts that had nowhere obvious to go (ambiguous vault, or no page exists yet). Surfaces where your vault needs a new page or a disambiguation rule; fold recurring gaps into `ROUTING.md`.
+- **Undo log** — `~/.claude/dream-skill/undo/<date>.jsonl`. Every write, reversible.
 
-Each vault root should have a `CLAUDE.md` (the schema Claude reads) and a `wiki/index.md` (the catalog of pages). dream-skill auto-updates the index, idempotently.
+## Dry-run vs full run
 
-**Env overrides** (rarely needed):
+Both run the **identical** pipeline — FIND → MAP → REDUCE → ROUTE → RECONCILE → REVIEW. The only difference is what **APPLY** (Step 7) and onward are allowed to touch:
 
-| Var | Default | Purpose |
+| | `--dry-run` | full run |
 |---|---|---|
-| `DREAM_THRESHOLD` | `1` | Min genuine user messages to trigger dispatch |
-| `DREAM_MODEL` | `claude-haiku-4-5` | Model for the headless classifier run |
-| `DREAM_HOME` | `~/.claude/dream-skill` | State root |
-| `DREAM_CONFIG` | `$DREAM_HOME/config.toml` | Vault config |
-| `DREAM_QUEUE_FILE` | `$DREAM_HOME/queue/pending.md` | Queue file |
+| FIND … RECONCILE | runs normally | runs normally |
+| Vault pages | **untouched** — `vault-writer.sh` prints the intended change and exits | appended / replaced / marked-stale for real |
+| Queue writes | skipped | real entries created |
+| Undo log | not written | written |
+| Receipt | rendered to **stdout** (proposed edits) | written to `reports_dir` |
+| `last-run` marker | **not advanced** | advanced to batch end |
 
-## State layout
-
-All dream-skill state lives under `~/.claude/dream-skill/`:
-
-```
-~/.claude/dream-skill/
-├── config.toml              # vault roots (you create this)
-├── trigger.log              # ALL dispatch outcomes: SKIP / DISPATCH / SPAWNED / COMPLETED / ERROR / WARNING
-├── headless.log             # stdout/stderr from spawned claude -p
-├── error.log                # broken-install diagnostics
-├── log/<date>.md            # per-day human-readable activity log
-├── undo/<date>.jsonl        # per-write rollback entries
-└── queue/pending.md         # deferred-decision facts
-```
-
-This dir survives plugin updates and reinstalls.
+So a dry-run is a zero-mutation preview: you see precisely what *would* happen, and a second dry-run produces the same plan. Use it for the first shakedown of a new vault, or any time you want to look before you leap.
 
 ## Safety
 
-- **Add-only auto writes** to vault pages (auto mode never deletes or overwrites)
-- **Per-day undo log** — full rollback with `apply-undo.sh --date <YYYY-MM-DD>`
-- **Count-delta gate** — re-closing a conversation with no new messages is skipped (resume and type nothing → skip; type anything → re-capture)
-- **Threshold gate** — sessions with no genuine user messages skip dispatch entirely (raise `DREAM_THRESHOLD` to require more)
-- **Fire-and-forget hook** — never blocks shutdown; errors stay in `error.log`
-- **Reason filter** — `clear` and `prompt_input_exit` skip dispatch (you're not actually done)
-- **Failure logging** — every outcome (success, skip, error, silent abort) lands in `~/.claude/dream-skill/trigger.log`. Grep for `ERROR` or `WARNING` to see failures. Zero notifications, zero context pollution.
+- **Reversible writes.** Append, replace, and stale-marking all log to the per-day undo file. `bash scripts/apply-undo.sh --date <YYYY-MM-DD>` reverses a day.
+- **No silent destructive edits.** Every `supersede` and `contradict` goes through the review queue; the model never overwrites vault content without surfacing it.
+- **No silent routing guesses.** Ambiguous/gap routing is logged and queued, never written to a guessed page.
+- **Marker integrity.** The `last-run` marker advances only after a clean APPLY. A failed write → marker stays → next run retries the same window; idempotent writes mean retries don't duplicate.
+- **Dry-run guarantee.** The vault is byte-identical and the queue is untouched after a `--dry-run` APPLY (enforced by tests). The `last-run` marker is also left unadvanced on a dry-run, per the Step 9 orchestration rule.
+- **Private opt-out.** `--ignore` keeps a chat out entirely — no subagent reads it, nothing from it is recorded.
 
 ## Privacy
 
-- All processing local. Transcripts read directly from `~/.claude/projects/<slug>/*.jsonl` that Claude Code already wrote.
-- The only network call is the spawned `claude -p` — identical to any normal Claude Code session.
-- No telemetry. No third-party services. Vault paths never leave your machine.
+- All processing is local. Transcripts are read from the `~/.claude/projects/<slug>/*.jsonl` files Claude Code already wrote.
+- The only model calls are the subagents dispatched inside your normal Claude Code session — identical to any other Claude Code work. No telemetry, no third-party services, vault paths never leave your machine.
+- **Keeping a chat private:** type `/dream-skill --ignore` in that chat. At the next run, `find-chats.sh` (via `private-state.sh`) excludes it — no extraction, no writes. `--unignore` reverses it (latest decision wins, covers the whole chat).
 
-**Keeping a chat private.** Some conversations you just don't want in your vault. Type **`/dream-skill --ignore`** in that chat — when you close it, dream-skill skips it entirely: no headless run, no vault writes, no chat content or title recorded (just a `skipped — marked private` line in the day's `dream-reports` file so you can confirm it worked). Changed your mind? **`/dream-skill --unignore`** re-enables recording (latest one wins). The opt-out ships with the plugin — no global config or `CLAUDE.md` setup required.
+## State layout
+
+All runtime state lives under `~/.claude/dream-skill/` and survives plugin updates:
+
+```
+~/.claude/dream-skill/
+├── config.toml            # vault roots + reports_dir (you create this)
+├── last-run               # marker: the batch end date of the last successful run
+├── queue/pending.md       # deferred-decision facts (destructive / uncertain / brainstormed)
+├── log/<date>.md          # per-day human-readable activity log
+├── undo/<date>.jsonl       # per-write rollback entries
+├── routing-gaps.log        # ambiguous/gap routing decisions (review → fold rules into ROUTING.md)
+└── error.log              # broken-install / failed-step diagnostics
+```
+
+Receipts live in the `reports_dir` from `config.toml` (a folder beside your vaults, so they show up in Obsidian) — **not** under `~/.claude`.
+
+Env overrides (rarely needed): `DREAM_HOME`, `DREAM_CONFIG`, `DREAM_QUEUE_FILE`, `DREAM_DAILY_LOG`, `DREAM_UNDO_LOG`, `DREAM_ERROR_LOG`, `DREAM_MARKER_DIR`, `DREAM_SCRIPTS_DIR`. All have sensible defaults.
+
+## How it relates to the other vault skills
+
+dream-skill is the bulk, automated path. It pairs with two manual ones:
+
+- **`/sync-wiki`** — syncs **one** conversation (the current one) to the vault. dream-skill is essentially "sync-wiki, but every chat since last time, in one observable batch."
+- **`/clean-wiki`** — monthly vault hygiene: finds stale facts, contradictions, broken links, and duplicate pages, then lets you swipe approve/reject. Run it **before** a first big dream-skill sweep so reconciliation routes facts to canonical pages instead of drifted duplicates.
 
 ## FAQ
 
-**Q: I closed the same chat in two windows (used `/resume`). Will my vault get polluted?**
-No. Three dedupe layers protect you: the per-transcript count-delta gate (re-dispatch only when you've added a message), vault per-line idempotency (`grep -Fxq` exact match), and queue `(title, target)` dedupe. Each unique fact lands exactly once. Worst case: 2x cost on a wasted second headless run that produces zero vault changes.
+**Q: Does anything still run automatically when I close a session?**
+No. That was v0.2. Capture happens only when *you* run `/dream-skill`. (A legacy `SessionStart` script still ships but is silent and does nothing on a clean v0.3 install — see Install.)
 
-**Q: How do I confirm it ran, from inside Obsidian?**
-Every run appends a one-line entry to a `dream-reports/dream-<date>.md` file alongside your vault: `wrote N` with the captured bullets, `ran, 0 writes` when nothing was persona-worthy, `skipped` with the reason, or `error` when the transcript was unreadable/corrupt. Glance at today's file to see what each close captured — no leaving Obsidian.
+**Q: How do I know it actually did something?**
+Read today's receipt in `reports_dir/<date>.md` — it lists every fact Written, Superseded, Queued, or Skipped, with sources. That artifact is the whole design goal.
 
-**Q: How much does each session close cost?**
-On a Claude Code subscription (Pro / Max / Team) it's covered — no extra bill. Each dispatch just consumes a small slice of your normal session quota. Approximate per-dispatch usage with the default Haiku 4.5 model: ~30–80K input tokens (preprocessed transcript + vault `CLAUDE.md` + `wiki/index.md`) + ~1–5K output tokens. Translates to roughly $0.01–$0.10 on API billing, or ~5–15% of a single Pro 5-hour window per dispatch. Sessions with no user messages skip entirely; raise `DREAM_THRESHOLD` if you want to gate out short throwaway sessions too. Switch model with `DREAM_MODEL=claude-sonnet-4-6` for higher-quality classification at ~5x the spend.
+**Q: How much does a run cost?**
+One subagent per chat in the window, plus the reduce/route/reconcile steps — all inside your normal Claude Code session (covered on Pro/Max/Team). A week with ~10 substantive chats is ~10 subagent dispatches. Narrow the window with `--since` to spend less.
 
-**Q: Will it fire if I just open Claude and close without typing anything?**
-No. Threshold gate skips silently when the genuine user-message count is below `DREAM_THRESHOLD` (default 1, so only sessions with zero typed messages skip).
+**Q: I ran it twice — did my vault get polluted?**
+No. `vault-writer.sh` is line-idempotent (exact-match append guard), the queue dedupes by `(title, target)`, and the marker only advances on success. Worst case is wasted work on a re-scan that produces zero new writes.
 
-**Q: What if Claude Code crashes or I force-quit?**
-SessionEnd hook only fires on `/exit`, ⌘W, or normal quit — not on crash. The dropped session's facts are missed until you reopen and run `/dream-skill` manually (which sweeps the queue) or `/sync-wiki` (if you still have that skill).
+**Q: A giant session used to blow up the run. Still true?**
+No — that was the v0.2 failure mode. MAP now dispatches one **isolated** subagent per chat, and monster transcripts (>~100 KB) are chunked inside that subagent. No single chat can overflow the run's context.
 
-**Q: How do I disable temporarily?**
-Set `DREAM_THRESHOLD=99999` in your shell env, or comment out the SessionEnd entry in `~/.claude/settings.json` (or remove the plugin).
+**Q: What's the difference between `supersede` and `contradict`?**
+`supersede` = same subject, the candidate is clearly newer/more specific → the old line is replaced (and queued for confirmation). `contradict` = the claims conflict but there's no clear winner → the old line is marked stale and the new one is queued for you to decide, not written.
 
-**Q: Where do auto-writes go? How do I roll them back?**
-Confident facts append to your Obsidian vault pages (add-only). Every write is logged in `~/.claude/dream-skill/undo/<date>.jsonl`. Roll back a full day with `bash scripts/apply-undo.sh --date YYYY-MM-DD` — originals preserved.
-
-**Q: How do I know if dream-skill failed silently?**
-Everything lands in `~/.claude/dream-skill/trigger.log`. Three failure types get distinct lines:
-
-| Line | Meaning |
-|---|---|
-| `ERROR source=trigger ...` | trigger.sh pre-flight failure (claude CLI missing, etc.) |
-| `ERROR source=claude-p code=N ...` | `claude -p` exited non-zero (API error, timeout, crash) |
-| `WARNING kind=orphan ...` | A spawn never reported completion — silent abort inside the headless skill |
-
-To inspect:
-
-```bash
-tail ~/.claude/dream-skill/trigger.log              # last 10 events
-grep -E "ERROR|WARNING" ~/.claude/dream-skill/trigger.log   # all failures
-```
-
-Legitimate skips (below threshold, no new messages, empty transcript) appear as `SKIP` lines — not failures. No popups, no Claude-context injection — pure log output.
+**Q: Where do writes go, and how do I undo them?**
+Into your Obsidian vault pages (per routing), with the index updated. Every write is in `~/.claude/dream-skill/undo/<date>.jsonl`; roll back a day with `bash scripts/apply-undo.sh --date YYYY-MM-DD`.
 
 ## Troubleshooting
 
-**Diagnostic-first checklist.** Run these three before assuming a bug:
+Run these first:
 
 ```bash
-tail ~/.claude/dream-skill/trigger.log         # most recent dispatches + outcomes
-cat ~/.claude/dream-skill/headless.log         # claude -p stdout/stderr
-cat ~/.claude/dream-skill/error.log            # broken-install diagnostics (Rule 3)
+ls ~/.claude/dream-skill/             # config.toml + queue/ + log/ + undo/ should exist
+cat ~/.claude/dream-skill/error.log   # failed-step diagnostics
+claude --version                      # any v1.x / v2.x
+which jq                              # must return a path (brew install jq / apt install jq)
 ```
 
-Then match symptom to fix.
-
-### Hard requirements (verify install)
-
-```bash
-claude --version            # any v1.x or v2.x works
-which jq                    # must return a path
-uname -s                    # Darwin or Linux (Windows: use WSL2 or Git Bash)
-ls ~/.claude/dream-skill/   # config.toml + queue/ + log/ + undo/ dirs must exist
-```
-
-If `jq` missing → `brew install jq` (Mac) or `apt install jq` (Debian/Ubuntu).
-
-### Tier 1 — Critical (blocks dispatch entirely)
-
 | Symptom | Cause | Fix |
 |---|---|---|
-| Nothing happens on session close, trigger.log unchanged | Plugin hooks didn't auto-merge into `~/.claude/settings.json` | Manually add the SessionStart + SessionEnd entries from `hooks/hooks.json` |
-| `ERROR source=trigger code=127 msg=claude-cli-missing` | `claude` CLI not on PATH | Reinstall Claude Code; `which claude` to verify |
-| `ERROR source=claude-p code=N` immediate (<5s) | claude not authenticated (no API key / no subscription session) | `claude login` or set `ANTHROPIC_API_KEY` |
-| Scripts fail with `jq: command not found` | `jq` not installed | `brew install jq` / `apt install jq` |
-| Windows user — scripts won't run at all | Native cmd/PowerShell has no bash | Use WSL2 or Git Bash; dream-skill is bash-only |
-
-### Tier 2 — Functional but degraded
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `ERROR source=skill code=1 msg=env-validation-failed` every run | No `~/.claude/dream-skill/config.toml` | Create it. Minimum: one `[vaults.X]` block with `root = "/path/to/vault"` |
-| Auto-mode runs (logs COMPLETED) but writes nothing useful | Vault has no `CLAUDE.md` or `wiki/index.md` — LLM can't route facts | Create both files in vault root, even empty stubs |
-| `WARNING kind=orphan` after every session | `claude -p` exits 0 but headless LLM aborts | Check `~/.claude/dream-skill/headless.log` for the reason (usually permission denial, model error, or SKILL.md prompt issue) |
-| `ERROR source=claude-p code=N` says "model not found" | Pinned `claude-haiku-4-5` not available on user's plan | Override: `export DREAM_MODEL=claude-sonnet-4-6` or earlier haiku build |
-| Subscription rate-limit hit mid-session | Pro/Max 5h quota exhausted | Raise `DREAM_THRESHOLD` so trivial sessions skip; or set cheaper `DREAM_MODEL` |
-| Multiple dispatches, all fast `COMPLETED` but zero queue/vault output | LLM dropping everything as recursive/no-info — may be over-firing | Tune SKILL.md Step 3 Bucket C/D rules (open issue if persistent) |
-
-### Tier 3 — Edge cases (rare)
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| A chat won't re-capture even after you add messages | Stale seen-count in `~/.claude/dream-skill/.locks/<hash>` | Self-heals on the next close (gate re-dispatches on any count change). To force-reset all baselines: `rm -rf ~/.claude/dream-skill/.locks/` |
-| Hook fires from wrong cwd, paths break | `$CLAUDE_PLUGIN_ROOT` unset (rare for plugin install) | trigger.sh falls back to its own `dirname` — usually works. If not, hardcode absolute path in settings.json hook command |
-| Vault on iCloud Drive, write fails or corrupts | iCloud sync conflict / file open in another app | Move vault outside iCloud, or use Obsidian's local-only mode |
-| Vault has 1000+ pages, headless run slow | SKILL.md loads `wiki/index.md` — large indexes inflate context | Split into per-subdir indexes; trim main index |
-| Disk full — silent append failures | `>>` returns non-zero, swallowed by `|| true` guards | `df -h ~/.claude/` to verify; free disk |
-| Mixed-case path mismatch on Linux | macOS case-insensitive default vs Linux case-sensitive | Match case in `config.toml` `root = ...` exactly to actual directory name |
-| `tac` not on system, undo loop slow | macOS lacks `tac` (Linux-only) — awk fallback used | Already handled; only matters if awk also missing |
-
-### Tier 4 — Known limitations (won't fix in v0.2)
-
-| Limitation | Workaround |
-|---|---|
-| Claude Code crash → SessionEnd never fires | Manually run `/dream-skill --auto <transcript-path>` afterward |
-| Two simultaneous closes (same transcript, <100ms apart) | Both reads see the same seen-count, so a sub-100ms race may double-dispatch. Vault-writer idempotency + queue dedup catch the downstream duplicates anyway |
-| Plugin updated mid-session | Old hook config in memory stays active for current session; new sessions get new behavior |
-| Transcript .jsonl written async by Claude Code | If hook fires before file flushed, trigger.sh logs `SKIP file-not-found`. Acceptable — next session usually has the file |
-
-### Still stuck?
-
-Open an issue at <https://github.com/BohdanChuprynka/skills/issues> with:
-- Output of the diagnostic-first 3 commands above
-- `claude --version`
-- `uname -a`
-- Last ~50 lines of `~/.claude/dream-skill/trigger.log`
+| "No last-run marker found" prompt every run | Marker missing (first run) | Pick a window (1 = last 7 days is recommended); the marker is written on success. |
+| Run finds 0 chats | Window is empty, or all chats `--ignore`d | Widen with `--since <date>` or `--all`. |
+| Facts pile up in the queue, few written | Routing can't find canonical pages | Run `/clean-wiki` to merge duplicate pages; add disambiguation rules to `ROUTING.md`. |
+| `error.log` shows `missing <script>` | Scripts dir not resolved | Reinstall the plugin; verify `scripts/` is intact. |
+| Scripts fail with `jq: command not found` | `jq` not installed | `brew install jq` / `apt install jq`. |
+| Vault on iCloud, write fails | iCloud sync conflict | Move the vault out of iCloud, or use local-only mode. |
 
 ## Roadmap
 
-- **v0.2** (current) — per-conversation auto-on-close, manual queue review, in-vault progress reports
-- **v0.2.1** (next) — first-run setup wizard, cost guard via token counter, JSON-shaped headless log
-- **v0.3** — `/dream-skill --reconcile` for periodic full-vault audit against accumulated session data
+- **v0.3** (current) — on-demand batch sweep, map-reduce extraction, per-candidate reconciliation, terminal review, in-vault receipts, dry-run.
+- **Next** — first-run config wizard; richer receipt diffs; a `volatility`-aware reconcile pass for fast-changing pages.
 
 ## Docs
 
-- [SKILL.md](skills/dream-skill/SKILL.md) — runtime instructions Claude reads
-- [PLAN.md](PLAN.md) — original v0.2 build plan
+- [`docs/architecture.mmd`](docs/architecture.mmd) — architecture diagram source (renders the image above)
+- [SKILL.md](skills/dream-skill/SKILL.md) — runtime instructions Claude reads (Steps 0–9, Routing, Reconciliation)
+- [REDESIGN-2026-06-03-on-demand-batch.md](REDESIGN-2026-06-03-on-demand-batch.md) — the approved redesign spec
+- [PLAN-OVERVIEW-2026-06-03.md](PLAN-OVERVIEW-2026-06-03.md) — normative data contracts (candidate-fact, routing-decision, reconciliation-decision)
 - [HARVEST.md](HARVEST.md) — patterns ported from v0.1
 
 ## License

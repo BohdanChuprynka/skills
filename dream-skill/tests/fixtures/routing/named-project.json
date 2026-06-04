@@ -1,0 +1,24 @@
+{
+  "_fixture": "named-project",
+  "_description": "A decision about a named repo/project → projects vault project page",
+  "input": {
+    "candidate": {
+      "content": "Switched aximon-api auth layer from JWT to session cookies for the dashboard",
+      "type": "observation",
+      "confidence": "high",
+      "evidence": "we moved off JWTs for the dashboard, using sessions now",
+      "source_chat": "def456",
+      "source_date": "2026-06-02",
+      "suggested_section": "Architecture"
+    },
+    "routing_context": "(elided)"
+  },
+  "expected_output": {
+    "status": "routed",
+    "vault": "projects",
+    "page": "wiki/aximon.md",
+    "section": "Architecture",
+    "routing_confidence": "high"
+  },
+  "routing_rationale": "Fact names a specific repo (aximon-api). ROUTING.md rule: 'choice inside a repo → projects/<x>/architecture'. projects wiki/index.md lists aximon.md."
+}

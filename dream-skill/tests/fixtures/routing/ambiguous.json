@@ -1,0 +1,25 @@
+{
+  "_fixture": "ambiguous",
+  "_description": "A fact equally at home in me/career and work/pipeline → status ambiguous",
+  "input": {
+    "candidate": {
+      "content": "Decided to pursue AI/ML contracting as primary income track for summer 2026",
+      "type": "belief",
+      "confidence": "high",
+      "evidence": "I'm going all-in on contracting this summer",
+      "source_chat": "jkl012",
+      "source_date": "2026-06-01",
+      "suggested_section": "Goals"
+    },
+    "routing_context": "(elided)"
+  },
+  "expected_output": {
+    "status": "ambiguous",
+    "vault": null,
+    "page": null,
+    "section": null,
+    "routing_confidence": "low",
+    "ambiguity_note": "Could fit me/wiki/goals.md (career direction, durable) OR work vault current cycle goals. ROUTING.md cross-vault rule needed: if a fact is about Bohdan's strategic direction (not a specific active deal/client), prefer me/goals. Add this rule to ROUTING.md disambiguation section."
+  },
+  "routing_rationale": "When a goal straddles personal identity ('who I am') and active operational work ('what I'm doing this cycle'), the router cannot resolve without an explicit disambiguation rule. This case should be flagged and the rule added to ROUTING.md."
+}

@@ -1,63 +1,38 @@
 ---
 name: dream-skill
-description: Auto-record Claude Code conversations to an Obsidian vault. Use when the user says "/dream-skill", "review dream queue", "process dream queue", "sweep dream queue", or asks to update wiki from a recent conversation. Also runs headlessly via SessionEnd hook in auto mode when invoked with `--auto <transcript-path>`. Manual no-arg invocation sweeps the queue of deferred-decision facts and walks the user through approve/edit/skip. `--reconcile` is a v0.3 stub. Type `/dream-skill --ignore` to mark the current chat private so it is never recorded into the vault (undo with `--unignore`).
-version: 0.2.0
+description: On-demand batch sync of Claude Code conversations to an Obsidian vault. Use when the user says "/dream-skill", "review dream queue", "process dream queue", "sweep dream queue", or asks to update wiki from a recent conversation. Runs a FIND→MAP→REDUCE→ROUTE→RECONCILE→REVIEW→APPLY→RECEIPT→MARKER pipeline over unprocessed transcripts. Type `/dream-skill --ignore` to mark the current chat private so it is never recorded into the vault (undo with `--unignore`).
+version: 0.3.1
 ---
 
 # dream-skill
 
-Persona-model sync for an Obsidian vault. Four modes:
+> This file is read by the LLM at skill invocation time. It contains no executable code.
+> Plans 2 and 3 will append `## Routing` and `## Reconciliation` sections below.
 
-| Invocation | Mode | Trigger |
-|---|---|---|
-| `/dream-skill --auto <transcript.jsonl>` | **Auto (headless)** | SessionEnd hook fires this on close. No user interaction. |
-| `/dream-skill` (no args) | **Manual review** | User runs this anytime to walk the queue. |
-| `/dream-skill --ignore` | **Mark private** | User runs this in a chat they don't want recorded. Confirms; the SessionEnd hook then skips this chat on close. |
-| `/dream-skill --unignore` | **Unmark private** | Undo `--ignore` for this chat — recording resumes on close. |
-| `/dream-skill --reconcile` | **Reconcile (stub)** | Reserved for v0.3 full-vault audit. Prints "not yet implemented" and exits. |
-| `/dream-skill --help` | **Help** | Prints the mode table, env vars, state paths, and exits. Never writes anything. |
+## Invocation modes
 
-### `--help` output
-
-When invoked with `--help` (or `-h`), print this verbatim and exit 0:
-
-```
-dream-skill v0.2 — auto-record Claude Code conversations to an Obsidian vault.
-
-USAGE
-  /dream-skill                          Manual queue review (interactive)
-  /dream-skill --ignore                  Mark THIS chat private — never recorded
-  /dream-skill --unignore                Undo --ignore for this chat
-  /dream-skill --auto <transcript.jsonl> Headless capture (used by SessionEnd hook)
-  /dream-skill --reconcile               v0.3 stub — prints not-implemented
-  /dream-skill --help                    Show this help
-
-STATE
-  ~/.claude/dream-skill/config.toml       Vault roots
-  ~/.claude/dream-skill/queue/pending.md  Deferred-decision facts (review with no-arg call)
-  ~/.claude/dream-skill/log/<date>.md     Daily human-readable activity log
-  ~/.claude/dream-skill/undo/<date>.jsonl Per-write rollback entries
-  ~/.claude/dream-skill/trigger.log       SessionEnd dispatch decisions
-  ~/.claude/dream-skill/error.log         Append on broken-install failures
-
-ENV VARS (set by trigger.sh before headless run)
-  DREAM_SCRIPTS_DIR   Resolved scripts/ dir (vault-writer.sh, queue.sh, ...)
-  DREAM_HOME          Defaults to ~/.claude/dream-skill
-  DREAM_CONFIG        Path to config.toml
-  DREAM_QUEUE_FILE    Path to queue/pending.md
-  DREAM_DAILY_LOG     Path to today's log file
-  DREAM_UNDO_LOG      Path to today's undo file
-  DREAM_ERROR_LOG     Path to error log
-  DREAM_TRANSCRIPT    Absolute path to the just-closed transcript
-
-ROLLBACK
-  bash $DREAM_SCRIPTS_DIR/apply-undo.sh --date <YYYY-MM-DD>
-
-DOCS
-  README.md, HARVEST.md, PLAN.md in the plugin root.
-```
+| Invocation | Mode |
+|---|---|
+| `/dream-skill` | On-demand run: opens a terminal review session. Runs FIND → MAP → REDUCE → ROUTE → RECONCILE → REVIEW → APPLY → RECEIPT → MARKER. |
+| `/dream-skill --since <YYYY-MM-DD>` | Explicit window start override (passes `--since` to `"$DREAM_SCRIPTS_DIR/find-chats.sh"`). |
+| `/dream-skill --all` | Full-history backfill (weekly-batched; only after pipeline is trusted). Passes `--all` to `"$DREAM_SCRIPTS_DIR/find-chats.sh"`. |
+| `/dream-skill --dry-run` | Run the full pipeline but write nothing to the vault. Receipt is printed to stdout only. |
+| `/dream-skill --ignore` | Mark THIS chat private — skip on next close. |
+| `/dream-skill --unignore` | Undo `--ignore` for this chat. |
+| `/dream-skill --help` | Print this table, env vars, state paths, and exit 0. |
 
 ---
+
+## Model policy
+
+Every LLM step in this pipeline runs on **Sonnet** (`model: sonnet` → Sonnet 4.6, `claude-sonnet-4-6`):
+
+- **MAP** (Step 2) — one extraction subagent per chat. Dispatch with `model: sonnet`.
+- **ROUTE** (Step 4) and **RECONCILE** (Step 5c) — per-candidate judgments. Run each as a Sonnet subagent (`model: sonnet`); the isolated context per candidate also keeps the orchestrator lean (the original context-overflow failure mode).
+
+These are high-volume, tightly-specified steps (read one chat → emit candidate JSON; emit one routing JSON; emit one reconciliation JSON) that Sonnet handles well. Only the orchestrator that stitches the run together (the FIND / REDUCE / REVIEW / APPLY / RECEIPT / MARKER plumbing) runs on the session model. If you ever need maximum fidelity on the destructive-edit judgment, RECONCILE is the single step worth temporarily pinning back to a stronger model — but the default is Sonnet everywhere.
+
+This is a dispatch-level setting (model + per-candidate isolation): it does not change any data contract, so the deterministic test suites are unaffected.
 
 ## HARD RULES — read first, apply always
 
@@ -71,45 +46,45 @@ The ONLY valid write destinations are:
 3. The daily log at `$DREAM_DAILY_LOG` (plain append)
 4. The undo log at `$DREAM_UNDO_LOG` (managed by `vault-writer.sh`)
 5. The error log at `$DREAM_ERROR_LOG` (plain append on failures)
+6. The marker file at `${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}/last-run` (Step 9)
+7. The receipt file in `reports_dir` (via `scripts/write-receipt.sh`)
+8. The routing-gaps log at `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (plain append when routing returns `ambiguous`/`gap` — Step 5a / R7)
 
 You MUST NOT write to any of these:
-- ❌ `~/.claude/projects/*/memory/` — that is Claude Code's per-project auto-memory, a different persistence layer. Writing here defeats the whole purpose of dream-skill (which is to sync to the user's GLOBAL Obsidian vault). If you find yourself wanting to use `Edit` or `Write` on `MEMORY.md` or any `user_*.md`, `feedback_*.md`, `project_*.md`, `reference_*.md` file under `~/.claude/projects/`, **STOP** — that file lives in the auto-memory system, not dream-skill's target.
-- ❌ Any path outside the vault roots in `$DREAM_CONFIG`
-- ❌ Any path not under `$DREAM_HOME`
+- `~/.claude/projects/*/memory/` — that is Claude Code's per-project auto-memory, a different persistence layer.
+- Any path outside the vault roots in `$DREAM_CONFIG`
+- Any path not under `$DREAM_HOME` or a configured vault root
 
 ### Rule 2 — Use the provided helper scripts, never improvise
 
-Vault writes go through `$DREAM_SCRIPTS_DIR/vault-writer.sh`.
-Queue appends go through `$DREAM_SCRIPTS_DIR/queue.sh`.
-Never use the `Write`/`Edit` tools directly to mutate vault files in auto mode. (Manual mode may use them after explicit user approval.)
+Vault writes go through `scripts/vault-writer.sh`.
+Queue appends go through `scripts/queue.sh`.
+Receipts go through `scripts/write-receipt.sh`.
+Apply decisions go through `scripts/apply-decision.sh` (Plan 3).
+Never use the `Write`/`Edit` tools directly to mutate vault files.
 
-### Rule 3 — Fail loud (in the log), exit silent (to the user)
+### Rule 3 — Fail loud (in the log), exit gracefully to the user
 
-If any required env var (`DREAM_SCRIPTS_DIR`, `DREAM_HOME`, `DREAM_CONFIG`, `DREAM_QUEUE_FILE`) is unset or the path it points to doesn't exist, append a structured error line to `$DREAM_ERROR_LOG` and exit 0. Do NOT try to find an alternative persistence layer. The SessionEnd hook is fire-and-forget; broken installs must surface in `error.log`, never crash, never write to the wrong place.
+If any required env var or script path is missing, append a structured error line to `$DREAM_ERROR_LOG` and stop that step. Do NOT try to find an alternative persistence layer.
 
-### Rule 4 — Always close the trigger.log loop
+### Rule 4 — Dry-run is mechanical
 
-Every auto-mode invocation MUST end with a `COMPLETED` or `ERROR` line appended to `$DREAM_LOG` (see Step 6). trigger.sh logged a `SPAWNED` line right before invoking you; `check-pending.sh` treats unmatched `SPAWNED` lines as silent failures and writes a `WARNING kind=orphan` line. If you skip Step 6, the log gets spurious orphan warnings — which means YOU are the source of the noise the user sees on `tail trigger.log`.
+When `--dry-run` is active, pass `--dry-run` through to `apply-decision.sh` and `vault-writer.sh` unchanged. No conditional logic — every APPLY call carries the flag.
 
 ---
 
 ## State layout (env-var sourced)
 
-trigger.sh exports these BEFORE invoking the headless skill. **Always read them from the environment; never hardcode paths.**
-
 | Env var | Default | Purpose |
 |---|---|---|
-| `DREAM_SCRIPTS_DIR` | (resolved by trigger.sh) | Where vault-writer.sh, queue.sh, apply-undo.sh, preprocess.sh live |
+| `DREAM_SCRIPTS_DIR` | (resolved at runtime) | Where vault-writer.sh, queue.sh, apply-decision.sh, write-receipt.sh, find-chats.sh live |
 | `DREAM_HOME` | `~/.claude/dream-skill` | Runtime state root |
 | `DREAM_CONFIG` | `$DREAM_HOME/config.toml` | Vault roots TOML |
 | `DREAM_QUEUE_FILE` | `$DREAM_HOME/queue/pending.md` | Deferred-decision facts |
 | `DREAM_DAILY_LOG` | `$DREAM_HOME/log/<YYYY-MM-DD>.md` | Human-readable activity log |
 | `DREAM_UNDO_LOG` | `$DREAM_HOME/undo/<YYYY-MM-DD>.jsonl` | Per-write rollback entries |
 | `DREAM_ERROR_LOG` | `$DREAM_HOME/error.log` | Append on broken-install failures |
-| `DREAM_TRANSCRIPT` | (set by trigger.sh) | Absolute path to the just-closed JSONL transcript |
-| `DREAM_LOG` | `$DREAM_HOME/trigger.log` | Append-only dispatch decisions + completion markers (Step 6) |
-
-If any are unset when you enter auto mode, fall through to Rule 3.
+| `DREAM_MARKER_DIR` | `$DREAM_HOME` | Directory containing `last-run` marker file |
 
 ## Vault config
 
@@ -123,256 +98,151 @@ description = "Identity, skills, experience, projects, career"
 [vaults.projects]
 root = "/path/to/projects"
 description = "Repos, architecture, goals, gotchas"
+
+reports_dir = "/path/to/me/dream-reports"
 ```
 
-Each vault root should have a `CLAUDE.md` (the vault's schema/conventions) and `wiki/index.md` (catalog of pages). vault-writer.sh handles index auto-update.
+Each vault root should have a `CLAUDE.md` (vault schema/conventions) and `wiki/index.md` (catalog). `vault-writer.sh` handles index auto-update.
 
-In **auto mode**: if `$DREAM_CONFIG` doesn't exist or has no vault entries, log to `$DREAM_ERROR_LOG` and exit (Rule 3). Do not prompt.
-
-In **manual mode**: if `$DREAM_CONFIG` doesn't exist, prompt the user for at least one vault root and write the file before continuing.
+If `$DREAM_CONFIG` doesn't exist or has no vault entries: prompt the user to configure it before proceeding.
 
 ---
 
-## Auto mode (`--auto <transcript-path>`)
+## Orchestration
 
-**Headless. Never asks user. Never blocks.**
+The on-demand pipeline runs in the following steps. Each step is described below.
 
-### Step 0 — Sanity check env vars (literal file checks ONLY)
+### Step 0 — Pre-flight
 
-This is a **plain `test -f` / `test -d` check on shell env vars and paths**. It is NOT a check of which tools you have access to or which permissions you've been granted. Do not abort on tool-availability concerns or permission concerns. Run the checks via `Bash` tool only:
-
-```bash
-[ -n "$DREAM_SCRIPTS_DIR" ] && [ -d "$DREAM_SCRIPTS_DIR" ] || echo "MISSING DREAM_SCRIPTS_DIR" >> "$DREAM_ERROR_LOG"
-[ -n "$DREAM_HOME" ]        && [ -d "$DREAM_HOME" ]        || echo "MISSING DREAM_HOME"        >> "$DREAM_ERROR_LOG"
-[ -n "$DREAM_CONFIG" ]      && [ -f "$DREAM_CONFIG" ]      || echo "MISSING DREAM_CONFIG"      >> "$DREAM_ERROR_LOG"
-[ -x "$DREAM_SCRIPTS_DIR/vault-writer.sh" ] || echo "MISSING vault-writer.sh" >> "$DREAM_ERROR_LOG"
-[ -x "$DREAM_SCRIPTS_DIR/queue.sh" ]        || echo "MISSING queue.sh"        >> "$DREAM_ERROR_LOG"
-[ -x "$DREAM_SCRIPTS_DIR/preprocess.sh" ]   || echo "MISSING preprocess.sh"   >> "$DREAM_ERROR_LOG"
-[ -x "$DREAM_SCRIPTS_DIR/preprocess-gate.sh" ] || echo "MISSING preprocess-gate.sh" >> "$DREAM_ERROR_LOG"
-```
-
-If — and ONLY if — any file/dir literally does not exist on disk: append the failure to `$DREAM_ERROR_LOG` and exit 0. Otherwise, proceed to Step 1.
-
-**You are running under `--dangerously-skip-permissions`. You will not be prompted for any tool call. Do not abort because you "might not have permission" — you do.**
-
-### Step 0.5 — Honor the private opt-out (belt-and-suspenders)
-
-`trigger.sh` already skips chats the user marked private *before* spawning you. In rare paths (e.g. compaction-continuation resolution) you may still be invoked on one — so re-check the **raw** transcript (not the preprocessed text; command records may be stripped):
+1. Check the `--dry-run` flag. If set, no vault writes occur; receipt is printed to stdout only. Thread `--dry-run` to `apply-decision.sh` (Plan 3 makes this mechanical).
+2. Check `--ignore` / `--unignore`. If present, update the private-state flag for the current transcript and exit. Do not proceed to FIND.
+3. Resolve `DREAM_SCRIPTS_DIR` robustly — works as a marketplace plugin OR a bare `~/.claude/skills` symlink. Run:
 
 ```bash
-"$DREAM_SCRIPTS_DIR/private-state.sh" "$DREAM_TRANSCRIPT"
-```
-
-If it prints `ignore`, the user typed `/dream-skill --ignore`: write NOTHING to the vault or queue. Close the loop and exit 0:
-
-```bash
-TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "$TS COMPLETED source=skill reason=marked-private writes=0 queued=0 dropped=0 transcript=$DREAM_TRANSCRIPT" >> "$DREAM_LOG"
-"$DREAM_SCRIPTS_DIR/report.sh" --status skipped \
-  --chat "${DREAM_CHAT_LABEL:-$(basename "${DREAM_TRANSCRIPT%.jsonl}") (auto)}" \
-  --reason "marked private" 2>/dev/null || true
-```
-
-Pass **no** `--title` — the first message is itself sensitive. Then stop (do not run Steps 1–6).
-
-### Step 1 — Preprocess transcript (deterministic content gate)
-
-Run the content gate and decide OK/EMPTY/ERROR **from its exit code alone**. **You MUST NOT inspect the cleaned text's length or content to judge whether the transcript is "empty."** That exact judgment call is the v0.2 bug: a rich 5.8 KB session was eyeballed, called "empty after preprocessing," and silently dropped. `preprocess-gate.sh` makes emptiness a deterministic byte-count decided in-shell, surfaced as an exit code:
-
-- exit `0` = **OK** — real content; the cleaned text is on stdout (your `clean_transcript`)
-- exit `3` = **EMPTY** — valid transcript, but nothing survives cleaning
-- exit `2` = **ERROR** — missing / unreadable / corrupt transcript, or `jq` unavailable
-
-Bind `T` to the transcript path: **it is the path in your `--auto` argument** — e.g. if you were invoked as `/dream-skill --auto /Users/me/.claude/projects/x/abc.jsonl`, set `T=/Users/me/.claude/projects/x/abc.jsonl` (substitute the real path; do not leave a placeholder). `$DREAM_TRANSCRIPT` holds the same path as a fallback. Then capture **set-e-safely** — a bare `clean=$(…); rc=$?` aborts before `rc=$?` under `set -e`:
-
-```bash
-T="/absolute/path/from/your/--auto/argument.jsonl"   # the real path; $DREAM_TRANSCRIPT is the same value
-[ -f "$T" ] || T="$DREAM_TRANSCRIPT"
-if clean_transcript=$("$DREAM_SCRIPTS_DIR/preprocess-gate.sh" "$T" 2>>"$DREAM_ERROR_LOG"); then
-  :   # OK (exit 0): real content is in $clean_transcript → go to Step 2
+# Resolve the scripts dir robustly — works as a marketplace plugin OR a bare ~/.claude/skills symlink.
+SKILL_DIR="<the base directory shown in this skill's invocation header>"
+REAL="$(cd -P "$SKILL_DIR" && pwd)"              # follow symlink to the real skill dir
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "$CLAUDE_PLUGIN_ROOT/scripts/find-chats.sh" ]; then
+  DREAM_SCRIPTS_DIR="$CLAUDE_PLUGIN_ROOT/scripts"            # plugin install
+elif [ -x "$REAL/scripts/find-chats.sh" ]; then
+  DREAM_SCRIPTS_DIR="$REAL/scripts"                          # self-contained skill dir
+elif [ -x "$REAL/../../scripts/find-chats.sh" ]; then
+  DREAM_SCRIPTS_DIR="$(cd -P "$REAL/../.." && pwd)/scripts"  # skills/<name>/ under a plugin root (current layout)
 else
-  rc=$?   # 3 = EMPTY, 2 (or any other non-zero) = ERROR
+  echo "dream-skill: cannot locate scripts dir from $REAL — append to \$DREAM_ERROR_LOG and stop (Rule 3)." >&2
 fi
+DREAM_SKILL_HOME="$(dirname "$DREAM_SCRIPTS_DIR")"
+ROUTING_MD="$DREAM_SKILL_HOME/ROUTING.md"
+# Verify all helpers exist + executable; if any missing, fail loud (Rule 3) and stop.
+for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh advance-marker.sh; do
+  [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; }
+done
+```
+4. Parse `~/.claude/dream-skill/config.toml` (override via `${DREAM_CONFIG}` for tests) to resolve vault roots and `reports_dir`. Parse vault names from `^\[vaults\.<name>\]`, then `root =` per block; `reports_dir =` at top level. `config.toml` is the ONLY source of vault roots — no fallback to `CLAUDE.md` grep.
+
+### Step 1 — FIND
+
+Run:
+```bash
+"$DREAM_SCRIPTS_DIR/find-chats.sh" [--since <date>] [--all]
 ```
 
-Then branch on the result:
+Parse stdout into a list of `(batch_start, batch_end, [transcript_paths...])` tuples by consuming `BATCH:<start>:<end>` header lines.
 
-- **OK** → proceed to Step 2 with `$clean_transcript`.
-- **EMPTY (`rc` = 3)** → genuinely nothing to ingest. Append `[SKIP] empty-transcript` to `$DREAM_DAILY_LOG`, then close the loop via **Step 6** with `reason=empty-transcript` (report `--status noop --reason empty-transcript`). Exit 0.
-- **ERROR (`rc` ≠ 0 and ≠ 3)** → the transcript is missing/unreadable/corrupt. Do **not** report it as empty. Append the failure to `$DREAM_ERROR_LOG`, then close the loop via **Step 6** ERROR branch (`--status error`). Exit 0.
+**No-marker prompt:** If `"$DREAM_SCRIPTS_DIR/find-chats.sh"` emits no BATCH header (marker missing and no flag), prompt the user:
+> No last-run marker found. Choose a window:
+> 1. Last 7 days (default — recommended for first run)
+> 2. Since <date> (enter a YYYY-MM-DD date)
+> 3. All history (--all; weekly-batched; only after pipeline is trusted)
 
-Do **not** skip on length alone: a single short user message can be high persona signal (e.g. "I got into MIT", "quit my job today"). If the gate says OK, there is content — process it.
+Then re-invoke `"$DREAM_SCRIPTS_DIR/find-chats.sh"` with the chosen flag.
 
-### Step 2 — Load vault context
+**Empty result:** If a batch contains zero transcript paths, skip to RECEIPT for that batch (write a receipt noting "0 chats in window") and advance the marker — **unless `--dry-run` is active, in which case the marker is never advanced** (I3).
 
-Read `$DREAM_CONFIG` to get vault names + roots.
-For each vault, read `<root>/CLAUDE.md` and `<root>/wiki/index.md` (if they exist) to learn schema + catalog. Do **not** read every page — just CLAUDE.md and the index, so you know what exists and where new info would land.
+### Step 2 — MAP
 
-### Step 3 — Extract candidate facts
+For each batch, dispatch one subagent per transcript path using the Task/Agent tool, **with `model: sonnet`** (see Model policy). Each subagent receives:
 
-Scan `clean_transcript`. For each candidate fact, classify into one of these buckets.
+**Dispatch prompt (verbatim — copy into each Task invocation):**
 
-**Meta-session rule (important):** If the transcript is about building/debugging dream-skill itself, do NOT blanket-skip as "recursive." Look for concrete decisions the user made: architecture picks, file paths committed to, technical choices, version bumps, default values changed. Those ARE persona signal about their work and belong in vault (typically `projects/wiki/skills-monorepo.md` or similar). Only skip the literal back-and-forth ("yes", "do it", "looks good") as Bucket B execution-confirmations.
+> You are a dream-skill extraction agent. Read the transcript at `<absolute_path>` and extract every fact about Bohdan that belongs in bucket A (additive personal fact) or buckets D/E (queued items), using the extraction taxonomy in SKILL.md.
+>
+> Rules:
+> - Apply the five-bucket taxonomy above (A=write-candidate, B/C=drop, D/E=queue).
+> - Output ONLY a JSON array of candidate-fact objects matching this schema exactly (overview §4):
+>   `[{"content":"...","confidence":"high|medium|low","source_chat":"<path>","source_date":"<YYYY-MM-DD>","type":"...","evidence":"...","suggested_section":"..."}]`
+> - Required fields: `content`, `confidence`, `source_chat`, `source_date`. Optional: `type`, `evidence`, `suggested_section`.
+> - `source_date` is the date of this chat (derive from the transcript filename or metadata).
+> - Do NOT include `needs_review`, `target_hint`, or `section` — those are set by routing and reconciliation.
+> - An empty array `[]` is valid for code-only or private chats.
+> - Do NOT invent facts. Do NOT route or reconcile. Extract only.
+> - For monster chats (transcript > ~100 KB): chunk the file into overlapping 40 KB segments, extract from each, then deduplicate within this chat before returning.
 
-#### Bucket A — HIGH CONFIDENCE, ADDITIVE → write to vault
+Each subagent returns a JSON array of candidate facts. Validate the JSON structure using the `validate_candidates` harness (required fields ONLY: `content`, `confidence`, `source_chat`, `source_date`). Any subagent output that is not valid JSON, or is missing any required field, is logged as an extraction error and skipped for this run. Missing optional fields (`type`, `evidence`, `suggested_section`) never cause a candidate to be dropped.
 
-**Default to WRITE, not queue.** Auto-mode's whole purpose is to keep the vault current without manual sync. Queue is an escape hatch for genuinely ambiguous facts, NOT the default. If you find yourself queuing 5+ facts in one run and writing 0, you are being too cautious — re-classify.
+**JSON validation harness — use the helper script (Rule 2), do not re-implement:**
 
-A fact qualifies as Bucket A if ALL of:
-- New information about the user OR about a project/topic the user is working on (role, project, deadline, preference, decision, relationship, body/health, learning, schedule, technical choice, architecture pick)
-- Vault has no current fact that contradicts it (check the relevant `wiki/index.md` linked pages)
-- The user themselves stated it OR the assistant stated it and the user confirmed (acceptance, "yes", "do it", building on it)
-- Stated as fact or decision, not pure hypothesis ("I'm doing X" / "let's go with X" qualifies; "maybe I'll do X" does not)
-
-**Concrete qualifying examples** (write these, don't queue):
-- User picks a tech stack ("we're using Postgres + Drizzle")
-- User commits to a project direction ("v0.2 will ship Haiku as default model")
-- User states a date or deadline ("Cycle 4 ends 2026-08-17")
-- User defines a workflow ("close session → SessionEnd → headless")
-- User makes an architecture call ("use add-only writes + queue for destructive")
-
-**Action:** call the helper script with absolute paths:
+Validation lives in `"$DREAM_SCRIPTS_DIR/validate-candidates.sh"` — the single source of truth (unit-tested via `tests/test_map_harness.sh`, which sources this same script; golden inputs in `tests/fixtures/map/`). It filters a candidate array to items carrying all 4 required fields and errors on non-array input. Run it per subagent output:
 
 ```bash
-"$DREAM_SCRIPTS_DIR/vault-writer.sh" \
-  --vault <vault-root-from-config> \
-  --page <wiki/page-name.md> \
-  --section "<existing or new section header>" \
-  --content "<fact text>" \
-  --undo-log "$DREAM_UNDO_LOG" \
-  --index-label "<short label>" \
-  --index-desc "<one-line description>"
+# Validate one subagent's JSON array; VALID is the filtered array, or empty on error.
+VALID=$(printf '%s' "$subagent_json" | "$DREAM_SCRIPTS_DIR/validate-candidates.sh") \
+  || { echo "MAP: invalid candidate JSON (not an array) — skipping this transcript" >&2; VALID="[]"; }
+# Or, if sourced:  source "$DREAM_SCRIPTS_DIR/validate-candidates.sh"; VALID=$(validate_candidates "$subagent_json")
 ```
 
-Then append a `[WRITE] ...` line to `$DREAM_DAILY_LOG`.
+It checks ONLY the 4 required fields (`content`, `confidence`, `source_chat`, `source_date`); optional fields (`type`, `evidence`, `suggested_section`) never cause a drop.
 
-#### Bucket B — GENERAL-KNOWLEDGE Q&A → drop UNLESS signal-bearing
+### Step 3 — REDUCE
 
-If the user asked a generic technical question and got a generic answer, **drop** (log `[DROP] generic Q&A`).
+After all MAP subagents complete for a batch, merge their outputs. REDUCE is **structural only** — it deduplicates by exact string match on `(content, suggested_section)` and counts distinct `source_chat` values. It NEVER clears `needs_review`, NEVER auto-approves, and NEVER applies semantic equivalence judgments.
 
-BUT if the question itself reveals user signal — out-of-domain question, surprising knowledge gap, change in focus area — route to queue under `## Brainstormed ideas` as a "user explored X today" note.
+1. Flatten all candidate arrays into a single pool.
+2. Deduplicate by exact case-insensitive `(content, suggested_section)` pair. Keep the highest-confidence copy; if equal confidence, keep the one with the most `evidence` text. Carry `source_date` through from the kept copy.
+3. For facts where N ≥ 2 distinct `source_chat` values share the exact same `(content, suggested_section)`:
+   - `N = 2`: raise confidence label to `medium` if currently `low`.
+   - `N ≥ 3`: raise confidence label to `high` if currently below `high`.
+   - Confidence promotion is the ONLY action REDUCE takes. It does NOT set `needs_review`, does NOT approve facts.
+4. Output: a single deduplicated array of candidate-fact objects, with a `source_chat_count` field added to each fact (integer count of distinct source chats that surfaced it).
 
-#### Bucket C — CODE BLOCKS → drop UNLESS conceptual
+### Step 4 — ROUTE
 
-If the conversation is pure code-paste/edit loop: **drop** (log `[DROP] code paste, no concept signal`).
+Pass each candidate fact to the routing logic defined in `## Routing` (defined below — appended by Plan 2). Execute the routing prompt as one Sonnet subagent per candidate (`model: sonnet`, see Model policy) so per-candidate nav-context never accumulates in the orchestrator. The routing step resolves each candidate to a `{vault, page, section}` triple (a routing decision per overview §4). If `## Routing` is not yet present in this file, log a gap and queue all candidates as `uncertain`.
 
-BUT if surrounding prose discusses a concept, architecture decision, or pattern the user is learning/choosing, summarize the **concept** (not the code) as a candidate fact and re-run through Bucket A logic.
+### Step 5 — RECONCILE
 
-#### Bucket D — DESTRUCTIVE EDIT → queue
+For each routed candidate, perform the following sub-steps (overview §5):
 
-A fact is destructive if it CONTRADICTS or REPLACES existing vault content. Examples: "I'm no longer doing X" (vault still says they do X), "actually it's Y not Z" (vault has Z).
+**Step 5a — Route status check:** If the routing decision has `status != "routed"` (i.e. `ambiguous`, `gap`, or similar), mark `needs_review = true`, append to `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` with timestamp + fact content, route to the `uncertain` queue bucket, and skip reconciliation for this candidate.
 
-**Action:**
-
+**Step 5b — Resolve target page:** For candidates with `status = "routed"`, resolve the absolute path:
 ```bash
-"$DREAM_SCRIPTS_DIR/queue.sh" append \
-  --bucket destructive \
-  --title "<short title>" \
-  --evidence "<exact quote from transcript>" \
-  --confidence <high|medium|low> \
-  --target "<vault-relative-path>"
+abs_path="<config[vault].root>/<routing_decision.page>"
 ```
+Read the file at `abs_path` (use empty string `""` if the file does not exist — `vault-writer` will create it on a `new` write).
 
-Then append `[QUEUE/Destructive] ...` to `$DREAM_DAILY_LOG`.
-
-#### Bucket E — UNCERTAIN or BRAINSTORMED → queue
-
-- Medium/low confidence additive fact → `--bucket uncertain`
-- User brainstormed an idea but didn't commit ("maybe I should X", "thinking about Y") → `--bucket brainstormed`
-
-Same call shape as Bucket D, just different `--bucket` value.
-
-### Step 4 — Write the daily log
-
-Append (don't overwrite) to `$DREAM_DAILY_LOG`. Suggested format:
-
-```markdown
-## <YYYY-MM-DDTHH:MM:SSZ> auto run — transcript <basename>
-
-- [WRITE] <vault>/<page>: added "<short summary>"
-- [QUEUE/Destructive] <short title> → contradicts <vault>/<page>
-- [QUEUE/Brainstormed] <short title>
-- [DROP] <reason>
-
-Summary: X writes, Y queued, Z dropped.
+**Step 5c — RECONCILE prompt:** Pass the following to Plan 3's reconciliation logic (the `## Reconciliation` section, to be appended by Plan 3). Execute it as one Sonnet subagent per candidate (`model: sonnet`, see Model policy):
+```json
+{
+  "candidate":   { "...full candidate-fact object including source_date..." },
+  "target_page": "<full markdown text of the routed vault page, or empty string>",
+  "run_date":    "<today YYYY-MM-DD>"
+}
 ```
+Each candidate receives a reconciliation decision per overview §4: `action`, `mode`, `target`, `old_content`, `content`, `candidate_confidence`, `needs_review`, `rationale`. Field is `rationale` (not `reason`).
 
-### Step 5 — Exit silently
+**Step 5d — Apply:** Feed the reconciliation decision to `apply-decision.sh` (Plan 3). `apply-decision.sh` owns the action→mode→vault-writer mapping. The orchestrator does NOT re-implement this mapping — it passes the decision through unchanged.
 
-Never print to stdout in auto mode (headless invocation may discard it). All output goes to log files. Exit 0 even on partial failures so the SessionEnd hook stays fire-and-forget.
+### Step 6 — REVIEW
 
-### Step 6 — Record completion to $DREAM_LOG
+For all facts where `needs_review = true`, call `"$DREAM_SCRIPTS_DIR/queue.sh" append` with the appropriate bucket:
+- `destructive` — D-bucket facts or `replace`/`stale` actions on high-stakes facts.
+- `uncertain` — E-bucket facts, ambiguous routing, or confidence < high.
+- `brainstormed` — facts that are plausible but not directly evidenced.
 
-ALWAYS run this as the **final action** of auto mode, regardless of which exit branch you took. Without it, `check-pending.sh` will see your `SPAWNED` line as an orphan on the next session start and append a false-alarm `WARNING` line to the log.
+Then invoke the existing terminal review flow from `"$DREAM_SCRIPTS_DIR/queue.sh" list` for the user to approve / edit / skip / discard each queued item. Facts approved during review are promoted to the APPLY list; discarded facts are removed from the queue.
 
-Append exactly ONE line to `$DREAM_LOG` (NOT to `$DREAM_DAILY_LOG` — that's a different file for human-readable summaries).
-
-**On successful or legitimate-skip completion** (Step 4 normal completion / Step 1 empty / Step 3 recursive / Step 3 no-info):
-
-```bash
-TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "$TS COMPLETED source=skill reason=<reason> writes=<N> queued=<N> dropped=<N> transcript=$DREAM_TRANSCRIPT" >> "$DREAM_LOG"
-```
-
-`<reason>` enum (pick one):
-- `wrote-N` — Step 4 normal completion (N is total `[WRITE]` count)
-- `empty-transcript` — Step 1 stripped output was empty (no content after cleaning)
-- `recursive-transcript` — Step 3 every line was a dream-skill discussion
-- `no-info-gain` — Step 3 candidates extracted but all dropped (Bucket B/C)
-- `marked-private` — Step 0.5 user marked this chat private (`/dream-skill --ignore`)
-
-**On internal ERROR** (Step 0 env validation failed, Step 1 gate returned ERROR — unreadable/corrupt transcript or `jq` missing, vault-writer.sh non-zero, any unhandled error):
-
-```bash
-TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "$TS ERROR source=skill code=1 msg=\"<short msg>\" transcript=$DREAM_TRANSCRIPT" >> "$DREAM_LOG"
-```
-
-**Then write the user-visible vault entry.** Same final action — this is what the user sees in Obsidian under `dream-reports/dream-<date>.md`. It uses `$DREAM_CHAT_LABEL` (exported by trigger.sh) and `$DREAM_SCRIPTS_DIR/report.sh`. Run exactly ONE branch, matching the `$DREAM_LOG` outcome you just recorded. It is best-effort: never let a report failure change your exit status.
-
-```bash
-LABEL="${DREAM_CHAT_LABEL:-$(basename "${DREAM_TRANSCRIPT%.jsonl}") (auto)}"
-TITLE="${DREAM_CHAT_TITLE:-}"   # first-message title (empty → report.sh omits the title: line)
-```
-
-- **wrote** — pipe the SAME `[WRITE]/[QUEUE]/[DROP]` lines you appended to `$DREAM_DAILY_LOG` in Step 4 (omit the `## ...` header and the `Summary:` line):
-
-```bash
-"$DREAM_SCRIPTS_DIR/report.sh" --status wrote --chat "$LABEL" --title "$TITLE" <<'BODY' 2>/dev/null || true
-- [WRITE] me/wiki/<page>.md: <short summary>
-- [DROP] <reason>
-BODY
-```
-
-- **noop** — nothing written; `<reason>` is `empty-transcript` | `recursive-transcript` | `no-info-gain`:
-
-```bash
-"$DREAM_SCRIPTS_DIR/report.sh" --status noop --chat "$LABEL" --title "$TITLE" --reason "<reason>" 2>/dev/null || true
-```
-
-- **error**:
-
-```bash
-"$DREAM_SCRIPTS_DIR/report.sh" --status error --chat "$LABEL" --title "$TITLE" --reason "see error.log" 2>/dev/null || true
-```
-
-This is the contract that lets the user see silent failures. If you skip Step 6, the next-session orphan scanner produces a spurious `WARNING` line. **Always close the loop.**
-
----
-
-## Manual mode (no args)
-
-**Interactive. Walks the user through the queue fact-by-fact in the REPL.**
-
-### Step 1 — Read queue
-
-Open `$DREAM_QUEUE_FILE`. Parse into entries (one per `### ` heading inside any `## <bucket>` section). Each entry has 5 fields: `bucket`, `title`, `evidence`, `confidence`, `target`.
-
-If empty: tell user `Queue is empty. Nothing to review.` and exit 0.
-
-### Step 2 — Present each entry
-
-Show the entry verbatim:
+**Review UI per entry:**
 
 ```
 [N/M] <bucket>: <title>
@@ -384,55 +254,17 @@ Show the entry verbatim:
 [a]pprove  [e]dit  [s]kip  [d]iscard  [q]uit
 ```
 
-Wait for user input.
+**Approve (`a`):** Promote to the APPLY list for this run. Call `"$DREAM_SCRIPTS_DIR/vault-writer.sh"` with resolved args + `--undo-log "$DREAM_UNDO_LOG"`. Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove` to clear the entry. Append `[APPROVED]` line to `$DREAM_DAILY_LOG`.
 
-### Step 3 — Act on choice
+**Edit (`e`) — free-form field editor:** Prompt: `What to edit? Comma-separated field:value pairs. Valid fields: title, evidence, target, confidence, bucket.` Parse and validate. Re-show full updated entry. Prompt `[a]pply / [r]e-edit / [d]iscard`. On apply: `"$DREAM_SCRIPTS_DIR/queue.sh" remove` (original key) + `"$DREAM_SCRIPTS_DIR/queue.sh" append` (new values). Do NOT auto-approve after edit.
 
-#### approve (`a`)
+**Skip (`s`):** Leave in queue. Advance.
 
-1. Resolve `target` to a configured vault: look up `vaults.<name>.root` in `$DREAM_CONFIG` where `<name>` is the first path segment of `target` (e.g., `me/wiki/Bio.md` → `vaults.me`). If no match, prompt user to pick a vault.
-2. Ask user for two missing fields the queue entry doesn't carry:
-   - `section` (default: `Notes`)
-   - `content` (default: the entry's `title`)
-   Show both as a one-line preview: `Will write to <vault>/<page> under "## <section>": "- <content>"`. Wait for `[c]onfirm` or `[c]ancel`.
-3. On confirm: call `vault-writer.sh` with the resolved args + `--undo-log "$DREAM_UNDO_LOG"`. Then call `queue.sh remove --title "<title>" --target "<target>"` to clear the entry.
-4. Append `[APPROVED] <vault>/<page>: <content>` to `$DREAM_DAILY_LOG`.
+**Discard (`d`):** Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove`. Advance. Append `[DISCARDED]` to `$DREAM_DAILY_LOG`.
 
-#### edit (`e`) — free-form field editor
+**Quit (`q`):** Stop walking. Remaining entries stay queued. Jump to RECEIPT.
 
-Prompt: `What to edit? Comma-separated field:value pairs. Valid fields: title, evidence, target, confidence, bucket. Example: title: Move to Acme, target: me/wiki/Work.md`
-
-Parse the user's input by splitting on `,` then on the first `:` per pair. Trim whitespace. Validate:
-- `bucket` must be one of `destructive`, `uncertain`, `brainstormed` (reject + re-prompt if not)
-- `confidence` must be one of `high`, `medium`, `low`
-- Unknown field names → tell user `unknown field: X (valid: title, evidence, target, confidence, bucket)` and re-prompt
-
-Apply edits to an in-memory copy of the entry. Re-show the FULL updated entry verbatim (same shape as Step 2, no diff highlighting — just the new values). Prompt: `[a]pply  [r]e-edit  [d]iscard`.
-
-- **apply (`a`)**: Persist the edits to the queue:
-  - `queue.sh remove --title "<original-title>" --target "<original-target>"` (use the ORIGINAL title/target, since those identify the entry)
-  - `queue.sh append --bucket "<new-bucket>" --title "<new-title>" --evidence "<new-evidence>" --confidence "<new-confidence>" --target "<new-target>"`
-  - This works whether the bucket changed or not — remove + append is the same primitive
-  - Then continue to the next entry (do NOT auto-approve after edit — user must explicitly approve a separately-edited entry on the next pass)
-- **re-edit (`r`)**: discard the current in-memory edits, re-prompt for changes from the original entry.
-- **discard (`d`)**: drop the edits, leave the entry untouched in queue, advance to next.
-
-#### skip (`s`)
-
-Leave the entry in queue. Advance.
-
-#### discard (`d`)
-
-Call `queue.sh remove --title "<title>" --target "<target>"`. Advance. Append `[DISCARDED] <title>` to `$DREAM_DAILY_LOG`.
-
-#### quit (`q`)
-
-Stop walking. Remaining entries stay queued. Jump to Step 4.
-
-### Step 4 — Summary
-
-Print:
-
+**Summary at end of REVIEW:**
 ```
 Dream queue review complete.
 - Approved: X
@@ -441,40 +273,137 @@ Dream queue review complete.
 - Skipped (still queued): W
 ```
 
-Append a summary line to `$DREAM_DAILY_LOG`.
+### Step 7 — APPLY
+
+For each fact promoted from REVIEW (approved) or for auto-approved facts (confidence=high, action=new, no conflict), call `apply-decision.sh` with the reconciliation decision. The orchestrator resolves `target.vault` (a logical name like `me`) to its absolute root via `config.toml` before calling, and collects apply-decision's emitted run-summary fact line(s) from stdout for the Step 8 receipt.
+
+```bash
+FACT_JSON=$("$DREAM_SCRIPTS_DIR/apply-decision.sh" \
+  [--dry-run] \
+  --vault    "<abs root resolved from target.vault via config.toml>" \
+  --decision '<path-to-decision-json>' \
+  --undo-log "$DREAM_UNDO_LOG")
+# $FACT_JSON is one JSON line per action (contradict emits two lines)
+```
+
+`apply-decision.sh` (Plan 3) maps `action` + `mode` to the correct `vault-writer.sh` invocation and emits one run-summary fact JSON line to stdout per action (contradict emits two: one written-old, one queued-new). The orchestrator passes the decision through unchanged and accumulates the emitted fact lines for Step 8.
+
+On vault-writer non-zero exit: log the error to `$DREAM_ERROR_LOG`; continue to the next fact; do NOT advance the marker.
+
+### Step 8 — RECEIPT
+
+After all APPLY calls for a batch complete, assemble the run-summary JSON from the fact lines emitted by `apply-decision.sh` in Step 7 (`.facts[]` is the array of run-summary fact objects collected from apply-decision's stdout), then pipe it to `write-receipt.sh`. Pass `DREAM_RUNS_DIR` to supply the reports directory.
+
+```bash
+# Build run-summary JSON from accumulated apply-decision stdout fact lines.
+# Each line from Step 7's $FACT_JSON captures is one element of .facts[].
+RUN_SUMMARY=$(jq -cn \
+  --arg run_id        "<run_id>" \
+  --arg date          "<batch_end_date>" \
+  --arg window_start  "<batch_start_date>" \
+  --arg window_end    "<batch_end_date>" \
+  --argjson chats_scanned "<number_of_transcript_paths_in_this_batch>" \
+  --argjson facts     "<json-array of run-summary fact lines from Step 7>" \
+  '{run_id:$run_id, date:$date, window_start:$window_start, window_end:$window_end, chats_scanned:$chats_scanned, facts:$facts}')
+
+printf '%s' "$RUN_SUMMARY" | \
+  DREAM_RUNS_DIR="<reports_dir from config>" \
+  "$DREAM_SCRIPTS_DIR/write-receipt.sh" [--dry-run]
+```
+
+`write-receipt.sh` accepts only `--dry-run` and `--config`; all other metadata is passed via stdin in the run-summary JSON. `.facts[]` is assembled by collecting apply-decision's emitted run-summary fact lines from Step 7.
+
+**If `--dry-run`:** print the receipt to stdout instead of writing to `reports_dir`.
+
+**If receipt write fails:** log to `$DREAM_ERROR_LOG`; still advance the marker (receipt failure is not a vault-integrity issue).
+
+### Step 9 — MARKER advance
+
+Only after a batch's APPLY + RECEIPT completes without fatal error — **and never on a `--dry-run`**:
+
+```bash
+# A dry-run is a zero-mutation preview: it must NOT advance the marker, or the next
+# real run would silently skip the previewed window (see REVIEW-2026-06-04 I3).
+# advance-marker.sh owns this guard (no-op on --dry-run); tested in test_advance_marker.sh.
+MARKER_FLAGS=""
+[ "${DRY_RUN:-0}" = "1" ] && MARKER_FLAGS="--dry-run"
+"$DREAM_SCRIPTS_DIR/advance-marker.sh" --date "<batch_end_date>" $MARKER_FLAGS
+```
+
+If `--dry-run` is active, do NOT advance the marker under any circumstance. If the run failed during APPLY (vault-writer exited non-zero), also do NOT advance the marker. The next invocation will re-process the same window; vault-writer's idempotency ensures safe re-runs.
+
+For `--all` (multi-batch) runs, the marker advances after each individual batch, so a mid-run failure leaves the marker at the last successfully completed batch boundary.
+
+### Error handling
+
+- MAP subagent fails (non-zero exit or invalid JSON): log the error, skip that transcript, continue.
+- ROUTE returns gap/ambiguous: add to gaps log + review queue; never a silent guess.
+- APPLY vault-writer exits non-zero: log + continue to next fact; do NOT advance marker if any write fails.
+- Receipt write fails: log to `$DREAM_ERROR_LOG`; still advance marker (receipt failure is not a vault-integrity issue).
 
 ---
 
-## Reconcile mode (`--reconcile`)
+## Extraction taxonomy
 
-**Reserved for v0.3.** Print:
+Scan each transcript. For each candidate fact, classify into one of these buckets.
 
-```
-/dream-skill --reconcile is not yet implemented in v0.2.
+**Meta-session rule (important):** If the transcript is about building/debugging dream-skill itself, do NOT blanket-skip as "recursive." Look for concrete decisions the user made: architecture picks, file paths committed to, technical choices, version bumps, default values changed. Those ARE persona signal about their work and belong in vault. Only skip the literal back-and-forth ("yes", "do it", "looks good") as Bucket B execution-confirmations.
 
-v0.2 ships per-conversation auto-capture via SessionEnd hook.
-v0.3 will add scheduled full-vault audit against accumulated session data.
+### Bucket A — HIGH CONFIDENCE, ADDITIVE → write candidate
 
-For now, run /dream-skill (no args) to review the queue.
-```
+**Default to WRITE, not queue.** Queue is an escape hatch for genuinely ambiguous facts, NOT the default. If you find yourself queuing 5+ facts in one run and writing 0, you are being too cautious — re-classify.
 
-Exit 0.
+A fact qualifies as Bucket A if ALL of:
+- New information about the user OR about a project/topic the user is working on (role, project, deadline, preference, decision, relationship, body/health, learning, schedule, technical choice, architecture pick)
+- Vault has no current fact that contradicts it
+- The user themselves stated it OR the assistant stated it and the user confirmed (acceptance, "yes", "do it", building on it)
+- Stated as fact or decision, not pure hypothesis
+
+**Concrete qualifying examples** (emit these, don't queue):
+- User picks a tech stack ("we're using Postgres + Drizzle")
+- User commits to a project direction ("v0.2 will ship Haiku as default model")
+- User states a date or deadline ("Cycle 4 ends 2026-08-17")
+- User defines a workflow ("close session → SessionEnd → headless")
+- User makes an architecture call ("use add-only writes + queue for destructive")
+
+### Bucket B — GENERAL-KNOWLEDGE Q&A → drop UNLESS signal-bearing
+
+If the user asked a generic technical question and got a generic answer, **drop** (emit nothing).
+
+BUT if the question itself reveals user signal — out-of-domain question, surprising knowledge gap, change in focus area — route to queue under `brainstormed` as a "user explored X today" note.
+
+### Bucket C — CODE BLOCKS → drop UNLESS conceptual
+
+If the conversation is pure code-paste/edit loop: **drop** (emit nothing).
+
+BUT if surrounding prose discusses a concept, architecture decision, or pattern the user is learning/choosing, summarize the **concept** (not the code) as a candidate fact and re-run through Bucket A logic.
+
+### Bucket D — DESTRUCTIVE EDIT → queue
+
+A fact is destructive if it CONTRADICTS or REPLACES existing vault content. Examples: "I'm no longer doing X" (vault still says they do X), "actually it's Y not Z" (vault has Z).
+
+Emit with `confidence` set appropriately; `suggested_section` pointing to the target page. Flag as bucket D in the `type` field if helpful (e.g. `"type": "destructive"`). The reconciler will detect the contradiction.
+
+### Bucket E — UNCERTAIN or BRAINSTORMED → queue
+
+- Medium/low confidence additive fact → emit with `confidence: "medium"` or `"low"`
+- User brainstormed an idea but didn't commit ("maybe I should X", "thinking about Y") → emit with `confidence: "low"` and `type: "belief"` or `type: "observation"`
 
 ---
 
 ## Private opt-out mode (`--ignore` / `--unignore`)
 
-**Interactive, confirmation-only. Writes nothing — the skip is enforced at close.**
+**Interactive, confirmation-only. Writes nothing to the vault — the skip is enforced at the next FIND step.**
 
-When invoked as `/dream-skill --ignore`: do NOT process the queue or touch the vault. Print exactly this, then exit 0:
+When invoked as `/dream-skill --ignore`:
 
-> 🔒 This chat is now private. dream-skill will **skip it** when you close it — nothing from this conversation will be written to your Obsidian vault. Undo anytime with `/dream-skill --unignore`.
+> This chat is now private. dream-skill will skip it during the next on-demand run — nothing from this conversation will be written to your Obsidian vault. Undo anytime with `/dream-skill --unignore`.
 
-When invoked as `/dream-skill --unignore`: print exactly this, then exit 0:
+When invoked as `/dream-skill --unignore`:
 
-> 🔓 This chat is no longer private. dream-skill will record it on close as usual.
+> This chat is no longer private. dream-skill will include it in the next on-demand run as usual.
 
-**How it works:** typing the command leaves a record in the transcript. At close, the SessionEnd hook (`trigger.sh` → `private-state.sh`) reads the LATEST `--ignore`/`--unignore` and, when the chat is private, skips dispatch entirely — no model tokens are spent, and a `skipped — marked private` line (no chat content, no title) lands in your `dream-reports/dream-<date>.md`. Decision is latest-wins and covers the whole chat.
+**How it works:** typing the command leaves a record in the transcript. At FIND time, `scripts/find-chats.sh` calls `scripts/private-state.sh` per transcript and excludes those marked private. Decision is latest-wins and covers the whole chat.
 
 ---
 
@@ -482,11 +411,212 @@ When invoked as `/dream-skill --unignore`: print exactly this, then exit 0:
 
 - `HARVEST.md` — patterns ported from v0.1
 - `PLAN.md` — v0.2 build plan
-- `hooks/hooks.json` — SessionEnd hook
-- `scripts/trigger.sh` — exports all `DREAM_*` env vars before invoking headless mode
-- `scripts/preprocess.sh` — transcript noise stripper (handles real Claude Code nested format + flat format)
+- `PLAN-OVERVIEW-2026-06-03.md` — normative data contracts (§4 candidate-fact, §5 seam, §8 invariants)
+- `PLAN-04-orchestrator-2026-06-03.md` — this skill's build plan
+- `scripts/find-chats.sh` — transcript enumeration + batch boundary slicing
+- `scripts/write-receipt.sh` — per-run receipt rendering
 - `scripts/vault-writer.sh` — add-only vault append + idempotent index update
 - `scripts/queue.sh` — queue file manager (append + list + dedupe by title+target)
-- `scripts/private-state.sh` — resolves a chat's private (`--ignore`) state from its transcript (used by trigger.sh + auto mode)
-- `scripts/apply-undo.sh` — rollback auto-mode writes
-- `scripts/count_tokens.py` — tiktoken counter (cost guard, future use)
+- `scripts/apply-decision.sh` — reconciliation decision → vault-writer mapping (Plan 3)
+- `scripts/private-state.sh` — resolves a chat's private (`--ignore`) state from its transcript
+- `scripts/apply-undo.sh` — rollback writes
+- `tests/test_map_harness.sh` — unit tests for `validate_candidates` harness
+- `tests/fixtures/map/` — golden fixtures for MAP extraction (manual eval only, not CI)
+
+<!-- Plans 2 and 3 append ## Routing and ## Reconciliation sections below this line. -->
+
+---
+
+## Routing
+
+> **When to run:** once per candidate fact, after MAP produces a `candidate-fact` JSON object and before the Reconciliation step.
+
+### Inputs
+
+1. **`candidate-fact` JSON** — the object from MAP (fields: `content`, `type`, `confidence`, `evidence`, `source_chat`, `source_date`, `suggested_section`).
+2. **`nav-context` block** — the output of `"$DREAM_SCRIPTS_DIR/build-nav-context.sh"` (reads `~/.claude/dream-skill/config.toml` by default; override with `--config <toml-path>` for tests). Contains, for each vault: 1-line purpose (from config `description`), `wiki/index.md` entries (up to 40 lines), and a dir-scan listing of pages.
+3. **`ROUTING.md`** — the disambiguation + volatility supplement (read from `$ROUTING_MD`).
+
+### Routing procedure (follow in order)
+
+**Step R1 — Read `$ROUTING_MD` §1 disambiguation rules.** Apply the first matching rule to the candidate fact. Note which rule fired and why.
+
+**Step R2 — Confirm the vault in nav-context.** After picking the vault, scan the nav-context block for that vault's `index` and `pages on disk`. Identify the single most specific page that matches the candidate. The page must exist either in the index entries or the dir scan. If no page exists yet → do NOT invent a path; emit `status: gap`.
+
+**Step R3 — Determine the section.** Use `suggested_section` from the candidate if it matches a heading that exists or would logically exist in the target page. Otherwise, infer from the vault CLAUDE.md's page format (visible in the nav-context purpose line or index entry description).
+
+**Step R4 — Apply confidence calibration from ROUTING.md §4.**
+
+**Step R5 — Check for ambiguity.** If after R1–R4 two or more vault+page pairs remain equally plausible with no disambiguation rule resolving them → emit `status: ambiguous`.
+
+**Step R6 — Check for gap.** If no vault rule matched in R1 and no vault page is a reasonable fit → emit `status: gap`.
+
+**Step R7 — If status is `ambiguous` or `gap`:** append one line to the routing-gaps log at `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (NOT into `ROUTING.md` — that file is hand-maintained read-only routing guidance) using this format:
+```
+- <source_date> | <content truncated to 80 chars> | <reason> | proposed-rule: <optional>
+```
+
+### Output format
+
+Emit **one JSON object** and nothing else:
+
+```json
+{
+  "status": "routed",
+  "vault": "<vault-name>",
+  "page": "<relative-path-from-vault-root>",
+  "section": "<section heading>",
+  "routing_confidence": "high | medium | low"
+}
+```
+
+For `ambiguous` or `gap`, set `vault`, `page`, and `section` to `null`.
+
+### Hard constraints
+
+- Output fields are exactly `status`, `vault`, `page`, `section`, `routing_confidence` — no extras (`canonical_path`, `routing_status`, `needs_review`, etc.).
+- `status` values are exactly `"routed"`, `"ambiguous"`, or `"gap"` — no other strings.
+- `page` must be a relative path from the vault root. Never an absolute path.
+- The page must resolve to a CANONICAL page that exists (per nav-context index or dir scan) or be `null`. Never invent a path.
+- For `ambiguous` or `gap`: `vault`, `page`, and `section` are always `null`; append to the routing-gaps log (Step R7).
+- `routing_confidence` is one of `"high"`, `"medium"`, or `"low"` — calibrated per ROUTING.md §4.
+
+---
+
+## Reconciliation
+
+> This section is the LLM prompt executed by the orchestrator (Plan 4) once per routed
+> candidate-fact. Input: a `candidate` JSON object, the full text of the `target_page`
+> (as a string), and the `run_date` (ISO-8601, today's date). Output: one JSON object
+> matching the reconciliation-decision contract. Emit the JSON only — no prose.
+
+### Input schema
+
+```json
+{
+  "candidate": {
+    "content":          "Cleveland Clinic internship confirmed for Jun–Aug 2026",
+    "type":             "world-fact | belief | observation | experience",
+    "confidence":       "high | medium | low",
+    "evidence":         "short quote/paraphrase from the source chat",
+    "source_chat":      "<session-id>",
+    "source_date":      "2026-06-01",
+    "suggested_section": "Experience"
+  },
+  "target_page": "<full markdown text of the routed vault page>",
+  "run_date":    "2026-06-03"
+}
+```
+
+### Output schema (reconciliation-decision)
+
+```json
+{
+  "action":               "new | duplicate | supersede | contradict",
+  "mode":                 "append | replace | stale | none",
+  "target": {
+    "vault":   "<vault-name>",
+    "page":    "<relative path, e.g. wiki/experience.md>",
+    "section": "<H2 heading text>"
+  },
+  "old_content":          "<exact existing line text, omit key for 'new' and 'duplicate'>",
+  "content":              "<the new fact line to write, omit key for 'duplicate'>",
+  "candidate_confidence": "high | medium | low",
+  "needs_review":         true,
+  "rationale":            "<one sentence explaining the classification>"
+}
+```
+
+Field notes (from v2 §4):
+- `action` enum is EXACTLY `new|duplicate|supersede|contradict` (never mode-values).
+- `mode` is `append|replace|stale|none` — use `none` for `duplicate`.
+- `candidate_confidence` is a REQUIRED pass-through of the candidate's `confidence` field; it drives queue bucketing in `apply-decision.sh`.
+- Field is `rationale` (not `reason`).
+- **`needs_review` rule:** `true` for everything EXCEPT `action: new` AND `candidate_confidence: high`. All destructive edits, all contradictions, and all low/medium-confidence new facts go to review.
+
+### Action definitions and mode mapping
+
+| Action       | When to use                                                        | mode    | needs_review |
+|--------------|--------------------------------------------------------------------|---------|-------------|
+| `new`        | The fact (or one semantically equivalent) is absent from the page | append  | false if confidence=high; true otherwise |
+| `duplicate`  | An existing line carries the same meaning (wording may differ)    | none    | false |
+| `supersede`  | Same subject+attribute, candidate value is newer/more specific    | replace | true |
+| `contradict` | Conflicting claims, winner unclear (no clear date precedence)     | stale   | true |
+
+**For `duplicate`:** emit `"mode": "none"` and `"content": ""` (empty string) as placeholders — `none` is the correct mode value per v2 §4. The dispatcher skips any write because the fact is already represented. Do NOT omit the `mode` and `content` keys — the schema validator requires all fields.
+
+**For `contradict`:** `mode` is `stale` (the existing line is struck through); the new candidate is queued for human review but NOT written. Set `old_content` to the conflicting existing line.
+
+### Precedence rules (apply in order)
+
+1. **User's words in the source chat always win** — if the candidate came from a direct user statement in the session, treat it as authoritative over any existing vault claim.
+2. **Newer `source_date` beats older vault content** — when both a candidate and an existing line reference the same subject+attribute, the one with the later date supersedes. If the existing line has no date marker, treat it as older.
+3. **`confidence: low` (brainstormed/hypothetical) never auto-writes** — force `needs_review: true` regardless of action.
+4. **Ambiguous precedence → `contradict`** — when you cannot determine which claim is more recent or authoritative, classify as `contradict`, not `supersede`.
+
+### Volatility guidance
+
+The target page's frontmatter or the vault's `CLAUDE.md` may carry a `volatility` tag (`VOLATILE` or `STABLE`). Use it as follows:
+
+- **VOLATILE page** (e.g. `goals/now`, current-project status, active sprint): actively scan every existing line in the candidate's section for a semantically stale version of the same fact. When found, classify as `supersede` rather than `new`.
+- **STABLE page** (e.g. past experience, education, completed projects): prefer `new` (append) unless an exact or near-exact duplicate is present. Do not hunt for supersession targets.
+- **No tag / unknown**: treat as STABLE.
+
+### Semantic equivalence (duplicate detection)
+
+Two lines are **semantically equivalent** if a competent reader would consider them to convey the same fact about the same subject, even if the wording differs. Examples:
+
+- `"interned at Cleveland Clinic"` ≅ `"Cleveland Clinic internship Jun–Aug 2026"` → **duplicate** (same role, same org)
+- `"lives in Berlin"` ≠ `"lives in Munich"` → same attribute, different value → **supersede** or **contradict**
+- `"knows Python"` ≅ `"Python (proficient)"` → **duplicate**
+- `"interested in ML"` ≠ `"working on ML project"` → different claim level → **new** (additive, not a duplicate)
+
+### Worked examples
+
+**Example A — new (absent fact, high confidence)**
+```
+candidate.content = "Passed AWS Solutions Architect exam 2026-05"
+candidate.confidence = "high"
+target_page (skills.md) has no mention of AWS certification
+→ action: "new", mode: "append", needs_review: false
+```
+
+**Example B — duplicate**
+```
+candidate.content = "Python (proficient)"
+target_page (skills.md) already contains line "- knows Python"
+→ action: "duplicate", mode: "none", content: "", needs_review: false
+```
+
+**Example C — supersede**
+```
+candidate.content = "lives in Munich (moved 2026-06)"
+candidate.source_date = "2026-06-03"
+target_page (bio.md) contains "- lives in Berlin" (no date marker → treated as older)
+→ action: "supersede", mode: "replace",
+   old_content: "lives in Berlin",
+   content: "lives in Munich (moved 2026-06)",
+   needs_review: true
+```
+
+**Example D — contradict**
+```
+candidate.content = "primary language is TypeScript"
+candidate.source_date = "2026-05-10"
+target_page (skills.md) contains "- primary language is Python (since 2023)"
+Both have dates; TypeScript claim is newer but Python claim is qualified "since 2023";
+winner is genuinely unclear → classify as contradict
+→ action: "contradict", mode: "stale",
+   old_content: "primary language is Python (since 2023)",
+   needs_review: true
+```
+
+### Output rules
+
+- Emit the reconciliation-decision JSON object and nothing else. No explanation, no markdown fencing.
+- Every output object MUST include all required keys: `action`, `mode`, `target`, `content`, `candidate_confidence`, `needs_review`, `rationale`.
+- `old_content` is REQUIRED for `supersede` and `contradict`; OMIT the key entirely for `new` and `duplicate`.
+- `content` for `duplicate` MUST be `""` (empty string), not omitted.
+- `target.vault` comes from the routing decision passed in by the orchestrator.
+- `target.page` and `target.section` come from the routing decision; do not re-derive them.
+- `candidate_confidence` is a verbatim copy of `candidate.confidence` — never change it.

@@ -1,0 +1,28 @@
+{
+  "_comment": "Same subject+attribute, candidate is newer → supersede/replace, needs_review:true",
+  "candidate": {
+    "content": "lives in Munich (moved 2026-06)",
+    "type": "world-fact",
+    "confidence": "high",
+    "evidence": "\"I moved to Munich at the start of June\"",
+    "source_chat": "session-abc125",
+    "source_date": "2026-06-03",
+    "suggested_section": "Bio"
+  },
+  "target_page_snapshot": "# Bio\n\n## Bio\n\n- lives in Berlin\n- originally from Kyiv\n",
+  "run_date": "2026-06-03",
+  "expected_decision": {
+    "action": "supersede",
+    "mode": "replace",
+    "target": {
+      "vault": "me",
+      "page": "wiki/bio.md",
+      "section": "Bio"
+    },
+    "old_content": "lives in Berlin",
+    "content": "lives in Munich (moved 2026-06)",
+    "candidate_confidence": "high",
+    "needs_review": true,
+    "rationale": "Candidate's source_date (2026-06-03) is newer than the undated vault line; same subject+attribute (location) → supersede with replace."
+  }
+}

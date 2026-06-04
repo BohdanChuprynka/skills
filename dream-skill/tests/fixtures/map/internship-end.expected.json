@@ -1,0 +1,11 @@
+[
+  {
+    "content": "Cleveland Clinic internship ended; now job searching for full-time role in medical AI",
+    "confidence": "high",
+    "source_chat": "internship-end.input.jsonl",
+    "source_date": "2026-06-01",
+    "type": "destructive",
+    "evidence": "I finished my internship at Cleveland Clinic last week. Job searching now.",
+    "suggested_section": "Experience"
+  }
+]

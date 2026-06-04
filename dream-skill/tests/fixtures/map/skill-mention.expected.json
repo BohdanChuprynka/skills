@@ -1,0 +1,11 @@
+[
+  {
+    "content": "Learning Rust; a few weeks in, still doing exercises",
+    "confidence": "medium",
+    "source_chat": "skill-mention.input.jsonl",
+    "source_date": "2026-06-01",
+    "type": "experience",
+    "evidence": "I've been learning Rust lately. Only a few weeks in but it's starting to click.",
+    "suggested_section": "Skills"
+  }
+]

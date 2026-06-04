@@ -1,0 +1,28 @@
+{
+  "_comment": "Conflicting claims, winner unclear → contradict/stale + queue, needs_review:true",
+  "candidate": {
+    "content": "primary language is TypeScript",
+    "type": "belief",
+    "confidence": "high",
+    "evidence": "\"these days TypeScript is really my main language\"",
+    "source_chat": "session-abc126",
+    "source_date": "2026-05-10",
+    "suggested_section": "Languages"
+  },
+  "target_page_snapshot": "# Skills\n\n## Languages\n\n- primary language is Python (since 2023)\n- TypeScript (proficient)\n",
+  "run_date": "2026-06-03",
+  "expected_decision": {
+    "action": "contradict",
+    "mode": "stale",
+    "target": {
+      "vault": "me",
+      "page": "wiki/skills.md",
+      "section": "Languages"
+    },
+    "old_content": "primary language is Python (since 2023)",
+    "content": "primary language is TypeScript",
+    "candidate_confidence": "high",
+    "needs_review": true,
+    "rationale": "Both claims reference the same attribute (primary language); the 'since 2023' qualifier on the existing line makes precedence unclear, so contradiction is flagged for human review."
+  }
+}

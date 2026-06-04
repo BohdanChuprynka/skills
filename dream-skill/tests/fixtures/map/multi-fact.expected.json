@@ -1,0 +1,20 @@
+[
+  {
+    "content": "Moving to San Francisco in two months for a new job",
+    "confidence": "high",
+    "source_chat": "multi-fact.input.jsonl",
+    "source_date": "2026-06-01",
+    "type": "world-fact",
+    "evidence": "I'm moving to San Francisco in two months. SF is for a new job.",
+    "suggested_section": "Location"
+  },
+  {
+    "content": "Building a gesture recognition model with PyTorch as a side project (computer vision)",
+    "confidence": "high",
+    "source_chat": "multi-fact.input.jsonl",
+    "source_date": "2026-06-01",
+    "type": "experience",
+    "evidence": "Been diving deep into PyTorch for a computer vision side project. Working on a gesture recognition model.",
+    "suggested_section": "Skills"
+  }
+]
