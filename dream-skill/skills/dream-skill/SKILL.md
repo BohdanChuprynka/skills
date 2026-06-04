@@ -1,7 +1,7 @@
 ---
 name: dream-skill
 description: On-demand batch sync of Claude Code conversations to an Obsidian vault. Use when the user says "/dream-skill", "review dream queue", "process dream queue", "sweep dream queue", or asks to update wiki from a recent conversation. Runs a FIND→MAP→REDUCE→ROUTE→RECONCILE→REVIEW→APPLY→RECEIPT→MARKER pipeline over unprocessed transcripts. Type `/dream-skill --ignore` to mark the current chat private so it is never recorded into the vault (undo with `--unignore`).
-version: 0.3.0
+version: 0.3.1
 ---
 
 # dream-skill
@@ -23,6 +23,17 @@ version: 0.3.0
 
 ---
 
+## Model policy
+
+Every LLM step in this pipeline runs on **Sonnet** (`model: sonnet` → Sonnet 4.6, `claude-sonnet-4-6`):
+
+- **MAP** (Step 2) — one extraction subagent per chat. Dispatch with `model: sonnet`.
+- **ROUTE** (Step 4) and **RECONCILE** (Step 5c) — per-candidate judgments. Run each as a Sonnet subagent (`model: sonnet`); the isolated context per candidate also keeps the orchestrator lean (the original context-overflow failure mode).
+
+These are high-volume, tightly-specified steps (read one chat → emit candidate JSON; emit one routing JSON; emit one reconciliation JSON) that Sonnet handles well. Only the orchestrator that stitches the run together (the FIND / REDUCE / REVIEW / APPLY / RECEIPT / MARKER plumbing) runs on the session model. If you ever need maximum fidelity on the destructive-edit judgment, RECONCILE is the single step worth temporarily pinning back to a stronger model — but the default is Sonnet everywhere.
+
+This is a dispatch-level setting (model + per-candidate isolation): it does not change any data contract, so the deterministic test suites are unaffected.
+
 ## HARD RULES — read first, apply always
 
 These rules override anything else in this skill. Violating them silently destroys the user's persona-sync.
@@ -37,6 +48,7 @@ The ONLY valid write destinations are:
 5. The error log at `$DREAM_ERROR_LOG` (plain append on failures)
 6. The marker file at `${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}/last-run` (Step 9)
 7. The receipt file in `reports_dir` (via `scripts/write-receipt.sh`)
+8. The routing-gaps log at `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (plain append when routing returns `ambiguous`/`gap` — Step 5a / R7)
 
 You MUST NOT write to any of these:
 - `~/.claude/projects/*/memory/` — that is Claude Code's per-project auto-memory, a different persistence layer.
@@ -122,7 +134,7 @@ fi
 DREAM_SKILL_HOME="$(dirname "$DREAM_SCRIPTS_DIR")"
 ROUTING_MD="$DREAM_SKILL_HOME/ROUTING.md"
 # Verify all helpers exist + executable; if any missing, fail loud (Rule 3) and stop.
-for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh; do
+for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh; do
   [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; }
 done
 ```
@@ -145,11 +157,11 @@ Parse stdout into a list of `(batch_start, batch_end, [transcript_paths...])` tu
 
 Then re-invoke `"$DREAM_SCRIPTS_DIR/find-chats.sh"` with the chosen flag.
 
-**Empty result:** If a batch contains zero transcript paths, skip to RECEIPT for that batch (write a receipt noting "0 chats in window") and advance the marker.
+**Empty result:** If a batch contains zero transcript paths, skip to RECEIPT for that batch (write a receipt noting "0 chats in window") and advance the marker — **unless `--dry-run` is active, in which case the marker is never advanced** (I3).
 
 ### Step 2 — MAP
 
-For each batch, dispatch one subagent per transcript path using the Task/Agent tool. Each subagent receives:
+For each batch, dispatch one subagent per transcript path using the Task/Agent tool, **with `model: sonnet`** (see Model policy). Each subagent receives:
 
 **Dispatch prompt (verbatim — copy into each Task invocation):**
 
@@ -168,25 +180,18 @@ For each batch, dispatch one subagent per transcript path using the Task/Agent t
 
 Each subagent returns a JSON array of candidate facts. Validate the JSON structure using the `validate_candidates` harness (required fields ONLY: `content`, `confidence`, `source_chat`, `source_date`). Any subagent output that is not valid JSON, or is missing any required field, is logged as an extraction error and skipped for this run. Missing optional fields (`type`, `evidence`, `suggested_section`) never cause a candidate to be dropped.
 
-**JSON validation shell harness (unit-tested — see `tests/test_map_harness.sh` and `tests/fixtures/map/`):**
+**JSON validation harness — use the helper script (Rule 2), do not re-implement:**
+
+Validation lives in `"$DREAM_SCRIPTS_DIR/validate-candidates.sh"` — the single source of truth (unit-tested via `tests/test_map_harness.sh`, which sources this same script; golden inputs in `tests/fixtures/map/`). It filters a candidate array to items carrying all 4 required fields and errors on non-array input. Run it per subagent output:
 
 ```bash
-# validate_candidates — embedded logic used in Step 2 MAP processing.
-# Must be sourced or inlined; not a standalone script.
-validate_candidates() {
-  local json="$1"
-  # Must be a JSON array; filter to items with all 4 required fields present.
-  # NEVER select() on optional fields (type, evidence, suggested_section).
-  printf '%s' "$json" | jq 'if type == "array" then
-    map(
-      select(
-        has("content") and has("confidence") and has("source_chat")
-        and has("source_date")
-      )
-    )
-  else error("not an array") end' 2>/dev/null
-}
+# Validate one subagent's JSON array; VALID is the filtered array, or empty on error.
+VALID=$(printf '%s' "$subagent_json" | "$DREAM_SCRIPTS_DIR/validate-candidates.sh") \
+  || { echo "MAP: invalid candidate JSON (not an array) — skipping this transcript" >&2; VALID="[]"; }
+# Or, if sourced:  source "$DREAM_SCRIPTS_DIR/validate-candidates.sh"; VALID=$(validate_candidates "$subagent_json")
 ```
+
+It checks ONLY the 4 required fields (`content`, `confidence`, `source_chat`, `source_date`); optional fields (`type`, `evidence`, `suggested_section`) never cause a drop.
 
 ### Step 3 — REDUCE
 
@@ -202,13 +207,13 @@ After all MAP subagents complete for a batch, merge their outputs. REDUCE is **s
 
 ### Step 4 — ROUTE
 
-Pass each candidate fact to the routing logic defined in `## Routing` (defined below — appended by Plan 2). The routing step resolves each candidate to a `{vault, page, section}` triple (a routing decision per overview §4). If `## Routing` is not yet present in this file, log a gap and queue all candidates as `uncertain`.
+Pass each candidate fact to the routing logic defined in `## Routing` (defined below — appended by Plan 2). Execute the routing prompt as one Sonnet subagent per candidate (`model: sonnet`, see Model policy) so per-candidate nav-context never accumulates in the orchestrator. The routing step resolves each candidate to a `{vault, page, section}` triple (a routing decision per overview §4). If `## Routing` is not yet present in this file, log a gap and queue all candidates as `uncertain`.
 
 ### Step 5 — RECONCILE
 
 For each routed candidate, perform the following sub-steps (overview §5):
 
-**Step 5a — Route status check:** If the routing decision has `status != "routed"` (i.e. `ambiguous`, `gap`, or similar), mark `needs_review = true`, append to `~/.claude/dream-skill/routing-gaps.log` with timestamp + fact content, route to the `uncertain` queue bucket, and skip reconciliation for this candidate.
+**Step 5a — Route status check:** If the routing decision has `status != "routed"` (i.e. `ambiguous`, `gap`, or similar), mark `needs_review = true`, append to `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` with timestamp + fact content, route to the `uncertain` queue bucket, and skip reconciliation for this candidate.
 
 **Step 5b — Resolve target page:** For candidates with `status = "routed"`, resolve the absolute path:
 ```bash
@@ -216,7 +221,7 @@ abs_path="<config[vault].root>/<routing_decision.page>"
 ```
 Read the file at `abs_path` (use empty string `""` if the file does not exist — `vault-writer` will create it on a `new` write).
 
-**Step 5c — RECONCILE prompt:** Pass the following to Plan 3's reconciliation logic (the `## Reconciliation` section, to be appended by Plan 3):
+**Step 5c — RECONCILE prompt:** Pass the following to Plan 3's reconciliation logic (the `## Reconciliation` section, to be appended by Plan 3). Execute it as one Sonnet subagent per candidate (`model: sonnet`, see Model policy):
 ```json
 {
   "candidate":   { "...full candidate-fact object including source_date..." },
@@ -294,11 +299,12 @@ After all APPLY calls for a batch complete, assemble the run-summary JSON from t
 # Each line from Step 7's $FACT_JSON captures is one element of .facts[].
 RUN_SUMMARY=$(jq -cn \
   --arg run_id        "<run_id>" \
+  --arg date          "<batch_end_date>" \
   --arg window_start  "<batch_start_date>" \
   --arg window_end    "<batch_end_date>" \
-  --argjson chats_scanned "<source_chat_count_integer>" \
+  --argjson chats_scanned "<number_of_transcript_paths_in_this_batch>" \
   --argjson facts     "<json-array of run-summary fact lines from Step 7>" \
-  '{run_id:$run_id, window_start:$window_start, window_end:$window_end, chats_scanned:$chats_scanned, facts:$facts}')
+  '{run_id:$run_id, date:$date, window_start:$window_start, window_end:$window_end, chats_scanned:$chats_scanned, facts:$facts}')
 
 printf '%s' "$RUN_SUMMARY" | \
   DREAM_RUNS_DIR="<reports_dir from config>" \
@@ -313,15 +319,21 @@ printf '%s' "$RUN_SUMMARY" | \
 
 ### Step 9 — MARKER advance
 
-Only after a batch's APPLY + RECEIPT completes without fatal error:
+Only after a batch's APPLY + RECEIPT completes without fatal error — **and never on a `--dry-run`**:
 
 ```bash
-MARKER_DIR="${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}"
-mkdir -p "$MARKER_DIR"
-printf '%s\n' "<batch_end_date>" > "$MARKER_DIR/last-run"
+# A dry-run is a zero-mutation preview: it must NOT advance the marker, or the next
+# real run would silently skip the previewed window (see REVIEW-2026-06-04 I3).
+if [ "${DRY_RUN:-0}" = "1" ]; then
+  : # dry-run — marker intentionally left unchanged
+else
+  MARKER_DIR="${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}"
+  mkdir -p "$MARKER_DIR"
+  printf '%s\n' "<batch_end_date>" > "$MARKER_DIR/last-run"
+fi
 ```
 
-If the run failed during APPLY (vault-writer exited non-zero), do NOT advance the marker. The next invocation will re-process the same window; vault-writer's idempotency ensures safe re-runs.
+If `--dry-run` is active, do NOT advance the marker under any circumstance. If the run failed during APPLY (vault-writer exited non-zero), also do NOT advance the marker. The next invocation will re-process the same window; vault-writer's idempotency ensures safe re-runs.
 
 For `--all` (multi-batch) runs, the marker advances after each individual batch, so a mid-run failure leaves the marker at the last successfully completed batch boundary.
 
@@ -442,7 +454,7 @@ When invoked as `/dream-skill --unignore`:
 
 **Step R6 — Check for gap.** If no vault rule matched in R1 and no vault page is a reasonable fit → emit `status: gap`.
 
-**Step R7 — If status is `ambiguous` or `gap`:** append one line to the routing-gaps log in `ROUTING.md` using this format:
+**Step R7 — If status is `ambiguous` or `gap`:** append one line to the routing-gaps log at `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (NOT into `ROUTING.md` — that file is hand-maintained read-only routing guidance) using this format:
 ```
 - <source_date> | <content truncated to 80 chars> | <reason> | proposed-rule: <optional>
 ```

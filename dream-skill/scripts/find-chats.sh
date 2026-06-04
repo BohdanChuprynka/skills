@@ -55,8 +55,11 @@ case "$MODE" in
       marker_content=$(cat "$MARKER_FILE" 2>/dev/null | tr -d '[:space:]')
       if printf '%s' "$marker_content" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
         # clean YYYY-MM-DD
-        window_start=$(date -j -f "%Y-%m-%d" "$marker_content" +%s 2>/dev/null \
-          || date -d "$marker_content" +%s 2>/dev/null) \
+        # Anchor to MIDNIGHT — BSD `date -j -f "%Y-%m-%d"` fills H:M:S from the wall
+        # clock, which would drift window_start to ~now's time-of-day and silently
+        # drop early-in-day chats on the boundary date (see REVIEW-2026-06-04 C2).
+        window_start=$(date -j -f "%Y-%m-%d %H:%M:%S" "$marker_content 00:00:00" +%s 2>/dev/null \
+          || date -d "$marker_content 00:00:00" +%s 2>/dev/null) \
           || window_start=""
       elif printf '%s' "$marker_content" | grep -qE '^[0-9]+$'; then
         # clean epoch integer
@@ -77,8 +80,9 @@ case "$MODE" in
     ;;
   since)
     [ -n "$SINCE_DATE" ] || die "--since requires a date argument (YYYY-MM-DD)"
-    window_start=$(date -j -f "%Y-%m-%d" "$SINCE_DATE" +%s 2>/dev/null \
-      || date -d "$SINCE_DATE" +%s 2>/dev/null) \
+    # Anchor to MIDNIGHT (same wall-clock-fill hazard as the marker branch, C2).
+    window_start=$(date -j -f "%Y-%m-%d %H:%M:%S" "$SINCE_DATE 00:00:00" +%s 2>/dev/null \
+      || date -d "$SINCE_DATE 00:00:00" +%s 2>/dev/null) \
       || die "cannot parse --since date: $SINCE_DATE"
     ;;
   all)

@@ -7,21 +7,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 fail() { echo "FAIL: $*"; exit 1; }
 
-# ── validate_candidates harness (mirrors the definition in SKILL.md Step 2) ──
-# Checks ONLY the 4 required fields (overview §4):
-#   content, confidence, source_chat, source_date
-# Optional fields (type, evidence, suggested_section) NEVER cause a drop.
-validate_candidates() {
-  local json="$1"
-  printf '%s' "$json" | jq 'if type == "array" then
-    map(
-      select(
-        has("content") and has("confidence") and has("source_chat")
-        and has("source_date")
-      )
-    )
-  else error("not an array") end' 2>/dev/null
-}
+# ── validate_candidates harness — source the REAL implementation (M4) ─────────
+# Single source of truth: scripts/validate-candidates.sh. Sourcing it (instead of
+# re-typing the function) means this test exercises the shipped logic, so any drift
+# in the jq filter breaks the build instead of silently passing a stale copy.
+VALIDATE_SCRIPT="$SCRIPT_DIR/../scripts/validate-candidates.sh"
+[ -f "$VALIDATE_SCRIPT" ] || fail "validate-candidates.sh missing at $VALIDATE_SCRIPT"
+# shellcheck source=/dev/null
+source "$VALIDATE_SCRIPT"
 
 # ── Test 1: valid candidate, required fields only (no optionals) ──────────────
 VALID='[{"content":"c","confidence":"high","source_chat":"/a.jsonl","source_date":"2026-06-01"}]'

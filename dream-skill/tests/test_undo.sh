@@ -52,5 +52,28 @@ grep -q "page.md" "$VAULT/wiki/index.md" && fail "index entry still present afte
 grep -q "original line" "$VAULT/wiki/page.md" || fail "undo deleted pre-existing original line"
 
 echo "PASS: undo reverts vault writes + index entry, preserves originals"
+
+# ── test 2 (M6): processed log renamed to .applied-* → re-apply is blocked ────
+[ ! -f "$UNDO_LOG" ] || fail "undo log not renamed after apply (re-apply protection missing)"
+APPLIED=$(ls "$UNDO_LOG".applied-* 2>/dev/null | head -1)
+[ -n "$APPLIED" ] || fail "no .applied-* sibling created after undo"
+# Re-applying the original (now-missing) path must fail loudly, not silently corrupt the page
+if HOME="$VAULT" "$UNDO" "$UNDO_LOG" 2>/dev/null; then fail "re-apply on renamed log unexpectedly succeeded"; fi
+grep -q "original line" "$VAULT/wiki/page.md" || fail "re-apply attempt damaged the page"
+echo "PASS: processed log renamed to .applied-*; re-apply blocked"
+
+# ── test 3 (M6): --date resolves to \$HOME/.claude/dream-skill/undo/<date>.jsonl ─
+FAKE_HOME=$(mktemp -d "/tmp/dream-undo-home-XXXXXX")
+mkdir -p "$FAKE_HOME/.claude/dream-skill/undo"
+DATED_VAULT="$VAULT/dated"; mkdir -p "$DATED_VAULT/wiki"
+printf '# Page\n\n## Notes\n\n- keep me\n- dated line\n' > "$DATED_VAULT/wiki/page.md"
+jq -cn --arg v "$DATED_VAULT" '{action:"append", vault:$v, page:"wiki/page.md", content:"dated line"}' \
+  > "$FAKE_HOME/.claude/dream-skill/undo/2026-06-01.jsonl"
+HOME="$FAKE_HOME" "$UNDO" --date 2026-06-01 >/dev/null
+grep -q "dated line" "$DATED_VAULT/wiki/page.md" && fail "--date: append not reverted"
+grep -q "keep me"    "$DATED_VAULT/wiki/page.md" || fail "--date: reverted too much (original gone)"
+[ ! -f "$FAKE_HOME/.claude/dream-skill/undo/2026-06-01.jsonl" ] || fail "--date: processed log not renamed"
+rm -rf "$FAKE_HOME"
+echo "PASS: --date resolves \$HOME/.claude/dream-skill/undo/<date>.jsonl, reverts, renames"
 echo
 echo "All apply-undo.sh tests passed."

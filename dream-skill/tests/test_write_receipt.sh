@@ -32,10 +32,12 @@ trap 'rm -rf "$RUNS_DIR"' EXIT
 #   Skipped    = action=="duplicate" (or review_status=="skipped")
 #
 # `target` is the flattened "<vault>/<page>" string (write-receipt strips trailing .md for wikilink).
+# NOTE: no top-level "date" key — the real Step 8 producer (SKILL.md) does NOT emit one.
+# write-receipt.sh must derive the receipt date from window_end (falling back to today),
+# never write to "null.md". A prior fixture injected "date" here and masked that bug (C1).
 SUMMARY=$(cat <<'EOF'
 {
   "run_id":       "dream-2026-06-03T14:23:00Z",
-  "date":         "2026-06-03",
   "window_start": "2026-05-27",
   "window_end":   "2026-06-03",
   "chats_scanned": 4,
@@ -157,13 +159,32 @@ DUPE_COUNT=$(grep -c "2026-06-03" "$INDEX" || true)
 [ "$DUPE_COUNT" -eq 1 ] || fail "index.md: idempotent re-run added duplicate line (count=$DUPE_COUNT)"
 echo "PASS: index.md idempotent (no duplicate on re-run)"
 
-# ── test 8: dry-run mode writes receipt but does NOT create/update index ──────
+# ── test 8 (M5): dry-run emits receipt to STDOUT and writes NO index/receipt file ─
 DRYRUN_DIR=$(mktemp -d "/tmp/dream-runs-dry-XXXXXX")
 DRY_SUMMARY=$(printf '%s' "$SUMMARY" | jq '.run_id = "dream-2026-06-03T15:00:00Z" | .date = "2026-06-03"')
-printf '%s' "$DRY_SUMMARY" | \
-  DREAM_RUNS_DIR="$DRYRUN_DIR" "$WRITER" --dry-run >/dev/null
+DRY_OUT=$(printf '%s' "$DRY_SUMMARY" | DREAM_RUNS_DIR="$DRYRUN_DIR" "$WRITER" --dry-run)
+printf '%s' "$DRY_OUT" | grep -q "^# Dream run — 2026-06-03" || fail "--dry-run: receipt body not emitted to stdout"
+[ ! -f "$DRYRUN_DIR/index.md" ]      || fail "--dry-run: index.md was created (index update must be suppressed)"
+[ ! -f "$DRYRUN_DIR/2026-06-03.md" ] || fail "--dry-run: receipt file written to disk (dry-run must be stdout-only)"
 rm -rf "$DRYRUN_DIR"
-# (dry-run suppresses index and marker; no assertion on content — just must not crash)
-echo "PASS: --dry-run does not crash"
+echo "PASS: --dry-run emits receipt to stdout; no index.md / receipt file on disk"
+
+# ── test 9 (C1): dateless producer → receipt filed under window_end, never null.md ──
+C1_DIR=$(mktemp -d "/tmp/dream-runs-c1-XXXXXX")
+printf '%s' "$SUMMARY" | DREAM_RUNS_DIR="$C1_DIR" "$WRITER" >/dev/null
+[ -f "$C1_DIR/2026-06-03.md" ] || fail "C1: dateless summary did not produce window_end-dated receipt (2026-06-03.md)"
+[ ! -f "$C1_DIR/null.md" ]     || fail "C1: receipt misfiled to null.md (date collapsed to null)"
+grep -q "^# Dream run — 2026-06-03" "$C1_DIR/2026-06-03.md" || fail "C1: header date is not window_end"
+grep -q "\[\[$(basename "$C1_DIR")/2026-06-03\]\]" "$C1_DIR/index.md" || fail "C1: index wikilink not dated from window_end"
+grep -q "null" "$C1_DIR/index.md" && fail "C1: index line contains literal 'null'"
+rm -rf "$C1_DIR"
+echo "PASS: dateless producer → window_end-dated receipt, no null.md (C1 regression guard)"
+
+# ── test 10 (C1): explicit .date wins over window_end (precedence preserved) ──────
+PREC_DIR=$(mktemp -d "/tmp/dream-runs-prec-XXXXXX")
+printf '%s' "$SUMMARY" | jq '.date = "2026-06-10"' | DREAM_RUNS_DIR="$PREC_DIR" "$WRITER" >/dev/null
+[ -f "$PREC_DIR/2026-06-10.md" ] || fail "C1: explicit .date did not take precedence over window_end"
+rm -rf "$PREC_DIR"
+echo "PASS: explicit .date takes precedence over window_end"
 
 echo "All write-receipt.sh tests passed."

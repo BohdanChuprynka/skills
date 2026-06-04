@@ -149,4 +149,30 @@ echo "$OUT8" | grep -q "new.jsonl"      || fail "marker round-trip: recent chat 
 echo "$OUT8" | grep -q "just-old.jsonl" && fail "marker round-trip: chat older than marker included"
 echo "PASS: marker round-trip (orchestrator write → find-chats read)"
 
+# ── test 9 (C2): early-morning chat on the boundary day is NOT silently dropped ──
+# Regression for bare-date parsing. BSD `date -j -f "%Y-%m-%d" "$d" +%s` fills H:M:S
+# from the wall clock, so window_start landed at ~now's time-of-day on the boundary
+# day and a 00:01 chat there was dropped on any later-in-day run. window_start MUST
+# anchor to midnight. Exercises BOTH the marker branch and the --since branch.
+BND_PROJ=$(mktemp -d "/tmp/dream-bnd-proj-XXXXXX")
+BND_MARKER=$(mktemp -d "/tmp/dream-bnd-marker-XXXXXX")
+BD_COMPACT=$(date -v "-4d" +%Y%m%d 2>/dev/null || date --date="4 days ago" +%Y%m%d)
+BD_DATE=$(date -v "-4d" +%Y-%m-%d 2>/dev/null || date --date="4 days ago" +%Y-%m-%d)
+EARLY="$BND_PROJ/proj-bnd/early.jsonl"
+mkdir -p "$(dirname "$EARLY")"
+echo '{"role":"user","content":"hi"}' > "$EARLY"
+touch -t "${BD_COMPACT}0001" "$EARLY"   # boundary day at 00:01
+
+printf '%s\n' "$BD_DATE" > "$BND_MARKER/last-run"
+OUT9M=$(DREAM_PROJECTS_ROOT="$BND_PROJ" DREAM_MARKER_DIR="$BND_MARKER" "$FINDER" 2>/dev/null)
+echo "$OUT9M" | grep -q "early.jsonl" \
+  || fail "C2 marker branch: 00:01 boundary-day chat dropped (window_start not anchored to midnight)"
+
+OUT9S=$(DREAM_PROJECTS_ROOT="$BND_PROJ" DREAM_MARKER_DIR="$BND_MARKER" "$FINDER" --since "$BD_DATE" 2>/dev/null)
+echo "$OUT9S" | grep -q "early.jsonl" \
+  || fail "C2 --since branch: 00:01 boundary-day chat dropped (window_start not anchored to midnight)"
+
+rm -rf "$BND_PROJ" "$BND_MARKER"
+echo "PASS: early-morning boundary-day chat retained (C2 midnight-anchor regression guard)"
+
 echo "All find-chats.sh tests passed."

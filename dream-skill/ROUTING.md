@@ -99,13 +99,9 @@ Reconciliation (Plan 3) uses this table to choose `append` vs `replace` vs `stal
 
 ## 5. Routing-gaps log
 
-Append a new entry here whenever a candidate produces `status: ambiguous` or `status: gap` and the rule does not yet exist above. After ≥3 similar gaps accumulate, fold a new rule into §1 or §2 above and delete those log entries.
+Routing gaps are appended **by the orchestrator** to `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (a standalone append-only file) — **not** into this page, which is hand-maintained read-only routing guidance. This section documents the log's format and is where you act on it: once ≥3 similar gaps accumulate in that log, fold a new rule into §1 or §2 above, then clear those entries from the log.
 
-Format:
+Log line format (written to `routing-gaps.log`):
 ```
 - DATE | FACT (truncated 80 chars) | reason-no-rule | proposed-rule (optional)
 ```
-
-<!-- === LOG START — add new entries below === -->
-
-<!-- === LOG END === -->

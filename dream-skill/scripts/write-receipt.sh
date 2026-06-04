@@ -35,7 +35,11 @@ SUMMARY=$(cat)
 command -v jq >/dev/null 2>&1 || { echo "write-receipt.sh: jq required" >&2; exit 1; }
 
 RUN_ID=$(printf '%s' "$SUMMARY"      | jq -r '.run_id')
-DATE=$(printf '%s' "$SUMMARY"        | jq -r '.date')
+# Receipt date: prefer an explicit .date, else the batch end (.window_end), else today.
+# Never let a missing key collapse to the literal "null" (which would misfile every
+# receipt to null.md and clobber the index — see REVIEW-2026-06-04 C1).
+DATE=$(printf '%s' "$SUMMARY"        | jq -r '.date // .window_end // empty')
+[ -n "$DATE" ] && [ "$DATE" != "null" ] || DATE=$(date +%F)
 WIN_START=$(printf '%s' "$SUMMARY"   | jq -r '.window_start')
 WIN_END=$(printf '%s' "$SUMMARY"     | jq -r '.window_end')
 CHATS=$(printf '%s' "$SUMMARY"       | jq -r '.chats_scanned')
