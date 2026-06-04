@@ -1,0 +1,27 @@
+{
+  "_comment": "Absent fact, high confidence → new/append, needs_review:false",
+  "candidate": {
+    "content": "Passed AWS Solutions Architect exam 2026-05",
+    "type": "world-fact",
+    "confidence": "high",
+    "evidence": "\"I just passed my AWS SA cert last week\"",
+    "source_chat": "session-abc123",
+    "source_date": "2026-05-28",
+    "suggested_section": "Certifications"
+  },
+  "target_page_snapshot": "# Skills\n\n## Languages\n\n- Python (proficient)\n- TypeScript (proficient)\n\n## Frameworks\n\n- React\n- FastAPI\n",
+  "run_date": "2026-06-03",
+  "expected_decision": {
+    "action": "new",
+    "mode": "append",
+    "target": {
+      "vault": "me",
+      "page": "wiki/skills.md",
+      "section": "Certifications"
+    },
+    "content": "Passed AWS Solutions Architect exam 2026-05",
+    "candidate_confidence": "high",
+    "needs_review": false,
+    "rationale": "Fact is absent from the target page and candidate confidence is high, so a direct append is warranted."
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "_comment": "Semantically equivalent fact already present → duplicate/skip",
+  "candidate": {
+    "content": "Python (proficient)",
+    "type": "world-fact",
+    "confidence": "high",
+    "evidence": "\"yeah I use Python day to day\"",
+    "source_chat": "session-abc124",
+    "source_date": "2026-06-01",
+    "suggested_section": "Languages"
+  },
+  "target_page_snapshot": "# Skills\n\n## Languages\n\n- knows Python\n- TypeScript (proficient)\n",
+  "run_date": "2026-06-03",
+  "expected_decision": {
+    "action": "duplicate",
+    "mode": "none",
+    "target": {
+      "vault": "me",
+      "page": "wiki/skills.md",
+      "section": "Languages"
+    },
+    "content": "",
+    "candidate_confidence": "high",
+    "needs_review": false,
+    "rationale": "The existing line 'knows Python' is semantically equivalent to the candidate; no write is needed."
+  }
+}

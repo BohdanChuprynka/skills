@@ -1,0 +1,27 @@
+{
+  "_comment": "New fact but low confidence (brainstormed) → new/append, needs_review:true",
+  "candidate": {
+    "content": "might pivot to product management",
+    "type": "belief",
+    "confidence": "low",
+    "evidence": "\"I've been thinking maybe PM could be interesting\"",
+    "source_chat": "session-abc127",
+    "source_date": "2026-06-02",
+    "suggested_section": "Goals"
+  },
+  "target_page_snapshot": "# Goals\n\n## Goals\n\n- become a strong ML engineer\n",
+  "run_date": "2026-06-03",
+  "expected_decision": {
+    "action": "new",
+    "mode": "append",
+    "target": {
+      "vault": "me",
+      "page": "wiki/goals.md",
+      "section": "Goals"
+    },
+    "content": "might pivot to product management",
+    "candidate_confidence": "low",
+    "needs_review": true,
+    "rationale": "Fact is absent from the page but candidate confidence is low (hypothetical), so human review is required before writing."
+  }
+}
