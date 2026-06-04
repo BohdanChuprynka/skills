@@ -1,0 +1,24 @@
+{
+  "_fixture": "skill-fact",
+  "_description": "A fact about a capability Bohdan has used → me/skills page",
+  "input": {
+    "candidate": {
+      "content": "Used PyTorch Lightning to train a multi-label classifier on clinical notes",
+      "type": "experience",
+      "confidence": "high",
+      "evidence": "I trained a PyTorch Lightning model on the EHR dataset",
+      "source_chat": "abc123",
+      "source_date": "2026-06-01",
+      "suggested_section": "Deep Learning"
+    },
+    "routing_context": "(elided — assembled by build-nav-context.sh at runtime)"
+  },
+  "expected_output": {
+    "status": "routed",
+    "vault": "me",
+    "page": "wiki/skills/deep-learning.md",
+    "section": "Deep Learning",
+    "routing_confidence": "high"
+  },
+  "routing_rationale": "Fact is about a capability Bohdan has (used tech). ROUTING.md rule: 'used/learned <tech> → capability he has → me/skills'. me vault CLAUDE.md: 'one page per skill domain'. wiki/index.md Skills section lists a Deep Learning page."
+}

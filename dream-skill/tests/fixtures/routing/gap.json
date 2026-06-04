@@ -1,0 +1,25 @@
+{
+  "_fixture": "gap",
+  "_description": "A fact about a topic not covered by any vault → status gap",
+  "input": {
+    "candidate": {
+      "content": "The Cleveland Clinic campus cafeteria closes at 7pm on weekdays",
+      "type": "observation",
+      "confidence": "high",
+      "evidence": "cafeteria closes at 7",
+      "source_chat": "mno345",
+      "source_date": "2026-06-03",
+      "suggested_section": null
+    },
+    "routing_context": "(elided)"
+  },
+  "expected_output": {
+    "status": "gap",
+    "vault": null,
+    "page": null,
+    "section": null,
+    "routing_confidence": "low",
+    "gap_note": "Transient logistical fact about an external location. Does not describe Bohdan's identity, skills, projects, fitness, learning, setup, active work, or personal notes. No vault owns this. Discard or route to personal-notes/Daily journal only if the user explicitly wants it tracked."
+  },
+  "routing_rationale": "The global CLAUDE.md vault table's mission statement is 'persona model — does this help understand who Bohdan is'. A cafeteria closing time fails that test. Router should emit gap, not force a vault."
+}
