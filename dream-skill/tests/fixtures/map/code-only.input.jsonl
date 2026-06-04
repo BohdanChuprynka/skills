@@ -1,0 +1,3 @@
+{"role":"user","content":"Can you fix this TypeScript error? `Type 'string | undefined' is not assignable to type 'string'.`"}
+{"role":"assistant","content":"You need to narrow the type. Add a null check:\n```ts\nif (value !== undefined) {\n  doSomething(value);\n}\n```\nOr use the non-null assertion `value!` if you are certain it's defined."}
+{"role":"user","content":"The null check worked, thanks."}

@@ -1,0 +1,11 @@
+[
+  {
+    "content": "Considering trying marathon running; will start with a 5K to see how it goes",
+    "confidence": "low",
+    "source_chat": "low-confidence.input.jsonl",
+    "source_date": "2026-06-01",
+    "type": "belief",
+    "evidence": "I think I might want to try running marathons. Not sure yet. Maybe I'll start with a 5K first.",
+    "suggested_section": "Goals"
+  }
+]

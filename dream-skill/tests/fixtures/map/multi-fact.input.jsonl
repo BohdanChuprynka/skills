@@ -1,0 +1,3 @@
+{"role":"user","content":"Quick update: I'm moving to San Francisco in two months. Also been diving deep into PyTorch for a computer vision side project."}
+{"role":"assistant","content":"Both are big moves! Is the SF relocation tied to the CV work, or separate?"}
+{"role":"user","content":"Separate. SF is for a new job. The PyTorch stuff is just for fun — working on a gesture recognition model."}
