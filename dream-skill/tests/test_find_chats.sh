@@ -175,4 +175,11 @@ echo "$OUT9S" | grep -q "early.jsonl" \
 rm -rf "$BND_PROJ" "$BND_MARKER"
 echo "PASS: early-morning boundary-day chat retained (C2 midnight-anchor regression guard)"
 
+# ── test 10: --since with missing date argument → non-zero exit ──────────────
+RC10=0
+DREAM_PROJECTS_ROOT="$PROJ_ROOT" DREAM_MARKER_DIR="$MARKER_DIR" \
+  "$FINDER" --since >/dev/null 2>&1 || RC10=$?
+[ "$RC10" -ne 0 ] || fail "--since with no date: expected non-zero exit, got exit 0"
+echo "PASS: --since with missing date argument → non-zero exit"
+
 echo "All find-chats.sh tests passed."

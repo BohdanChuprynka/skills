@@ -10,7 +10,7 @@
 #   Default: ${DREAM_CONFIG:-$HOME/.claude/dream-skill/config.toml}
 #   Override with --config for hermetic tests (pass a TOML fixture).
 #
-# Stdout: a single NAV-CONTEXT block (≤ 8 000 chars).
+# Stdout: a single NAV-CONTEXT block (≤ 7 800 chars).
 # Stderr: warnings for missing vault roots or missing wiki/index.md; never fatal.
 set -euo pipefail
 
@@ -122,4 +122,6 @@ done < <(parse_vaults "$CONFIG")
 
 append "=== NAV-CONTEXT END ===\n"
 
-printf '%b' "$ACCUMULATED"
+FINAL="${ACCUMULATED//\\n/
+}"
+printf '%s' "$FINAL"

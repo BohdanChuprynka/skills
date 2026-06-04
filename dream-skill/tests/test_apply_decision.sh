@@ -302,3 +302,92 @@ AFTER_QUEUE_LINES=$(wc -l < "$DRYRUN_QUEUE2")
 echo "PASS: --dry-run supersede → vault page byte-identical, queue untouched"
 
 rm -f "$DRYRUN_QUEUE2"
+
+# --- Test 8: new + medium confidence + needs_review:true → uncertain bucket (not brainstormed) ---
+
+cat > "$VAULT/wiki/career.md" <<'EOF'
+# Career
+
+## Goals
+
+- become a strong ML engineer
+EOF
+
+cat > "$DECISION_FILE" <<'EOF'
+{
+  "action": "new",
+  "mode": "append",
+  "target": { "vault": "me", "page": "wiki/career.md", "section": "Goals" },
+  "content": "considering a switch to product management",
+  "candidate_confidence": "medium",
+  "needs_review": true,
+  "rationale": "Medium confidence, uncertain fact."
+}
+EOF
+
+QUEUE_8=$(mktemp "/tmp/dream-queue-test8-XXXXXX.md")
+export DREAM_QUEUE_FILE="$QUEUE_8"
+
+FACT8=$("$APPLY" --vault "$VAULT" --decision "$DECISION_FILE" --undo-log "$UNDO_LOG")
+
+grep -q "considering a switch" "$VAULT/wiki/career.md" \
+  && fail "test 8: medium-confidence needs_review: must NOT auto-write to vault"
+grep -q "considering a switch" "$QUEUE_8" \
+  || fail "test 8: medium-confidence needs_review: must be queued"
+grep -qi "uncertain" "$QUEUE_8" \
+  || fail "test 8: medium-confidence needs_review: queue bucket must be 'uncertain'"
+grep -qi "brainstormed" "$QUEUE_8" \
+  && fail "test 8: medium-confidence needs_review: must NOT be in brainstormed bucket"
+[ "$(printf '%s' "$FACT8" | jq -r '.review_status')" = "queued" ] \
+  || fail "test 8: run-summary fact review_status must be 'queued'"
+[ "$(printf '%s' "$FACT8" | jq -r '.queue_bucket')" = "uncertain" ] \
+  || fail "test 8: run-summary fact queue_bucket must be 'uncertain'"
+rm -f "$QUEUE_8"
+echo "PASS: new medium-confidence needs_review:true → uncertain bucket (not brainstormed)"
+
+# --- Test 9: unknown action → non-zero exit + "unknown action" in stderr ---
+
+cat > "$DECISION_FILE" <<'EOF'
+{
+  "action": "frobble",
+  "mode": "append",
+  "target": { "vault": "me", "page": "wiki/skills.md", "section": "Certifications" },
+  "content": "some content",
+  "candidate_confidence": "high",
+  "needs_review": false,
+  "rationale": "Test unknown action."
+}
+EOF
+
+RC9=0
+ERR9=$(DREAM_QUEUE_FILE="/dev/null" \
+  "$APPLY" --vault "$VAULT" --decision "$DECISION_FILE" --undo-log "$UNDO_LOG" 2>&1) || RC9=$?
+[ "$RC9" -ne 0 ] || fail "test 9: unknown action should exit non-zero"
+printf '%s' "$ERR9" | grep -qi "unknown action\|frobble" \
+  || fail "test 9: stderr missing 'unknown action' or action name (got: $ERR9)"
+echo "PASS: unknown action → non-zero exit + 'unknown action' in stderr"
+
+# --- Test 10: null .target.page in decision → non-zero exit, no null.md created ---
+
+cat > "$DECISION_FILE" <<'EOF'
+{
+  "action": "new",
+  "mode": "append",
+  "target": { "vault": "me", "page": null, "section": "Certifications" },
+  "content": "should not reach vault",
+  "candidate_confidence": "high",
+  "needs_review": false,
+  "rationale": "Test null page field."
+}
+EOF
+
+RC10=0
+ERR10=$(DREAM_QUEUE_FILE="/dev/null" \
+  "$APPLY" --vault "$VAULT" --decision "$DECISION_FILE" --undo-log "$UNDO_LOG" 2>&1) || RC10=$?
+[ "$RC10" -ne 0 ] || fail "test 10: null .target.page should exit non-zero"
+[ ! -f "$VAULT/null.md" ] || fail "test 10: null .target.page created null.md in vault"
+printf '%s' "$ERR10" | grep -qi "page\|missing\|null" \
+  || fail "test 10: stderr should mention missing page (got: $ERR10)"
+echo "PASS: null .target.page → non-zero exit, no null.md created"
+
+echo "All apply-decision.sh tests passed."

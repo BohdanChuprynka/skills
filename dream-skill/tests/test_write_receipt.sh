@@ -187,4 +187,46 @@ printf '%s' "$SUMMARY" | jq '.date = "2026-06-10"' | DREAM_RUNS_DIR="$PREC_DIR" 
 rm -rf "$PREC_DIR"
 echo "PASS: explicit .date takes precedence over window_end"
 
+# ── test 11: empty facts array → exit 0, all sections present, valid index entry ─
+EMPTY_FACTS_DIR=$(mktemp -d "/tmp/dream-runs-emptyfacts-XXXXXX")
+EMPTY_FACTS_SUMMARY=$(cat <<'EOF'
+{
+  "run_id":       "dream-2026-06-03T16:00:00Z",
+  "window_start": "2026-05-27",
+  "window_end":   "2026-06-03",
+  "chats_scanned": 2,
+  "facts": []
+}
+EOF
+)
+printf '%s' "$EMPTY_FACTS_SUMMARY" | DREAM_RUNS_DIR="$EMPTY_FACTS_DIR" "$WRITER" >/dev/null
+[ -f "$EMPTY_FACTS_DIR/2026-06-03.md" ] || fail "empty facts: receipt file not created"
+grep -q "^## Written"           "$EMPTY_FACTS_DIR/2026-06-03.md" || fail "empty facts: Written section missing"
+grep -q "^## Queued for review" "$EMPTY_FACTS_DIR/2026-06-03.md" || fail "empty facts: Queued section missing"
+grep -q "^## Skipped"           "$EMPTY_FACTS_DIR/2026-06-03.md" || fail "empty facts: Skipped section missing"
+grep -q "^## Superseded"        "$EMPTY_FACTS_DIR/2026-06-03.md" || fail "empty facts: Superseded section missing"
+[ -f "$EMPTY_FACTS_DIR/index.md" ] || fail "empty facts: index.md not created"
+grep -q "2026-06-03" "$EMPTY_FACTS_DIR/index.md" || fail "empty facts: index entry missing date"
+rm -rf "$EMPTY_FACTS_DIR"
+echo "PASS: empty facts array → receipt with all sections + valid index entry (exit 0)"
+
+# ── test 12: null facts field → exit 0, receipt renders without error ─────────
+NULL_FACTS_DIR=$(mktemp -d "/tmp/dream-runs-nullfacts-XXXXXX")
+NULL_FACTS_SUMMARY=$(cat <<'EOF'
+{
+  "run_id":       "dream-2026-06-03T17:00:00Z",
+  "window_start": "2026-05-27",
+  "window_end":   "2026-06-03",
+  "chats_scanned": 0,
+  "facts": null
+}
+EOF
+)
+printf '%s' "$NULL_FACTS_SUMMARY" | DREAM_RUNS_DIR="$NULL_FACTS_DIR" "$WRITER" >/dev/null
+[ -f "$NULL_FACTS_DIR/2026-06-03.md" ] || fail "null facts: receipt not created"
+grep -q "^## Written"    "$NULL_FACTS_DIR/2026-06-03.md" || fail "null facts: Written section missing"
+grep -q "^## Superseded" "$NULL_FACTS_DIR/2026-06-03.md" || fail "null facts: Superseded section missing"
+rm -rf "$NULL_FACTS_DIR"
+echo "PASS: null facts field → receipt rendered without error (exit 0)"
+
 echo "All write-receipt.sh tests passed."

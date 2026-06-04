@@ -189,16 +189,16 @@ fi
 if [ -n "$UNDO_LOG" ]; then
   mkdir -p "$(dirname "$UNDO_LOG")"
   TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  ESC_SECTION=$(printf '%s' "$SECTION" | sed 's/\\/\\\\/g; s/"/\\"/g')
   if [ "$MODE" = "append" ]; then
-    ESC_CONTENT=$(printf '%s' "$CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    printf '{"timestamp":"%s","vault":"%s","page":"%s","section":"%s","content":"%s","action":"append"}\n' \
-      "$TS" "$VAULT" "$PAGE" "$ESC_SECTION" "$ESC_CONTENT" >> "$UNDO_LOG"
+    jq -cn --arg timestamp "$TS" --arg vault "$VAULT" --arg page "$PAGE" \
+      --arg section "$SECTION" --arg content "$CONTENT" \
+      '{"timestamp":$timestamp,"vault":$vault,"page":$page,"section":$section,"content":$content,"action":"append"}' \
+      >> "$UNDO_LOG"
   else
-    ESC_OLD=$(printf '%s' "$OLD_CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    ESC_NEW=$(printf '%s' "$FINAL_CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    printf '{"timestamp":"%s","vault":"%s","page":"%s","section":"%s","old_content":"%s","content":"%s","action":"replace"}\n' \
-      "$TS" "$VAULT" "$PAGE" "$ESC_SECTION" "$ESC_OLD" "$ESC_NEW" >> "$UNDO_LOG"
+    jq -cn --arg timestamp "$TS" --arg vault "$VAULT" --arg page "$PAGE" \
+      --arg section "$SECTION" --arg old_content "$OLD_CONTENT" --arg content "$FINAL_CONTENT" \
+      '{"timestamp":$timestamp,"vault":$vault,"page":$page,"section":$section,"old_content":$old_content,"content":$content,"action":"replace"}' \
+      >> "$UNDO_LOG"
   fi
 fi
 
@@ -239,9 +239,10 @@ if [ "$MODE" = "append" ] && [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ];
 
         # Log the index edit too
         if [ -n "$UNDO_LOG" ]; then
-          ESC_LABEL=$(printf '%s' "$INDEX_LABEL" | sed 's/\\/\\\\/g; s/"/\\"/g')
-          printf '{"timestamp":"%s","vault":"%s","index_file":"%s","line":"%s","action":"index_append"}\n' \
-            "$TS" "$VAULT" "$INDEX_FILE" "$LINE" >> "$UNDO_LOG"
+          jq -cn --arg timestamp "$TS" --arg vault "$VAULT" \
+            --arg index_file "$INDEX_FILE" --arg line "$LINE" \
+            '{"timestamp":$timestamp,"vault":$vault,"index_file":$index_file,"line":$line,"action":"index_append"}' \
+            >> "$UNDO_LOG"
         fi
       fi
     fi

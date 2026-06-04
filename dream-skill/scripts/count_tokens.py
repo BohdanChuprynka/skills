@@ -34,7 +34,7 @@ def count(text: str) -> tuple[int, bool]:
         global _TIKTOKEN_WARNED
         if not _TIKTOKEN_WARNED:
             print(
-                "count_tokens.py: WARN tiktoken not installed; using byte/3.5 estimate. "
+                "count_tokens.py: WARN tiktoken not installed; using byte/4.0 estimate. "
                 "Install with `pip install tiktoken` for accurate counts.",
                 file=sys.stderr,
             )

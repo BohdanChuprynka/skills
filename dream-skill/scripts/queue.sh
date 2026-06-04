@@ -53,12 +53,17 @@ cmd_append() {
 
   ensure_queue_file
 
-  # Dedupe: skip if (title + target) already queued.
-  # Protects against duplicate dispatch (e.g., same chat closed from two
-  # windows after /resume) — same fact extracted twice would otherwise
-  # queue twice.
-  if grep -Fq -- "### $title" "$QUEUE_FILE" 2>/dev/null \
-     && grep -Fq -- "**Target:** $target" "$QUEUE_FILE" 2>/dev/null; then
+  # Dedupe: skip if BOTH title AND target appear in the SAME queue block.
+  # Two independent greps would false-positive when title matches entry A and
+  # target matches entry B — a novel (title,target) pair would be silently dropped.
+  if awk -v tt="### $title" -v tg="**Target:** $target" '
+    /^### / { in_b=1; has_t=0; has_g=0 }
+    in_b && $0==tt { has_t=1 }
+    in_b && $0==tg { has_g=1 }
+    in_b && has_t && has_g { found=1; exit }
+    /^---$/ { in_b=0 }
+    END { exit (found ? 0 : 1) }
+  ' "$QUEUE_FILE" 2>/dev/null; then
     echo "queue: skip duplicate title='$title' target='$target'" >&2
     return 0
   fi

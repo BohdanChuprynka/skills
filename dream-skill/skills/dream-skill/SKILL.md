@@ -43,12 +43,11 @@ These rules override anything else in this skill. Violating them silently destro
 The ONLY valid write destinations are:
 1. Files **inside vault roots** declared in `$DREAM_CONFIG` (via `vault-writer.sh`)
 2. The queue file at `$DREAM_QUEUE_FILE` (via `queue.sh`)
-3. The daily log at `$DREAM_DAILY_LOG` (plain append)
-4. The undo log at `$DREAM_UNDO_LOG` (managed by `vault-writer.sh`)
-5. The error log at `$DREAM_ERROR_LOG` (plain append on failures)
-6. The marker file at `${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}/last-run` (Step 9)
-7. The receipt file in `reports_dir` (via `scripts/write-receipt.sh`)
-8. The routing-gaps log at `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (plain append when routing returns `ambiguous`/`gap` — Step 5a / R7)
+3. The undo log at `$DREAM_UNDO_LOG` (managed by `vault-writer.sh`)
+4. The error log at `$DREAM_ERROR_LOG` (plain append on failures)
+5. The marker file at `${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}/last-run` (Step 9)
+6. The receipt file in `reports_dir` (via `scripts/write-receipt.sh`)
+7. The routing-gaps log at `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (plain append when routing returns `ambiguous`/`gap` — Step 5a / R7)
 
 You MUST NOT write to any of these:
 - `~/.claude/projects/*/memory/` — that is Claude Code's per-project auto-memory, a different persistence layer.
@@ -81,7 +80,7 @@ When `--dry-run` is active, pass `--dry-run` through to `apply-decision.sh` and 
 | `DREAM_HOME` | `~/.claude/dream-skill` | Runtime state root |
 | `DREAM_CONFIG` | `$DREAM_HOME/config.toml` | Vault roots TOML |
 | `DREAM_QUEUE_FILE` | `$DREAM_HOME/queue/pending.md` | Deferred-decision facts |
-| `DREAM_DAILY_LOG` | `$DREAM_HOME/log/<YYYY-MM-DD>.md` | Human-readable activity log |
+| `DREAM_DAILY_LOG` | `$DREAM_HOME/log/<YYYY-MM-DD>.md` | Human-readable activity log (deferred — not yet implemented) |
 | `DREAM_UNDO_LOG` | `$DREAM_HOME/undo/<YYYY-MM-DD>.jsonl` | Per-write rollback entries |
 | `DREAM_ERROR_LOG` | `$DREAM_HOME/error.log` | Append on broken-install failures |
 | `DREAM_MARKER_DIR` | `$DREAM_HOME` | Directory containing `last-run` marker file |
@@ -134,9 +133,11 @@ fi
 DREAM_SKILL_HOME="$(dirname "$DREAM_SCRIPTS_DIR")"
 ROUTING_MD="$DREAM_SKILL_HOME/ROUTING.md"
 # Verify all helpers exist + executable; if any missing, fail loud (Rule 3) and stop.
+_MISSING=""
 for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh advance-marker.sh; do
-  [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; }
+  [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; _MISSING="$_MISSING $s"; }
 done
+[ -z "$_MISSING" ] || { echo "dream-skill: aborting — missing scripts:$_MISSING" >&2; exit 1; }
 ```
 4. Parse `~/.claude/dream-skill/config.toml` (override via `${DREAM_CONFIG}` for tests) to resolve vault roots and `reports_dir`. Parse vault names from `^\[vaults\.<name>\]`, then `root =` per block; `reports_dir =` at top level. `config.toml` is the ONLY source of vault roots — no fallback to `CLAUDE.md` grep.
 
@@ -235,12 +236,7 @@ Each candidate receives a reconciliation decision per overview §4: `action`, `m
 
 ### Step 6 — REVIEW
 
-For all facts where `needs_review = true`, call `"$DREAM_SCRIPTS_DIR/queue.sh" append` with the appropriate bucket:
-- `destructive` — D-bucket facts or `replace`/`stale` actions on high-stakes facts.
-- `uncertain` — E-bucket facts, ambiguous routing, or confidence < high.
-- `brainstormed` — facts that are plausible but not directly evidenced.
-
-Then invoke the existing terminal review flow from `"$DREAM_SCRIPTS_DIR/queue.sh" list` for the user to approve / edit / skip / discard each queued item. Facts approved during review are promoted to the APPLY list; discarded facts are removed from the queue.
+Invoke the terminal review flow from `"$DREAM_SCRIPTS_DIR/queue.sh" list` for the user to approve / edit / skip / discard each queued item. (`queue.sh` was populated in Step 5d by `apply-decision.sh`.) Facts approved during review are added to the APPLY list; discarded facts are removed from the queue.
 
 **Review UI per entry:**
 
@@ -254,13 +250,13 @@ Then invoke the existing terminal review flow from `"$DREAM_SCRIPTS_DIR/queue.sh
 [a]pprove  [e]dit  [s]kip  [d]iscard  [q]uit
 ```
 
-**Approve (`a`):** Promote to the APPLY list for this run. Call `"$DREAM_SCRIPTS_DIR/vault-writer.sh"` with resolved args + `--undo-log "$DREAM_UNDO_LOG"`. Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove` to clear the entry. Append `[APPROVED]` line to `$DREAM_DAILY_LOG`.
+**Approve (`a`):** Promote to the APPLY list for this run. Call `"$DREAM_SCRIPTS_DIR/apply-decision.sh"` with the stored decision JSON + `--undo-log "$DREAM_UNDO_LOG"`. Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove` to clear the entry.
 
 **Edit (`e`) — free-form field editor:** Prompt: `What to edit? Comma-separated field:value pairs. Valid fields: title, evidence, target, confidence, bucket.` Parse and validate. Re-show full updated entry. Prompt `[a]pply / [r]e-edit / [d]iscard`. On apply: `"$DREAM_SCRIPTS_DIR/queue.sh" remove` (original key) + `"$DREAM_SCRIPTS_DIR/queue.sh" append` (new values). Do NOT auto-approve after edit.
 
 **Skip (`s`):** Leave in queue. Advance.
 
-**Discard (`d`):** Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove`. Advance. Append `[DISCARDED]` to `$DREAM_DAILY_LOG`.
+**Discard (`d`):** Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove`. Advance.
 
 **Quit (`q`):** Stop walking. Remaining entries stay queued. Jump to RECEIPT.
 
@@ -275,7 +271,7 @@ Dream queue review complete.
 
 ### Step 7 — APPLY
 
-For each fact promoted from REVIEW (approved) or for auto-approved facts (confidence=high, action=new, no conflict), call `apply-decision.sh` with the reconciliation decision. The orchestrator resolves `target.vault` (a logical name like `me`) to its absolute root via `config.toml` before calling, and collects apply-decision's emitted run-summary fact line(s) from stdout for the Step 8 receipt.
+For each fact promoted from REVIEW (approved in Step 6), call `apply-decision.sh` with the stored reconciliation decision JSON. (Auto-approved high-confidence `new` facts are already written in Step 5d — do not re-apply them here.) The orchestrator resolves `target.vault` (a logical name like `me`) to its absolute root via `config.toml` before calling, and collects apply-decision's emitted run-summary fact line(s) from stdout for the Step 8 receipt.
 
 ```bash
 FACT_JSON=$("$DREAM_SCRIPTS_DIR/apply-decision.sh" \
@@ -422,6 +418,19 @@ When invoked as `/dream-skill --unignore`:
 - `scripts/apply-undo.sh` — rollback writes
 - `tests/test_map_harness.sh` — unit tests for `validate_candidates` harness
 - `tests/fixtures/map/` — golden fixtures for MAP extraction (manual eval only, not CI)
+- `scripts/path-guard.sh` — vault-root confinement guard (sourced by `vault-writer.sh`)
+
+---
+
+## Rollback
+
+To reverse all writes from a completed run:
+
+```bash
+"$DREAM_SCRIPTS_DIR/apply-undo.sh" --date <YYYY-MM-DD>
+```
+
+This reads `$DREAM_HOME/undo/<date>.jsonl`, reverses every vault-writer append/replace/stale, removes index entries, and renames the processed log to `.applied-*` to prevent re-runs. See `scripts/apply-undo.sh` and `tests/test_undo.sh`.
 
 <!-- Plans 2 and 3 append ## Routing and ## Reconciliation sections below this line. -->
 
