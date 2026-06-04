@@ -447,3 +447,143 @@ For `ambiguous` or `gap`, set `vault`, `page`, and `section` to `null`.
 - The page must resolve to a CANONICAL page that exists (per nav-context index or dir scan) or be `null`. Never invent a path.
 - For `ambiguous` or `gap`: `vault`, `page`, and `section` are always `null`; append to the routing-gaps log (Step R7).
 - `routing_confidence` is one of `"high"`, `"medium"`, or `"low"` — calibrated per ROUTING.md §4.
+
+---
+
+## Reconciliation
+
+> This section is the LLM prompt executed by the orchestrator (Plan 4) once per routed
+> candidate-fact. Input: a `candidate` JSON object, the full text of the `target_page`
+> (as a string), and the `run_date` (ISO-8601, today's date). Output: one JSON object
+> matching the reconciliation-decision contract. Emit the JSON only — no prose.
+
+### Input schema
+
+```json
+{
+  "candidate": {
+    "content":          "Cleveland Clinic internship confirmed for Jun–Aug 2026",
+    "type":             "world-fact | belief | observation | experience",
+    "confidence":       "high | medium | low",
+    "evidence":         "short quote/paraphrase from the source chat",
+    "source_chat":      "<session-id>",
+    "source_date":      "2026-06-01",
+    "suggested_section": "Experience"
+  },
+  "target_page": "<full markdown text of the routed vault page>",
+  "run_date":    "2026-06-03"
+}
+```
+
+### Output schema (reconciliation-decision)
+
+```json
+{
+  "action":               "new | duplicate | supersede | contradict",
+  "mode":                 "append | replace | stale | none",
+  "target": {
+    "vault":   "<vault-name>",
+    "page":    "<relative path, e.g. wiki/experience.md>",
+    "section": "<H2 heading text>"
+  },
+  "old_content":          "<exact existing line text, omit key for 'new' and 'duplicate'>",
+  "content":              "<the new fact line to write, omit key for 'duplicate'>",
+  "candidate_confidence": "high | medium | low",
+  "needs_review":         true,
+  "rationale":            "<one sentence explaining the classification>"
+}
+```
+
+Field notes (from v2 §4):
+- `action` enum is EXACTLY `new|duplicate|supersede|contradict` (never mode-values).
+- `mode` is `append|replace|stale|none` — use `none` for `duplicate`.
+- `candidate_confidence` is a REQUIRED pass-through of the candidate's `confidence` field; it drives queue bucketing in `apply-decision.sh`.
+- Field is `rationale` (not `reason`).
+- **`needs_review` rule:** `true` for everything EXCEPT `action: new` AND `candidate_confidence: high`. All destructive edits, all contradictions, and all low/medium-confidence new facts go to review.
+
+### Action definitions and mode mapping
+
+| Action       | When to use                                                        | mode    | needs_review |
+|--------------|--------------------------------------------------------------------|---------|-------------|
+| `new`        | The fact (or one semantically equivalent) is absent from the page | append  | false if confidence=high; true otherwise |
+| `duplicate`  | An existing line carries the same meaning (wording may differ)    | none    | false |
+| `supersede`  | Same subject+attribute, candidate value is newer/more specific    | replace | true |
+| `contradict` | Conflicting claims, winner unclear (no clear date precedence)     | stale   | true |
+
+**For `duplicate`:** emit `"mode": "none"` and `"content": ""` (empty string) as placeholders — `none` is the correct mode value per v2 §4. The dispatcher skips any write because the fact is already represented. Do NOT omit the `mode` and `content` keys — the schema validator requires all fields.
+
+**For `contradict`:** `mode` is `stale` (the existing line is struck through); the new candidate is queued for human review but NOT written. Set `old_content` to the conflicting existing line.
+
+### Precedence rules (apply in order)
+
+1. **User's words in the source chat always win** — if the candidate came from a direct user statement in the session, treat it as authoritative over any existing vault claim.
+2. **Newer `source_date` beats older vault content** — when both a candidate and an existing line reference the same subject+attribute, the one with the later date supersedes. If the existing line has no date marker, treat it as older.
+3. **`confidence: low` (brainstormed/hypothetical) never auto-writes** — force `needs_review: true` regardless of action.
+4. **Ambiguous precedence → `contradict`** — when you cannot determine which claim is more recent or authoritative, classify as `contradict`, not `supersede`.
+
+### Volatility guidance
+
+The target page's frontmatter or the vault's `CLAUDE.md` may carry a `volatility` tag (`VOLATILE` or `STABLE`). Use it as follows:
+
+- **VOLATILE page** (e.g. `goals/now`, current-project status, active sprint): actively scan every existing line in the candidate's section for a semantically stale version of the same fact. When found, classify as `supersede` rather than `new`.
+- **STABLE page** (e.g. past experience, education, completed projects): prefer `new` (append) unless an exact or near-exact duplicate is present. Do not hunt for supersession targets.
+- **No tag / unknown**: treat as STABLE.
+
+### Semantic equivalence (duplicate detection)
+
+Two lines are **semantically equivalent** if a competent reader would consider them to convey the same fact about the same subject, even if the wording differs. Examples:
+
+- `"interned at Cleveland Clinic"` ≅ `"Cleveland Clinic internship Jun–Aug 2026"` → **duplicate** (same role, same org)
+- `"lives in Berlin"` ≠ `"lives in Munich"` → same attribute, different value → **supersede** or **contradict**
+- `"knows Python"` ≅ `"Python (proficient)"` → **duplicate**
+- `"interested in ML"` ≠ `"working on ML project"` → different claim level → **new** (additive, not a duplicate)
+
+### Worked examples
+
+**Example A — new (absent fact, high confidence)**
+```
+candidate.content = "Passed AWS Solutions Architect exam 2026-05"
+candidate.confidence = "high"
+target_page (skills.md) has no mention of AWS certification
+→ action: "new", mode: "append", needs_review: false
+```
+
+**Example B — duplicate**
+```
+candidate.content = "Python (proficient)"
+target_page (skills.md) already contains line "- knows Python"
+→ action: "duplicate", mode: "none", content: "", needs_review: false
+```
+
+**Example C — supersede**
+```
+candidate.content = "lives in Munich (moved 2026-06)"
+candidate.source_date = "2026-06-03"
+target_page (bio.md) contains "- lives in Berlin" (no date marker → treated as older)
+→ action: "supersede", mode: "replace",
+   old_content: "lives in Berlin",
+   content: "lives in Munich (moved 2026-06)",
+   needs_review: true
+```
+
+**Example D — contradict**
+```
+candidate.content = "primary language is TypeScript"
+candidate.source_date = "2026-05-10"
+target_page (skills.md) contains "- primary language is Python (since 2023)"
+Both have dates; TypeScript claim is newer but Python claim is qualified "since 2023";
+winner is genuinely unclear → classify as contradict
+→ action: "contradict", mode: "stale",
+   old_content: "primary language is Python (since 2023)",
+   needs_review: true
+```
+
+### Output rules
+
+- Emit the reconciliation-decision JSON object and nothing else. No explanation, no markdown fencing.
+- Every output object MUST include all required keys: `action`, `mode`, `target`, `content`, `candidate_confidence`, `needs_review`, `rationale`.
+- `old_content` is REQUIRED for `supersede` and `contradict`; OMIT the key entirely for `new` and `duplicate`.
+- `content` for `duplicate` MUST be `""` (empty string), not omitted.
+- `target.vault` comes from the routing decision passed in by the orchestrator.
+- `target.page` and `target.section` come from the routing decision; do not re-derive them.
+- `candidate_confidence` is a verbatim copy of `candidate.confidence` — never change it.
