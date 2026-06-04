@@ -1,0 +1,3 @@
+{"role":"user","content":"I've been learning Rust lately. Only a few weeks in but it's starting to click."}
+{"role":"assistant","content":"Rust has a steep learning curve but pays off. What are you building with it?"}
+{"role":"user","content":"Just doing exercises for now. Maybe a CLI tool eventually."}

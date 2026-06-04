@@ -31,7 +31,7 @@ Read `config/vault-paths.toml` for the list of configured vaults. Present them v
 
 ### Step 2 — Dispatch one sub-agent per selected vault (parallel)
 
-For each selected vault, launch a sub-agent with the prompt below. Run them concurrently — separate Agent tool calls in a single message.
+For each selected vault, launch a sub-agent with the prompt below. Run them concurrently — separate Agent tool calls in a single message. **Dispatch every scan sub-agent on Sonnet (`model: sonnet`, i.e. Sonnet 4.6 / `claude-sonnet-4-6`).** The audit is high-volume read-and-classify work that Sonnet handles well; the orchestrator (this conversation) still merges findings and applies approved changes on whatever model the session runs.
 
 Sub-agent prompt template (one per vault):
 

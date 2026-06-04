@@ -1,0 +1,26 @@
+{
+  "_comment": "Expected REDUCE output for structural-dedup.input.json. Assertions that matter for manual eval: (1) each (content, suggested_section) collapses to ONE entry; (2) source_chat_count = number of distinct source_chats that surfaced it; (3) confidence PROMOTED by count only — N>=3 -> high, N==2 -> medium, N==1 unchanged; (4) NO entry has a `needs_review` key — REDUCE never sets it, never auto-approves (overview I6/§8.7). At equal confidence + equal evidence the SPECIFIC retained source_chat/source_date is implementation-defined (ties broken by first-seen); do not assert on which one survives, only on the fields below.",
+  "expected_candidates": [
+    {
+      "content": "learning Rust",
+      "confidence": "high",
+      "suggested_section": "Learning",
+      "source_chat_count": 3,
+      "_note": "low -> high because N>=3 distinct source_chats; needs_review intentionally absent"
+    },
+    {
+      "content": "prefers tabs over spaces",
+      "confidence": "medium",
+      "suggested_section": "Preferences",
+      "source_chat_count": 2,
+      "_note": "low -> medium because N==2; needs_review intentionally absent"
+    },
+    {
+      "content": "passed AWS SAA exam",
+      "confidence": "high",
+      "suggested_section": "Certifications",
+      "source_chat_count": 1,
+      "_note": "single source; confidence unchanged (already high); not laundered"
+    }
+  ]
+}

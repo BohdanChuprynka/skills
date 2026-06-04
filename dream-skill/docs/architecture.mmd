@@ -1,0 +1,80 @@
+---
+title: "dream-skill — on-demand batch sync"
+config:
+  theme: base
+  themeVariables:
+    fontFamily: 'Inter, -apple-system, Segoe UI, Helvetica, sans-serif'
+    fontSize: 14px
+    lineColor: '#94a3b8'
+  flowchart:
+    curve: basis
+    nodeSpacing: 45
+    rankSpacing: 55
+    padding: 8
+---
+flowchart TB
+
+  T(["/dream-skill<br/>--dry-run · --since/--all · --ignore"]):::trig
+  PRE["0 · Pre-flight<br/>resolve scripts · parse config.toml"]:::trig
+
+  subgraph BATCH["per batch"]
+    direction TB
+    FIND["1 · FIND — find-chats.sh<br/>marker + window → transcript batches<br/>default 7d · --since · --all · private excluded"]:::batch
+    MAP["2 · MAP — 1 subagent / chat (isolated)<br/>extract candidate facts · A=write B/C=drop D/E=queue"]:::batch
+    REDUCE["3 · REDUCE — structural merge (no LLM)<br/>dedup exact · confidence promote only"]:::batch
+  end
+
+  subgraph CAND["per candidate fact (1:1)"]
+    direction TB
+    ROUTE{"4 · ROUTE<br/>nav-context + ROUTING.md<br/>status?"}:::route
+    READ["5b · READ PAGE<br/>vaultRoot/page → read target<br/>(empty if new)"]:::route
+    RECON["5c · RECONCILE<br/>candidate vs target_page<br/>→ action"]:::route
+  end
+
+  APPLY{"7 · APPLY — apply-decision.sh<br/>action → write mode<br/>(dry-run: write nothing)"}:::apply
+
+  VAULT[("Obsidian vault pages<br/>+ wiki/index.md + undo log")]:::store
+  QUEUE[("queue/pending.md<br/>destructive · uncertain · brainstormed")]:::store
+  REVIEW{{"6 · REVIEW — terminal<br/>a / e / s / d / q"}}:::review
+  GAPS[/"routing-gaps.log"/]:::muted
+  SKIP(["drop — Skipped"]):::muted
+  RECEIPT[/"8 · RECEIPT — write-receipt.sh<br/>reports_dir + index<br/>Written · Superseded · Queued · Skipped"/]:::receipt
+  MARKER[("9 · last-run marker<br/>advance iff APPLY ok<br/>skipped in dry-run")]:::store
+
+  %% spine
+  T --> PRE --> FIND
+  FIND -->|"1 marker → N transcripts<br/>(empty → receipt 0)"| MAP
+  MAP -->|"N chats → many candidates"| REDUCE
+  REDUCE -->|"many → fewer unique"| ROUTE
+
+  %% route branch
+  ROUTE -->|routed| READ
+  ROUTE -->|"ambiguous / gap"| QUEUE
+  ROUTE -.->|log| GAPS
+  READ --> RECON --> APPLY
+
+  %% reconcile action fan-out
+  APPLY -->|"new(high) → append<br/>supersede → replace<br/>contradict → stale old"| VAULT
+  APPLY -->|"duplicate"| SKIP
+  APPLY -->|"needs_review:<br/>new(low/med) · supersede · contradict-new"| QUEUE
+
+  %% review loop
+  QUEUE --> REVIEW
+  REVIEW -->|approved| VAULT
+  REVIEW -->|discarded| SKIP
+
+  %% observability tail
+  APPLY -->|"run-summary facts"| RECEIPT
+  RECEIPT --> MARKER
+
+  classDef trig fill:#4f46e5,stroke:#3730a3,color:#ffffff;
+  classDef batch fill:#0ea5e9,stroke:#0369a1,color:#ffffff;
+  classDef route fill:#14b8a6,stroke:#0f766e,color:#ffffff;
+  classDef apply fill:#f59e0b,stroke:#b45309,color:#3b1d00;
+  classDef store fill:#e2e8f0,stroke:#64748b,color:#0f172a;
+  classDef review fill:#f97316,stroke:#c2410c,color:#ffffff;
+  classDef receipt fill:#a855f7,stroke:#7e22ce,color:#ffffff;
+  classDef muted fill:#f1f5f9,stroke:#cbd5e1,color:#475569;
+
+  style BATCH fill:#f8fafc,stroke:#e2e8f0,color:#475569
+  style CAND fill:#f8fafc,stroke:#e2e8f0,color:#475569

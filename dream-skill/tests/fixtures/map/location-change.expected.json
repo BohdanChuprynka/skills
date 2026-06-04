@@ -1,0 +1,11 @@
+[
+  {
+    "content": "Moving to New York next month for a job offer",
+    "confidence": "high",
+    "source_chat": "location-change.input.jsonl",
+    "source_date": "2026-06-01",
+    "type": "world-fact",
+    "evidence": "I'm moving to New York next month. I got a job offer there.",
+    "suggested_section": "Location"
+  }
+]

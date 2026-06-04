@@ -1,0 +1,24 @@
+{
+  "_fixture": "client-person",
+  "_description": "A named person in a prospect/deal context → work vault pipeline",
+  "input": {
+    "candidate": {
+      "content": "Marcus Chen expressed interest in the AI automation package, follow-up scheduled for June 10",
+      "type": "observation",
+      "confidence": "high",
+      "evidence": "Marcus Chen said he's interested, wants a follow-up call",
+      "source_chat": "ghi789",
+      "source_date": "2026-06-03",
+      "suggested_section": "Pipeline"
+    },
+    "routing_context": "(elided)"
+  },
+  "expected_output": {
+    "status": "routed",
+    "vault": "work",
+    "page": "wiki/cycles/cycle-current/pipeline.md",
+    "section": "Pipeline",
+    "routing_confidence": "high"
+  },
+  "routing_rationale": "Fact names a person in a deal/outreach context. ROUTING.md rule: 'a person → client/prospect → work/pipeline'. work vault CLAUDE.md: active cycle pipeline page."
+}
