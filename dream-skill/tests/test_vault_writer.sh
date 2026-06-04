@@ -195,5 +195,68 @@ echo "$OUT" | grep -q "skipped: 1" || fail "apply-undo should skip a replace who
 grep -q "^- unrelated line$" "$VAULT/wiki/gone.md" || fail "apply-undo corrupted an unrelated page"
 echo "PASS: apply-undo skips already-reverted replace"
 
+# Test 14: --dry-run append → page byte-identical, undo log not created/changed
+DRYRUN_PAGE="$VAULT/wiki/dryrun.md"
+cat > "$DRYRUN_PAGE" <<'EOF'
+# DryRun
+
+## Notes
+
+- existing line
+EOF
+
+BEFORE_HASH=$(shasum -a 256 "$DRYRUN_PAGE" | awk '{print $1}')
+BEFORE_UNDO_LINES=0
+DRYRUN_UNDO="$VAULT/undo-dryrun.jsonl"
+[ -f "$DRYRUN_UNDO" ] && BEFORE_UNDO_LINES=$(wc -l < "$DRYRUN_UNDO")
+
+"$WRITER" \
+  --vault    "$VAULT" \
+  --page     "wiki/dryrun.md" \
+  --section  "Notes" \
+  --content  "new dry-run line" \
+  --mode     append \
+  --undo-log "$DRYRUN_UNDO" \
+  --dry-run
+
+AFTER_HASH=$(shasum -a 256 "$DRYRUN_PAGE" | awk '{print $1}')
+[ "$BEFORE_HASH" = "$AFTER_HASH" ] || fail "--dry-run append: page was modified (hashes differ)"
+AFTER_UNDO_LINES=0
+[ -f "$DRYRUN_UNDO" ] && AFTER_UNDO_LINES=$(wc -l < "$DRYRUN_UNDO")
+[ "$BEFORE_UNDO_LINES" -eq "$AFTER_UNDO_LINES" ] || fail "--dry-run append: undo log was written (lines before=$BEFORE_UNDO_LINES after=$AFTER_UNDO_LINES)"
+echo "PASS: --dry-run append leaves page byte-identical, undo log untouched"
+
+# Test 15: --dry-run replace → page byte-identical, undo log not created/changed
+DRYRUN_REPLACE_PAGE="$VAULT/wiki/dryrun-replace.md"
+cat > "$DRYRUN_REPLACE_PAGE" <<'EOF'
+# DryRunReplace
+
+## Status
+
+- lives in Berlin
+EOF
+
+BEFORE_HASH=$(shasum -a 256 "$DRYRUN_REPLACE_PAGE" | awk '{print $1}')
+DRYRUN_REPLACE_UNDO="$VAULT/undo-dryrun-replace.jsonl"
+BEFORE_UNDO_LINES=0
+[ -f "$DRYRUN_REPLACE_UNDO" ] && BEFORE_UNDO_LINES=$(wc -l < "$DRYRUN_REPLACE_UNDO")
+
+"$WRITER" \
+  --vault       "$VAULT" \
+  --page        "wiki/dryrun-replace.md" \
+  --section     "Status" \
+  --content     "lives in Munich" \
+  --mode        replace \
+  --old-content "lives in Berlin" \
+  --undo-log    "$DRYRUN_REPLACE_UNDO" \
+  --dry-run
+
+AFTER_HASH=$(shasum -a 256 "$DRYRUN_REPLACE_PAGE" | awk '{print $1}')
+[ "$BEFORE_HASH" = "$AFTER_HASH" ] || fail "--dry-run replace: page was modified (hashes differ)"
+AFTER_UNDO_LINES=0
+[ -f "$DRYRUN_REPLACE_UNDO" ] && AFTER_UNDO_LINES=$(wc -l < "$DRYRUN_REPLACE_UNDO")
+[ "$BEFORE_UNDO_LINES" -eq "$AFTER_UNDO_LINES" ] || fail "--dry-run replace: undo log was written"
+echo "PASS: --dry-run replace leaves page byte-identical, undo log untouched"
+
 echo
 echo "All vault-writer.sh tests passed."

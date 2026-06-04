@@ -22,7 +22,8 @@
 #   apply-decision.sh \
 #     --vault <vault-root> \
 #     --decision <path-to-decision.json> \
-#     --undo-log <path-to-undo.jsonl>
+#     --undo-log <path-to-undo.jsonl> \
+#     [--dry-run]
 
 set -euo pipefail
 
@@ -33,6 +34,7 @@ QUEUE_SH="$SCRIPT_DIR/queue.sh"
 VAULT=""
 DECISION=""
 UNDO_LOG=""
+DRY_RUN=0
 
 die() { echo "apply-decision: $*" >&2; exit 1; }
 
@@ -41,6 +43,7 @@ while [ $# -gt 0 ]; do
     --vault)    VAULT="$2";    shift 2 ;;
     --decision) DECISION="$2"; shift 2 ;;
     --undo-log) UNDO_LOG="$2"; shift 2 ;;
+    --dry-run)  DRY_RUN=1;     shift ;;
     *) die "unknown arg: $1" ;;
   esac
 done
@@ -78,6 +81,9 @@ _bucket_for_confidence() {
   esac
 }
 
+# Build optional --dry-run flag to pass down to sub-tools
+_dry_flag() { [ "$DRY_RUN" = "1" ] && echo "--dry-run" || true; }
+
 # --- Dispatch ---
 case "$action" in
 
@@ -85,12 +91,16 @@ case "$action" in
     if [ "$needs_review" = "true" ]; then
       # Low/medium confidence fact: queue only, do NOT write to vault
       bucket=$(_bucket_for_confidence "$candidate_confidence")
-      "$QUEUE_SH" append \
-        --bucket "$bucket" \
-        --title  "$content" \
-        --evidence "$rationale" \
-        --confidence "$candidate_confidence" \
-        --target "${VAULT}/${page}#${section}"
+      if [ "$DRY_RUN" = "1" ]; then
+        echo "apply-decision [dry-run]: would queue action=new bucket=$bucket title='$content' target=${VAULT}/${page}#${section}"
+      else
+        "$QUEUE_SH" append \
+          --bucket "$bucket" \
+          --title  "$content" \
+          --evidence "$rationale" \
+          --confidence "$candidate_confidence" \
+          --target "${VAULT}/${page}#${section}"
+      fi
     else
       # High-confidence new fact: append directly to vault
       "$WRITER" \
@@ -100,7 +110,8 @@ case "$action" in
         --content  "$content" \
         --mode     append \
         --undo-log "$UNDO_LOG" \
-        --no-index-update
+        --no-index-update \
+        $(_dry_flag)
     fi
     ;;
 
@@ -118,13 +129,18 @@ case "$action" in
       --mode        replace \
       --old-content "$old_content" \
       --undo-log    "$UNDO_LOG" \
-      --no-index-update
-    "$QUEUE_SH" append \
-      --bucket destructive \
-      --title  "$content" \
-      --evidence "$rationale" \
-      --confidence "$candidate_confidence" \
-      --target "${VAULT}/${page}#${section}"
+      --no-index-update \
+      $(_dry_flag)
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "apply-decision [dry-run]: would queue action=supersede bucket=destructive title='$content' target=${VAULT}/${page}#${section}"
+    else
+      "$QUEUE_SH" append \
+        --bucket destructive \
+        --title  "$content" \
+        --evidence "$rationale" \
+        --confidence "$candidate_confidence" \
+        --target "${VAULT}/${page}#${section}"
+    fi
     ;;
 
   contradict)
@@ -139,14 +155,19 @@ case "$action" in
       --mode        stale \
       --old-content "$old_content" \
       --undo-log    "$UNDO_LOG" \
-      --no-index-update
+      --no-index-update \
+      $(_dry_flag)
     # Queue the new contradicting content for human review (do NOT write to vault)
-    "$QUEUE_SH" append \
-      --bucket destructive \
-      --title  "$content" \
-      --evidence "$rationale" \
-      --confidence "$candidate_confidence" \
-      --target "${VAULT}/${page}#${section}"
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "apply-decision [dry-run]: would queue action=contradict bucket=destructive title='$content' target=${VAULT}/${page}#${section}"
+    else
+      "$QUEUE_SH" append \
+        --bucket destructive \
+        --title  "$content" \
+        --evidence "$rationale" \
+        --confidence "$candidate_confidence" \
+        --target "${VAULT}/${page}#${section}"
+    fi
     ;;
 
   *)

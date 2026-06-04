@@ -22,7 +22,8 @@
 #     [--undo-log <path>] \
 #     [--index-label <text>] \
 #     [--index-desc <text>] \
-#     [--no-index-update]
+#     [--no-index-update] \
+#     [--dry-run]
 
 set -euo pipefail
 
@@ -36,6 +37,7 @@ INDEX_DESC=""
 UPDATE_INDEX=1
 MODE="append"
 OLD_CONTENT=""
+DRY_RUN=0
 
 die() { echo "vault-writer: $*" >&2; exit 1; }
 
@@ -51,6 +53,7 @@ while [ $# -gt 0 ]; do
     --no-index-update) UPDATE_INDEX=0; shift ;;
     --mode) MODE="$2"; shift 2 ;;
     --old-content) OLD_CONTENT="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
     *) die "unknown arg: $1" ;;
   esac
 done
@@ -70,6 +73,15 @@ if [ "$MODE" != "append" ]; then
 fi
 
 PAGE_PATH="$VAULT/$PAGE"
+
+# --- dry-run: print intended change and exit without any file mutation ------
+if [ "$DRY_RUN" = "1" ]; then
+  echo "vault-writer [dry-run]: mode=$MODE page=$PAGE_PATH section=$SECTION"
+  echo "  content:     $CONTENT"
+  [ -n "$OLD_CONTENT" ] && echo "  old_content: $OLD_CONTENT"
+  exit 0
+fi
+
 mkdir -p "$(dirname "$PAGE_PATH")"
 
 # --- per-page mutex (mkdir is atomic on POSIX) -----------------------------

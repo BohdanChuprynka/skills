@@ -178,3 +178,85 @@ grep -qi "brainstormed" "$QUEUE_FILE" \
 echo "PASS: new needs_review:true (low confidence) → not written, queued in brainstormed bucket"
 
 rm -f "$QUEUE_FILE"
+
+# --- Test 6: --dry-run new → vault page byte-identical, queue file untouched ---
+
+cat > "$VAULT/wiki/skills.md" <<'EOF'
+# Skills
+
+## Certifications
+
+- holds CKAD cert
+EOF
+
+cat > "$DECISION_FILE" <<'EOF'
+{
+  "action": "new",
+  "mode": "append",
+  "target": { "vault": "me", "page": "wiki/skills.md", "section": "Certifications" },
+  "content": "dry-run new fact",
+  "candidate_confidence": "high",
+  "needs_review": false,
+  "rationale": "Test dry-run new."
+}
+EOF
+
+DRYRUN_QUEUE=$(mktemp "/tmp/dream-dryrun-queue-XXXXXX.md")
+export DREAM_QUEUE_FILE="$DRYRUN_QUEUE"
+
+BEFORE_PAGE_HASH=$(shasum -a 256 "$VAULT/wiki/skills.md" | awk '{print $1}')
+BEFORE_QUEUE_LINES=$(wc -l < "$DRYRUN_QUEUE")
+
+"$APPLY" --vault "$VAULT" --decision "$DECISION_FILE" --undo-log "$UNDO_LOG" --dry-run
+
+AFTER_PAGE_HASH=$(shasum -a 256 "$VAULT/wiki/skills.md" | awk '{print $1}')
+[ "$BEFORE_PAGE_HASH" = "$AFTER_PAGE_HASH" ] \
+  || fail "--dry-run new: vault page was modified (hashes differ)"
+AFTER_QUEUE_LINES=$(wc -l < "$DRYRUN_QUEUE")
+[ "$BEFORE_QUEUE_LINES" -eq "$AFTER_QUEUE_LINES" ] \
+  || fail "--dry-run new: queue file was written"
+echo "PASS: --dry-run new → vault page byte-identical, queue untouched"
+
+rm -f "$DRYRUN_QUEUE"
+
+# --- Test 7: --dry-run supersede → vault page byte-identical, queue file untouched ---
+
+cat > "$VAULT/wiki/bio.md" <<'EOF'
+# Bio
+
+## Bio
+
+- lives in Berlin
+- originally from Kyiv
+EOF
+
+cat > "$DECISION_FILE" <<'EOF'
+{
+  "action": "supersede",
+  "mode": "replace",
+  "target": { "vault": "me", "page": "wiki/bio.md", "section": "Bio" },
+  "old_content": "lives in Berlin",
+  "content": "lives in Munich (moved 2026-06)",
+  "candidate_confidence": "high",
+  "needs_review": true,
+  "rationale": "Test dry-run supersede."
+}
+EOF
+
+DRYRUN_QUEUE2=$(mktemp "/tmp/dream-dryrun-queue2-XXXXXX.md")
+export DREAM_QUEUE_FILE="$DRYRUN_QUEUE2"
+
+BEFORE_PAGE_HASH=$(shasum -a 256 "$VAULT/wiki/bio.md" | awk '{print $1}')
+BEFORE_QUEUE_LINES=$(wc -l < "$DRYRUN_QUEUE2")
+
+"$APPLY" --vault "$VAULT" --decision "$DECISION_FILE" --undo-log "$UNDO_LOG" --dry-run
+
+AFTER_PAGE_HASH=$(shasum -a 256 "$VAULT/wiki/bio.md" | awk '{print $1}')
+[ "$BEFORE_PAGE_HASH" = "$AFTER_PAGE_HASH" ] \
+  || fail "--dry-run supersede: vault page was modified (hashes differ)"
+AFTER_QUEUE_LINES=$(wc -l < "$DRYRUN_QUEUE2")
+[ "$BEFORE_QUEUE_LINES" -eq "$AFTER_QUEUE_LINES" ] \
+  || fail "--dry-run supersede: queue file was written"
+echo "PASS: --dry-run supersede → vault page byte-identical, queue untouched"
+
+rm -f "$DRYRUN_QUEUE2"
