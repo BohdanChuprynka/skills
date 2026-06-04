@@ -131,4 +131,22 @@ echo "$OUT7B" | grep -q "recent.jsonl" || fail "corrupted marker: recent chat (2
 echo "$OUT7B" | grep -q "ancient.jsonl" && fail "corrupted marker: ancient chat (60d) included — epoch-0 fallback triggered (WRONG)"
 echo "PASS: corrupted marker falls back to 7-day window, never epoch-0"
 
+# ── test 8: marker written by orchestrator is read back on next invocation ───
+MARKER_ROUNDTRIP_DIR=$(mktemp -d "/tmp/dream-marker-rt-XXXXXX")
+# Simulate orchestrator advancing marker to 3 days ago
+THREE_DAYS=$(date -v "-3d" +%Y-%m-%d 2>/dev/null || date --date="3 days ago" +%Y-%m-%d)
+printf '%s\n' "$THREE_DAYS" > "$MARKER_ROUNDTRIP_DIR/last-run"
+
+make_chat "$PROJ_ROOT/proj-d/new.jsonl" 1    # 1 day ago → inside marker window
+make_chat "$PROJ_ROOT/proj-d/just-old.jsonl" 5  # 5 days ago → outside marker window (3d cutoff)
+
+OUT8=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+       DREAM_MARKER_DIR="$MARKER_ROUNDTRIP_DIR" \
+       "$FINDER" 2>/dev/null)
+rm -rf "$MARKER_ROUNDTRIP_DIR"
+
+echo "$OUT8" | grep -q "new.jsonl"      || fail "marker round-trip: recent chat missing"
+echo "$OUT8" | grep -q "just-old.jsonl" && fail "marker round-trip: chat older than marker included"
+echo "PASS: marker round-trip (orchestrator write → find-chats read)"
+
 echo "All find-chats.sh tests passed."
