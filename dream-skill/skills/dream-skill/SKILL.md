@@ -391,3 +391,59 @@ When invoked as `/dream-skill --unignore`:
 - `tests/fixtures/map/` — golden fixtures for MAP extraction (manual eval only, not CI)
 
 <!-- Plans 2 and 3 append ## Routing and ## Reconciliation sections below this line. -->
+
+---
+
+## Routing
+
+> **When to run:** once per candidate fact, after MAP produces a `candidate-fact` JSON object and before the Reconciliation step.
+
+### Inputs
+
+1. **`candidate-fact` JSON** — the object from MAP (fields: `content`, `type`, `confidence`, `evidence`, `source_chat`, `source_date`, `suggested_section`).
+2. **`nav-context` block** — the output of `scripts/build-nav-context.sh` (reads `~/.claude/dream-skill/config.toml` by default; override with `--config <toml-path>` for tests). Contains, for each vault: 1-line purpose (from config `description`), `wiki/index.md` entries (up to 40 lines), and a dir-scan listing of pages.
+3. **`ROUTING.md`** — the disambiguation + volatility supplement (read from the dream-skill root).
+
+### Routing procedure (follow in order)
+
+**Step R1 — Read ROUTING.md §1 disambiguation rules.** Apply the first matching rule to the candidate fact. Note which rule fired and why.
+
+**Step R2 — Confirm the vault in nav-context.** After picking the vault, scan the nav-context block for that vault's `index` and `pages on disk`. Identify the single most specific page that matches the candidate. The page must exist either in the index entries or the dir scan. If no page exists yet → do NOT invent a path; emit `status: gap`.
+
+**Step R3 — Determine the section.** Use `suggested_section` from the candidate if it matches a heading that exists or would logically exist in the target page. Otherwise, infer from the vault CLAUDE.md's page format (visible in the nav-context purpose line or index entry description).
+
+**Step R4 — Apply confidence calibration from ROUTING.md §4.**
+
+**Step R5 — Check for ambiguity.** If after R1–R4 two or more vault+page pairs remain equally plausible with no disambiguation rule resolving them → emit `status: ambiguous`.
+
+**Step R6 — Check for gap.** If no vault rule matched in R1 and no vault page is a reasonable fit → emit `status: gap`.
+
+**Step R7 — If status is `ambiguous` or `gap`:** append one line to the routing-gaps log in `ROUTING.md` using this format:
+```
+- <source_date> | <content truncated to 80 chars> | <reason> | proposed-rule: <optional>
+```
+
+### Output format
+
+Emit **one JSON object** and nothing else:
+
+```json
+{
+  "status": "routed",
+  "vault": "<vault-name>",
+  "page": "<relative-path-from-vault-root>",
+  "section": "<section heading>",
+  "routing_confidence": "high | medium | low"
+}
+```
+
+For `ambiguous` or `gap`, set `vault`, `page`, and `section` to `null`.
+
+### Hard constraints
+
+- Output fields are exactly `status`, `vault`, `page`, `section`, `routing_confidence` — no extras (`canonical_path`, `routing_status`, `needs_review`, etc.).
+- `status` values are exactly `"routed"`, `"ambiguous"`, or `"gap"` — no other strings.
+- `page` must be a relative path from the vault root. Never an absolute path.
+- The page must resolve to a CANONICAL page that exists (per nav-context index or dir scan) or be `null`. Never invent a path.
+- For `ambiguous` or `gap`: `vault`, `page`, and `section` are always `null`; append to the routing-gaps log (Step R7).
+- `routing_confidence` is one of `"high"`, `"medium"`, or `"low"` — calibrated per ROUTING.md §4.
