@@ -22,12 +22,14 @@ LIVE_TESTS=(
   test_map_harness.sh        # MAP   (validate_candidates harness)
   test_build_nav_context.sh  # ROUTE (nav-context builder)
   test_vault_writer.sh       # APPLY (write + --mode + --dry-run)
+  test_path_guard.sh         # APPLY safety (vault-root confinement)
   test_apply_decision.sh     # APPLY (action→mode→writer/queue mapping)
   test_queue.sh              # REVIEW queue
   test_undo.sh               # undo / rollback
   test_write_receipt.sh      # RECEIPT
   test_private_state.sh      # FIND  private (--ignore) resolution
   test_private_guard.sh      # private opt-out guard
+  test_advance_marker.sh     # MARKER advance (dry-run no-op, I3)
   test_integration_smoke.sh  # E2E: FIND → apply(dry-run) → receipt
 )
 

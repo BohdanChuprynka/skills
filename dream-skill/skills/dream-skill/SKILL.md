@@ -134,7 +134,7 @@ fi
 DREAM_SKILL_HOME="$(dirname "$DREAM_SCRIPTS_DIR")"
 ROUTING_MD="$DREAM_SKILL_HOME/ROUTING.md"
 # Verify all helpers exist + executable; if any missing, fail loud (Rule 3) and stop.
-for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh; do
+for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh advance-marker.sh; do
   [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; }
 done
 ```
@@ -324,13 +324,10 @@ Only after a batch's APPLY + RECEIPT completes without fatal error — **and nev
 ```bash
 # A dry-run is a zero-mutation preview: it must NOT advance the marker, or the next
 # real run would silently skip the previewed window (see REVIEW-2026-06-04 I3).
-if [ "${DRY_RUN:-0}" = "1" ]; then
-  : # dry-run — marker intentionally left unchanged
-else
-  MARKER_DIR="${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}"
-  mkdir -p "$MARKER_DIR"
-  printf '%s\n' "<batch_end_date>" > "$MARKER_DIR/last-run"
-fi
+# advance-marker.sh owns this guard (no-op on --dry-run); tested in test_advance_marker.sh.
+MARKER_FLAGS=""
+[ "${DRY_RUN:-0}" = "1" ] && MARKER_FLAGS="--dry-run"
+"$DREAM_SCRIPTS_DIR/advance-marker.sh" --date "<batch_end_date>" $MARKER_FLAGS
 ```
 
 If `--dry-run` is active, do NOT advance the marker under any circumstance. If the run failed during APPLY (vault-writer exited non-zero), also do NOT advance the marker. The next invocation will re-process the same window; vault-writer's idempotency ensures safe re-runs.

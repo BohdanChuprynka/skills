@@ -27,6 +27,10 @@
 
 set -euo pipefail
 
+# Shared path-confinement guard (vault page paths originate from untrusted LLM output).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/path-guard.sh"
+
 VAULT=""
 PAGE=""
 SECTION=""
@@ -72,6 +76,9 @@ if [ "$MODE" != "append" ]; then
   [ -n "$OLD_CONTENT" ] || die "--mode $MODE requires --old-content"
 fi
 
+# Confine the write to the vault root — $PAGE comes from LLM routing output (untrusted).
+assert_within_vault "$VAULT" "$PAGE"
+
 PAGE_PATH="$VAULT/$PAGE"
 
 # --- dry-run: print intended change and exit without any file mutation ------
@@ -106,6 +113,11 @@ while ! mkdir "$LOCK_PATH" 2>/dev/null; do
   sleep 0.1
 done
 trap 'rmdir "$LOCK_PATH" 2>/dev/null || true' EXIT
+
+# Defense-in-depth: never write THROUGH a symlinked page target. The guard already
+# rejects this, but the create-if-missing redirect below would otherwise follow a
+# symlink out of the vault, so refuse here too.
+[ -L "$PAGE_PATH" ] && die "refusing to write through symlinked page: $PAGE"
 
 # --- ensure page exists ----------------------------------------------------
 if [ ! -f "$PAGE_PATH" ]; then
@@ -213,8 +225,8 @@ if [ "$MODE" = "append" ] && [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ];
       # Log the index edit too
       if [ -n "$UNDO_LOG" ]; then
         ESC_LABEL=$(printf '%s' "$INDEX_LABEL" | sed 's/\\/\\\\/g; s/"/\\"/g')
-        printf '{"timestamp":"%s","index_file":"%s","line":"%s","action":"index_append"}\n' \
-          "$TS" "$INDEX_FILE" "$LINE" >> "$UNDO_LOG"
+        printf '{"timestamp":"%s","vault":"%s","index_file":"%s","line":"%s","action":"index_append"}\n' \
+          "$TS" "$VAULT" "$INDEX_FILE" "$LINE" >> "$UNDO_LOG"
       fi
     fi
   fi

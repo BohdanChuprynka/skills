@@ -279,5 +279,42 @@ TITLE_LINE=$(head -1 "$NEW_PAGE_PATH")
   || fail "new-page creation: title line is '$TITLE_LINE' (expected '# Auto created page'; awk capitalize broken?)"
 echo "PASS: new-page auto-created with correctly capitalized title (portable awk)"
 
+# Test 17: path-traversal via '..' is refused — a hallucinated/malicious --page must
+# not escape the vault root (.target.page is LLM-generated). See path-guard.sh.
+OUTSIDE=$(mktemp -d "/tmp/dream-outside-XXXXXX")
+printf '# victim\n\n## S\n- untouched\n' > "$OUTSIDE/victim.md"
+ESCAPE_REL="../$(basename "$OUTSIDE")/victim.md"   # ../dream-outside-XXXX/victim.md from $VAULT
+if "$WRITER" --vault "$VAULT" --page "$ESCAPE_REL" --section "S" \
+     --content "PWNED" --undo-log "$UNDO_LOG" 2>/dev/null; then
+  fail "path-traversal: writer accepted a '..' page escaping the vault"
+fi
+grep -q "PWNED" "$OUTSIDE/victim.md" && fail "path-traversal: writer modified a file OUTSIDE the vault"
+grep -q "untouched" "$OUTSIDE/victim.md" || fail "path-traversal: victim file corrupted"
+rm -rf "$OUTSIDE"
+echo "PASS: refuses '..' page paths that escape the vault root"
+
+# Test 18: absolute --page is refused (must be relative to the vault root)
+ABS_TARGET="/tmp/dream-abs-escape-$$.md"
+rm -f "$ABS_TARGET"
+if "$WRITER" --vault "$VAULT" --page "$ABS_TARGET" --section "S" \
+     --content "PWNED" 2>/dev/null; then
+  fail "path-traversal: writer accepted an absolute --page"
+fi
+[ -f "$ABS_TARGET" ] && { rm -f "$ABS_TARGET"; fail "path-traversal: writer created an absolute-path file"; }
+echo "PASS: refuses absolute page paths"
+
+# Test 19: a symlinked leaf page target is refused — the create redirect must NOT
+# follow the symlink and write outside the vault (the round-3 escape).
+OUTL=$(mktemp -d "/tmp/dream-leaf-XXXXXX")
+ln -s "$OUTL/escaped.md" "$VAULT/wiki/leaf-escape.md"
+if "$WRITER" --vault "$VAULT" --page "wiki/leaf-escape.md" --section "S" \
+     --content "PWNED" --no-index-update 2>/dev/null; then
+  rm -f "$VAULT/wiki/leaf-escape.md"; rm -rf "$OUTL"
+  fail "leaf-symlink: writer wrote through a symlinked page target"
+fi
+[ -e "$OUTL/escaped.md" ] && { rm -f "$VAULT/wiki/leaf-escape.md"; rm -rf "$OUTL"; fail "leaf-symlink: created a file OUTSIDE the vault"; }
+rm -f "$VAULT/wiki/leaf-escape.md"; rm -rf "$OUTL"
+echo "PASS: refuses a symlinked leaf page target (no escape)"
+
 echo
 echo "All vault-writer.sh tests passed."

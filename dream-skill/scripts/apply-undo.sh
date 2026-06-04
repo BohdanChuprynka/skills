@@ -13,6 +13,10 @@
 
 set -euo pipefail
 
+# Shared path-confinement guard (defends against a tampered/corrupt undo log).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/path-guard.sh"
+
 die() { echo "apply-undo: $*" >&2; exit 1; }
 
 UNDO_LOG=""
@@ -46,6 +50,10 @@ while IFS= read -r line; do
     append)
       VAULT=$(echo "$line" | jq -r '.vault')
       PAGE=$(echo "$line" | jq -r '.page')
+      if ! ( assert_within_vault "$VAULT" "$PAGE" ) 2>/dev/null; then
+        echo "apply-undo: skipping entry with unsafe path: $PAGE" >&2
+        SKIPPED=$((SKIPPED + 1)); continue
+      fi
       CONTENT=$(echo "$line" | jq -r '.content')
       PAGE_PATH="$VAULT/$PAGE"
       if [ -f "$PAGE_PATH" ]; then
@@ -60,6 +68,10 @@ while IFS= read -r line; do
     replace)
       VAULT=$(echo "$line" | jq -r '.vault')
       PAGE=$(echo "$line" | jq -r '.page')
+      if ! ( assert_within_vault "$VAULT" "$PAGE" ) 2>/dev/null; then
+        echo "apply-undo: skipping entry with unsafe path: $PAGE" >&2
+        SKIPPED=$((SKIPPED + 1)); continue
+      fi
       OLD=$(echo "$line" | jq -r '.old_content')
       NEW=$(echo "$line" | jq -r '.content')
       PAGE_PATH="$VAULT/$PAGE"
@@ -76,6 +88,22 @@ while IFS= read -r line; do
       ;;
     index_append)
       INDEX_FILE=$(echo "$line" | jq -r '.index_file')
+      IDX_VAULT=$(echo "$line" | jq -r '.vault // empty')
+      # MANDATORY confinement: index_file must resolve UNDER its stamped vault root.
+      # No best-effort fallback — an entry with no/unresolvable vault, or one resolving
+      # outside it, is skipped (never applied). vault-writer always stamps .vault here,
+      # so this rejects only tampered/corrupt entries.
+      IDX_VROOT=""
+      [ -n "$IDX_VAULT" ] && IDX_VROOT="$(cd "$IDX_VAULT" 2>/dev/null && pwd -P || true)"
+      IDX_DIR="$(cd "$(dirname "$INDEX_FILE")" 2>/dev/null && pwd -P || true)"
+      if [ -z "$IDX_VROOT" ] || [ -z "$IDX_DIR" ]; then
+        echo "apply-undo: skipping index entry (missing/unresolvable vault confinement): $INDEX_FILE" >&2
+        SKIPPED=$((SKIPPED + 1)); continue
+      fi
+      case "$IDX_DIR/" in
+        "$IDX_VROOT"/*) ;;
+        *) echo "apply-undo: skipping index entry outside its vault: $INDEX_FILE" >&2; SKIPPED=$((SKIPPED + 1)); continue ;;
+      esac
       LINE_TEXT=$(echo "$line" | jq -r '.line')
       if [ -f "$INDEX_FILE" ]; then
         grep -Fxv -- "$LINE_TEXT" "$INDEX_FILE" > "$INDEX_FILE.tmp" && mv "$INDEX_FILE.tmp" "$INDEX_FILE"
