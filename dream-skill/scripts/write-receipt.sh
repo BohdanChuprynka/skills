@@ -64,10 +64,10 @@ INDEX_FILE="$RUNS_DIR/index.md"
 # Superseded = review_status=="written" AND action=="contradict"
 # Queued     = review_status=="queued"
 # Skipped    = action=="duplicate" (or review_status=="skipped")
-N_WRITTEN=$(printf '%s' "$SUMMARY" | jq '[.facts[] | select(.review_status == "written" and (.action == "new" or .action == "supersede"))] | length')
-N_SUPERSEDED=$(printf '%s' "$SUMMARY" | jq '[.facts[] | select(.review_status == "written" and .action == "contradict")] | length')
-N_QUEUED=$(printf '%s' "$SUMMARY"    | jq '[.facts[] | select(.review_status == "queued")] | length')
-N_SKIPPED=$(printf '%s' "$SUMMARY"   | jq '[.facts[] | select(.action == "duplicate" or .review_status == "skipped")] | length')
+N_WRITTEN=$(printf '%s' "$SUMMARY" | jq '[(.facts // [])[] | select(.review_status == "written" and (.action == "new" or .action == "supersede"))] | length')
+N_SUPERSEDED=$(printf '%s' "$SUMMARY" | jq '[(.facts // [])[] | select(.review_status == "written" and .action == "contradict")] | length')
+N_QUEUED=$(printf '%s' "$SUMMARY"    | jq '[(.facts // [])[] | select(.review_status == "queued")] | length')
+N_SKIPPED=$(printf '%s' "$SUMMARY"   | jq '[(.facts // [])[] | select(.action == "duplicate" or .review_status == "skipped")] | length')
 # N_WRITTEN_CLEAN = same as N_WRITTEN (Written section in index line)
 N_WRITTEN_CLEAN="$N_WRITTEN"
 
@@ -89,7 +89,7 @@ render_receipt() {
   # Written section (overview §8.8): review_status=="written" AND action IN (new, supersede)
   printf '## Written\n'
   printf '%s' "$SUMMARY" | jq -r --arg undo "$RUN_ID" '
-    .facts[] | select(.review_status == "written" and (.action == "new" or .action == "supersede"))
+    (.facts // [])[] | select(.review_status == "written" and (.action == "new" or .action == "supersede"))
     | if .action == "supersede" then
         "- \(.target | gsub("\\.md$";"") | "[[" + . + "]]") — replaced \"\(.old_content // "?")\" → \"\(.content)\" *(undo: \($undo))*"
       else
@@ -102,7 +102,7 @@ render_receipt() {
   # (placed before Superseded so that grep -A5 on Written does not spill into Superseded content)
   printf '## Skipped (duplicate / low-confidence)\n'
   printf '%s' "$SUMMARY" | jq -r '
-    .facts[] | select(.action == "duplicate" or .review_status == "skipped")
+    (.facts // [])[] | select(.action == "duplicate" or .review_status == "skipped")
     | "- \"\(.content)\" — already present in \(.target | gsub("\\.md$";"") | "[[" + . + "]]")"
   ' || true
   printf '\n'
@@ -110,7 +110,7 @@ render_receipt() {
   # Queued section (overview §8.8): review_status=="queued"
   printf '## Queued for review\n'
   printf '%s' "$SUMMARY" | jq -r '
-    .facts[] | select(.review_status == "queued")
+    (.facts // [])[] | select(.review_status == "queued")
     | "- \(.target | gsub("\\.md$";"") | "[[" + . + "]]") — \"\(.content)\" (\(.queue_bucket // "uncertain"); confidence: \(.confidence // "?")) → `queue.sh` bucket: \(.queue_bucket // "uncertain")"
   ' || true
   printf '\n'
@@ -120,7 +120,7 @@ render_receipt() {
   # (placed last so grep -A5 on Written cannot reach this section's content)
   printf '## Superseded\n'
   printf '%s' "$SUMMARY" | jq -r --arg undo "$RUN_ID" '
-    .facts[] | select(.review_status == "written" and .action == "contradict")
+    (.facts // [])[] | select(.review_status == "written" and .action == "contradict")
     | "- \(.target | gsub("\\.md$";"") | "[[" + . + "]]") — \"\(.content)\" marked stale *(undo: \($undo))*"
   ' || true
   printf '\n'

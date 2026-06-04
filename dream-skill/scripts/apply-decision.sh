@@ -57,15 +57,15 @@ done
 [ -x "$QUEUE_SH" ] || die "queue.sh not found or not executable: $QUEUE_SH"
 
 # --- Parse decision JSON ---
-action=$(jq -r '.action'               "$DECISION")
-vault_name=$(jq -r '.target.vault // ""' "$DECISION")
-page=$(jq -r '.target.page'            "$DECISION")
-section=$(jq -r '.target.section'      "$DECISION")
-content=$(jq -r '.content // ""'       "$DECISION")
-old_content=$(jq -r '.old_content // ""' "$DECISION")
-candidate_confidence=$(jq -r '.candidate_confidence' "$DECISION")
-needs_review=$(jq -r '.needs_review'   "$DECISION")
-rationale=$(jq -r '.rationale // ""'   "$DECISION")
+action=$(jq -r '.action // empty'               "$DECISION")
+vault_name=$(jq -r '.target.vault // ""'         "$DECISION")
+page=$(jq -r '.target.page // empty'             "$DECISION")
+section=$(jq -r '.target.section // empty'       "$DECISION")
+content=$(jq -r '.content // ""'                 "$DECISION")
+old_content=$(jq -r '.old_content // ""'         "$DECISION")
+candidate_confidence=$(jq -r '.candidate_confidence // empty' "$DECISION")
+needs_review=$(jq -r '.needs_review // empty'    "$DECISION")
+rationale=$(jq -r '.rationale // ""'             "$DECISION")
 
 [ -n "$action" ]  || die "decision missing .action"
 [ -n "$page" ]    || die "decision missing .target.page"

@@ -7,9 +7,7 @@
 #   - test_preprocess.sh / test_preprocess_gate.sh / test_report.sh
 #       → cover demoted v0.2 scripts (REDESIGN §5 "demote, don't delete"); kept on
 #         disk but NOT part of the on-demand pipeline.
-#   - test_check_pending.sh
-#       → the legacy SessionStart orphan-scanner hook (silent no-op on a clean v0.3
-#         install; see README Install). Wired but not pipeline.
+#   (test_check_pending.sh is now in LIVE_TESTS — it tests the last-run nudge hook)
 # (test_trigger.sh and test_e2e.sh were deleted — they tested the dropped SessionEnd
 #  trigger→preprocess auto-chain.)
 #
@@ -18,6 +16,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 LIVE_TESTS=(
+  test_check_pending.sh      # SessionStart nudge hook
   test_find_chats.sh         # FIND
   test_map_harness.sh        # MAP   (validate_candidates harness)
   test_build_nav_context.sh  # ROUTE (nav-context builder)
