@@ -14,8 +14,8 @@ version: 0.3.0
 | Invocation | Mode |
 |---|---|
 | `/dream-skill` | On-demand run: opens a terminal review session. Runs FIND → MAP → REDUCE → ROUTE → RECONCILE → REVIEW → APPLY → RECEIPT → MARKER. |
-| `/dream-skill --since <YYYY-MM-DD>` | Explicit window start override (passes `--since` to `scripts/find-chats.sh`). |
-| `/dream-skill --all` | Full-history backfill (weekly-batched; only after pipeline is trusted). Passes `--all` to `scripts/find-chats.sh`. |
+| `/dream-skill --since <YYYY-MM-DD>` | Explicit window start override (passes `--since` to `"$DREAM_SCRIPTS_DIR/find-chats.sh"`). |
+| `/dream-skill --all` | Full-history backfill (weekly-batched; only after pipeline is trusted). Passes `--all` to `"$DREAM_SCRIPTS_DIR/find-chats.sh"`. |
 | `/dream-skill --dry-run` | Run the full pipeline but write nothing to the vault. Receipt is printed to stdout only. |
 | `/dream-skill --ignore` | Mark THIS chat private — skip on next close. |
 | `/dream-skill --unignore` | Undo `--ignore` for this chat. |
@@ -104,29 +104,46 @@ The on-demand pipeline runs in the following steps. Each step is described below
 
 1. Check the `--dry-run` flag. If set, no vault writes occur; receipt is printed to stdout only. Thread `--dry-run` to `apply-decision.sh` (Plan 3 makes this mechanical).
 2. Check `--ignore` / `--unignore`. If present, update the private-state flag for the current transcript and exit. Do not proceed to FIND.
-3. Resolve `DREAM_SKILL_HOME` (plugin root). Verify the following scripts are present and executable:
-   - `scripts/find-chats.sh`
-   - `scripts/write-receipt.sh`
-   - `scripts/queue.sh`
-   - `scripts/vault-writer.sh`
+3. Resolve `DREAM_SCRIPTS_DIR` robustly — works as a marketplace plugin OR a bare `~/.claude/skills` symlink. Run:
+
+```bash
+# Resolve the scripts dir robustly — works as a marketplace plugin OR a bare ~/.claude/skills symlink.
+SKILL_DIR="<the base directory shown in this skill's invocation header>"
+REAL="$(cd -P "$SKILL_DIR" && pwd)"              # follow symlink to the real skill dir
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -x "$CLAUDE_PLUGIN_ROOT/scripts/find-chats.sh" ]; then
+  DREAM_SCRIPTS_DIR="$CLAUDE_PLUGIN_ROOT/scripts"            # plugin install
+elif [ -x "$REAL/scripts/find-chats.sh" ]; then
+  DREAM_SCRIPTS_DIR="$REAL/scripts"                          # self-contained skill dir
+elif [ -x "$REAL/../../scripts/find-chats.sh" ]; then
+  DREAM_SCRIPTS_DIR="$(cd -P "$REAL/../.." && pwd)/scripts"  # skills/<name>/ under a plugin root (current layout)
+else
+  echo "dream-skill: cannot locate scripts dir from $REAL — append to \$DREAM_ERROR_LOG and stop (Rule 3)." >&2
+fi
+DREAM_SKILL_HOME="$(dirname "$DREAM_SCRIPTS_DIR")"
+ROUTING_MD="$DREAM_SKILL_HOME/ROUTING.md"
+# Verify all helpers exist + executable; if any missing, fail loud (Rule 3) and stop.
+for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh; do
+  [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; }
+done
+```
 4. Parse `~/.claude/dream-skill/config.toml` (override via `${DREAM_CONFIG}` for tests) to resolve vault roots and `reports_dir`. Parse vault names from `^\[vaults\.<name>\]`, then `root =` per block; `reports_dir =` at top level. `config.toml` is the ONLY source of vault roots — no fallback to `CLAUDE.md` grep.
 
 ### Step 1 — FIND
 
 Run:
 ```bash
-scripts/find-chats.sh [--since <date>] [--all]
+"$DREAM_SCRIPTS_DIR/find-chats.sh" [--since <date>] [--all]
 ```
 
 Parse stdout into a list of `(batch_start, batch_end, [transcript_paths...])` tuples by consuming `BATCH:<start>:<end>` header lines.
 
-**No-marker prompt:** If `find-chats.sh` emits no BATCH header (marker missing and no flag), prompt the user:
+**No-marker prompt:** If `"$DREAM_SCRIPTS_DIR/find-chats.sh"` emits no BATCH header (marker missing and no flag), prompt the user:
 > No last-run marker found. Choose a window:
 > 1. Last 7 days (default — recommended for first run)
 > 2. Since <date> (enter a YYYY-MM-DD date)
 > 3. All history (--all; weekly-batched; only after pipeline is trusted)
 
-Then re-invoke `find-chats.sh` with the chosen flag.
+Then re-invoke `"$DREAM_SCRIPTS_DIR/find-chats.sh"` with the chosen flag.
 
 **Empty result:** If a batch contains zero transcript paths, skip to RECEIPT for that batch (write a receipt noting "0 chats in window") and advance the marker.
 
@@ -213,12 +230,12 @@ Each candidate receives a reconciliation decision per overview §4: `action`, `m
 
 ### Step 6 — REVIEW
 
-For all facts where `needs_review = true`, call `scripts/queue.sh append` with the appropriate bucket:
+For all facts where `needs_review = true`, call `"$DREAM_SCRIPTS_DIR/queue.sh" append` with the appropriate bucket:
 - `destructive` — D-bucket facts or `replace`/`stale` actions on high-stakes facts.
 - `uncertain` — E-bucket facts, ambiguous routing, or confidence < high.
 - `brainstormed` — facts that are plausible but not directly evidenced.
 
-Then invoke the existing terminal review flow from `queue.sh list` for the user to approve / edit / skip / discard each queued item. Facts approved during review are promoted to the APPLY list; discarded facts are removed from the queue.
+Then invoke the existing terminal review flow from `"$DREAM_SCRIPTS_DIR/queue.sh" list` for the user to approve / edit / skip / discard each queued item. Facts approved during review are promoted to the APPLY list; discarded facts are removed from the queue.
 
 **Review UI per entry:**
 
@@ -232,13 +249,13 @@ Then invoke the existing terminal review flow from `queue.sh list` for the user 
 [a]pprove  [e]dit  [s]kip  [d]iscard  [q]uit
 ```
 
-**Approve (`a`):** Promote to the APPLY list for this run. Call `vault-writer.sh` with resolved args + `--undo-log "$DREAM_UNDO_LOG"`. Call `queue.sh remove` to clear the entry. Append `[APPROVED]` line to `$DREAM_DAILY_LOG`.
+**Approve (`a`):** Promote to the APPLY list for this run. Call `"$DREAM_SCRIPTS_DIR/vault-writer.sh"` with resolved args + `--undo-log "$DREAM_UNDO_LOG"`. Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove` to clear the entry. Append `[APPROVED]` line to `$DREAM_DAILY_LOG`.
 
-**Edit (`e`) — free-form field editor:** Prompt: `What to edit? Comma-separated field:value pairs. Valid fields: title, evidence, target, confidence, bucket.` Parse and validate. Re-show full updated entry. Prompt `[a]pply / [r]e-edit / [d]iscard`. On apply: `queue.sh remove` (original key) + `queue.sh append` (new values). Do NOT auto-approve after edit.
+**Edit (`e`) — free-form field editor:** Prompt: `What to edit? Comma-separated field:value pairs. Valid fields: title, evidence, target, confidence, bucket.` Parse and validate. Re-show full updated entry. Prompt `[a]pply / [r]e-edit / [d]iscard`. On apply: `"$DREAM_SCRIPTS_DIR/queue.sh" remove` (original key) + `"$DREAM_SCRIPTS_DIR/queue.sh" append` (new values). Do NOT auto-approve after edit.
 
 **Skip (`s`):** Leave in queue. Advance.
 
-**Discard (`d`):** Call `queue.sh remove`. Advance. Append `[DISCARDED]` to `$DREAM_DAILY_LOG`.
+**Discard (`d`):** Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove`. Advance. Append `[DISCARDED]` to `$DREAM_DAILY_LOG`.
 
 **Quit (`q`):** Stop walking. Remaining entries stay queued. Jump to RECEIPT.
 
@@ -408,12 +425,12 @@ When invoked as `/dream-skill --unignore`:
 ### Inputs
 
 1. **`candidate-fact` JSON** — the object from MAP (fields: `content`, `type`, `confidence`, `evidence`, `source_chat`, `source_date`, `suggested_section`).
-2. **`nav-context` block** — the output of `scripts/build-nav-context.sh` (reads `~/.claude/dream-skill/config.toml` by default; override with `--config <toml-path>` for tests). Contains, for each vault: 1-line purpose (from config `description`), `wiki/index.md` entries (up to 40 lines), and a dir-scan listing of pages.
-3. **`ROUTING.md`** — the disambiguation + volatility supplement (read from the dream-skill root).
+2. **`nav-context` block** — the output of `"$DREAM_SCRIPTS_DIR/build-nav-context.sh"` (reads `~/.claude/dream-skill/config.toml` by default; override with `--config <toml-path>` for tests). Contains, for each vault: 1-line purpose (from config `description`), `wiki/index.md` entries (up to 40 lines), and a dir-scan listing of pages.
+3. **`ROUTING.md`** — the disambiguation + volatility supplement (read from `$ROUTING_MD`).
 
 ### Routing procedure (follow in order)
 
-**Step R1 — Read ROUTING.md §1 disambiguation rules.** Apply the first matching rule to the candidate fact. Note which rule fired and why.
+**Step R1 — Read `$ROUTING_MD` §1 disambiguation rules.** Apply the first matching rule to the candidate fact. Note which rule fired and why.
 
 **Step R2 — Confirm the vault in nav-context.** After picking the vault, scan the nav-context block for that vault's `index` and `pages on disk`. Identify the single most specific page that matches the candidate. The page must exist either in the index entries or the dir scan. If no page exists yet → do NOT invent a path; emit `status: gap`.
 
