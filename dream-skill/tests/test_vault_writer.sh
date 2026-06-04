@@ -258,5 +258,26 @@ AFTER_UNDO_LINES=0
 [ "$BEFORE_UNDO_LINES" -eq "$AFTER_UNDO_LINES" ] || fail "--dry-run replace: undo log was written"
 echo "PASS: --dry-run replace leaves page byte-identical, undo log untouched"
 
+# Test 16: new page creation sets a capitalized title (portable awk, not GNU sed \u)
+# vault-writer auto-creates the file when --page references a non-existent page.
+NEW_PAGE_PATH="$VAULT/wiki/auto-created-page.md"
+rm -f "$NEW_PAGE_PATH"
+
+"$WRITER" \
+  --vault   "$VAULT" \
+  --page    "wiki/auto-created-page.md" \
+  --section "Notes" \
+  --content "first entry for auto-created page" \
+  --undo-log "$UNDO_LOG"
+
+[ -f "$NEW_PAGE_PATH" ] || fail "new-page creation: file not created"
+TITLE_LINE=$(head -1 "$NEW_PAGE_PATH")
+# Basename "auto-created-page", tr '-' ' ' → "auto created page"
+# awk toupper first char → "Auto created page"
+# Expected heading: "# Auto created page"
+[ "$TITLE_LINE" = "# Auto created page" ] \
+  || fail "new-page creation: title line is '$TITLE_LINE' (expected '# Auto created page'; awk capitalize broken?)"
+echo "PASS: new-page auto-created with correctly capitalized title (portable awk)"
+
 echo
 echo "All vault-writer.sh tests passed."

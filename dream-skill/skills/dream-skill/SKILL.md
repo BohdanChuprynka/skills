@@ -253,35 +253,42 @@ Dream queue review complete.
 
 ### Step 7 — APPLY
 
-For each fact promoted from REVIEW (approved) or for auto-approved facts (confidence=high, action=new, no conflict), call `apply-decision.sh` with the reconciliation decision:
+For each fact promoted from REVIEW (approved) or for auto-approved facts (confidence=high, action=new, no conflict), call `apply-decision.sh` with the reconciliation decision. The orchestrator resolves `target.vault` (a logical name like `me`) to its absolute root via `config.toml` before calling, and collects apply-decision's emitted run-summary fact line(s) from stdout for the Step 8 receipt.
 
 ```bash
-"$DREAM_SCRIPTS_DIR/apply-decision.sh" \
+FACT_JSON=$("$DREAM_SCRIPTS_DIR/apply-decision.sh" \
   [--dry-run] \
-  --decision '<reconciliation_decision_JSON>'
+  --vault    "<abs root resolved from target.vault via config.toml>" \
+  --decision '<path-to-decision-json>' \
+  --undo-log "$DREAM_UNDO_LOG")
+# $FACT_JSON is one JSON line per action (contradict emits two lines)
 ```
 
-`apply-decision.sh` (Plan 3) maps `action` + `mode` to the correct `vault-writer.sh` invocation. The orchestrator passes the decision through unchanged.
+`apply-decision.sh` (Plan 3) maps `action` + `mode` to the correct `vault-writer.sh` invocation and emits one run-summary fact JSON line to stdout per action (contradict emits two: one written-old, one queued-new). The orchestrator passes the decision through unchanged and accumulates the emitted fact lines for Step 8.
 
 On vault-writer non-zero exit: log the error to `$DREAM_ERROR_LOG`; continue to the next fact; do NOT advance the marker.
 
 ### Step 8 — RECEIPT
 
-After all APPLY calls for a batch complete, generate the receipt using `scripts/write-receipt.sh`:
+After all APPLY calls for a batch complete, assemble the run-summary JSON from the fact lines emitted by `apply-decision.sh` in Step 7 (`.facts[]` is the array of run-summary fact objects collected from apply-decision's stdout), then pipe it to `write-receipt.sh`. Pass `DREAM_RUNS_DIR` to supply the reports directory.
 
 ```bash
-"$DREAM_SCRIPTS_DIR/write-receipt.sh" \
-  --run-id    "<run_id>" \
-  --win-start "<batch_start_date>" \
-  --win-end   "<batch_end_date>" \
-  --chats     "<source_chat_count_integer>" \
-  --reports-dir "<reports_dir from config>" \
-  << 'SUMMARY'
-<run_summary_JSON>
-SUMMARY
+# Build run-summary JSON from accumulated apply-decision stdout fact lines.
+# Each line from Step 7's $FACT_JSON captures is one element of .facts[].
+RUN_SUMMARY=$(jq -cn \
+  --arg run_id        "<run_id>" \
+  --arg window_start  "<batch_start_date>" \
+  --arg window_end    "<batch_end_date>" \
+  --argjson chats_scanned "<source_chat_count_integer>" \
+  --argjson facts     "<json-array of run-summary fact lines from Step 7>" \
+  '{run_id:$run_id, window_start:$window_start, window_end:$window_end, chats_scanned:$chats_scanned, facts:$facts}')
+
+printf '%s' "$RUN_SUMMARY" | \
+  DREAM_RUNS_DIR="<reports_dir from config>" \
+  "$DREAM_SCRIPTS_DIR/write-receipt.sh" [--dry-run]
 ```
 
-The run summary JSON passed on stdin must conform to the schema `write-receipt.sh` expects (overview §8): `{ "facts": [ { "content", "target", "action", "review_status", "old_content" } ] }`.
+`write-receipt.sh` accepts only `--dry-run` and `--config`; all other metadata is passed via stdin in the run-summary JSON. `.facts[]` is assembled by collecting apply-decision's emitted run-summary fact lines from Step 7.
 
 **If `--dry-run`:** print the receipt to stdout instead of writing to `reports_dir`.
 

@@ -58,6 +58,7 @@ done
 
 # --- Parse decision JSON ---
 action=$(jq -r '.action'               "$DECISION")
+vault_name=$(jq -r '.target.vault // ""' "$DECISION")
 page=$(jq -r '.target.page'            "$DECISION")
 section=$(jq -r '.target.section'      "$DECISION")
 content=$(jq -r '.content // ""'       "$DECISION")
@@ -69,6 +70,25 @@ rationale=$(jq -r '.rationale // ""'   "$DECISION")
 [ -n "$action" ]  || die "decision missing .action"
 [ -n "$page" ]    || die "decision missing .target.page"
 [ -n "$section" ] || die "decision missing .target.section"
+
+# Flat target string for run-summary facts: "<vault_name>/<page>"
+# This is the single place that owns the object→string flatten (FIX 1).
+_target_str="${vault_name}/${page}"
+
+# Emit one run-summary fact line (JSON) to stdout.
+# $1=content $2=old_content $3=action $4=review_status $5=queue_bucket
+_emit_fact() {
+  local _c="$1" _old="$2" _act="$3" _rs="$4" _qb="$5"
+  printf '%s\n' "$(jq -cn \
+    --arg content   "$_c" \
+    --arg old_content "$_old" \
+    --arg target    "$_target_str" \
+    --arg action    "$_act" \
+    --arg review_status "$_rs" \
+    --arg queue_bucket  "$_qb" \
+    --arg confidence    "$candidate_confidence" \
+    '{content:$content, old_content:$old_content, target:$target, action:$action, review_status:$review_status, queue_bucket:$queue_bucket, confidence:$confidence}')"
+}
 
 # Derive queue bucket from candidate_confidence for destructive actions.
 # For new+needs_review, bucket depends on confidence level.
@@ -101,6 +121,7 @@ case "$action" in
           --confidence "$candidate_confidence" \
           --target "${VAULT}/${page}#${section}"
       fi
+      _emit_fact "$content" "" "new" "queued" "$bucket"
     else
       # High-confidence new fact: append directly to vault
       "$WRITER" \
@@ -112,11 +133,13 @@ case "$action" in
         --undo-log "$UNDO_LOG" \
         --no-index-update \
         $(_dry_flag)
+      _emit_fact "$content" "" "new" "written" ""
     fi
     ;;
 
   duplicate)
     # Already present — skip entirely (no write, no queue)
+    _emit_fact "$content" "" "duplicate" "skipped" ""
     ;;
 
   supersede)
@@ -141,6 +164,7 @@ case "$action" in
         --confidence "$candidate_confidence" \
         --target "${VAULT}/${page}#${section}"
     fi
+    _emit_fact "$content" "$old_content" "supersede" "written" "destructive"
     ;;
 
   contradict)
@@ -168,6 +192,11 @@ case "$action" in
         --confidence "$candidate_confidence" \
         --target "${VAULT}/${page}#${section}"
     fi
+    # Emit TWO run-summary facts:
+    # 1. The struck old line → receipt "Superseded" section
+    _emit_fact "$old_content" "" "contradict" "written" ""
+    # 2. The queued new content → receipt "Queued" section
+    _emit_fact "$content" "$old_content" "contradict" "queued" "destructive"
     ;;
 
   *)

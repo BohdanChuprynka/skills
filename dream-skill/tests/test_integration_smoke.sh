@@ -218,64 +218,139 @@ echo "PASS: APPLY dry-run supersede → vault byte-identical, 'vault-writer [dry
 
 # =============================================================================
 # PART C: RECEIPT
-#   Feed a mock run-summary JSON to write-receipt.sh.
-#   Assert the receipt renders with Written / Superseded / Queued / Skipped sections
-#   and an index line appears.
+#   Run reconciliation-decision OBJECTS through apply-decision.sh --dry-run,
+#   capture the emitted run-summary fact lines, assemble them into the
+#   run-summary JSON, and feed that to write-receipt.sh.
+#   This proves the object→string flatten works end-to-end.
 # =============================================================================
 
 RUNS_DIR="$TMPROOT/runs"
 mkdir -p "$RUNS_DIR"
 
-# Mock run-summary JSON: one fact per section bucket (matches §8.8 logic)
-SUMMARY=$(cat <<'EOF'
+# Build a vault for Part C decisions (apply-decision --dry-run won't mutate it)
+VAULT_C="$TMPROOT/vault-c"
+mkdir -p "$VAULT_C/wiki"
+cat > "$VAULT_C/wiki/skills.md" <<'EOF'
+# Skills
+
+## Certifications
+
+- holds CKAD cert
+
+## Languages
+
+- Python (proficient)
+EOF
+cat > "$VAULT_C/wiki/bio.md" <<'EOF'
+# Bio
+
+## Bio
+
+- lives in Berlin
+- originally from Kyiv
+EOF
+cat > "$VAULT_C/wiki/projects.md" <<'EOF'
+# Projects
+
+## Work
+
+- current internship at Aximon
+EOF
+
+UNDO_LOG_C="$TMPROOT/undo-c.jsonl"
+QUEUE_FILE_C="$TMPROOT/queue-c.md"
+export DREAM_QUEUE_FILE="$QUEUE_FILE_C"
+
+# Helper: run one decision through apply-decision --dry-run, capture stdout fact lines
+run_dec() {
+  local dec_file="$1"
+  "$APPLY_DEC" \
+    --vault    "$VAULT_C" \
+    --decision "$dec_file" \
+    --undo-log "$UNDO_LOG_C" \
+    --dry-run  2>/dev/null || true
+}
+
+# Decision 1: new (high confidence, no needs_review) → review_status=written
+DEC1="$TMPROOT/dec1.json"
+cat > "$DEC1" <<'EOF'
 {
-  "run_id":        "smoke-2026-06-04T00:00:00Z",
-  "date":          "2026-06-04",
-  "window_start":  "2026-05-28",
-  "window_end":    "2026-06-04",
-  "chats_scanned": 1,
-  "facts": [
-    {
-      "content":       "Passed AWS Solutions Architect exam 2026-05",
-      "target":        "me/wiki/skills.md",
-      "action":        "new",
-      "review_status": "written",
-      "confidence":    "high"
-    },
-    {
-      "content":       "lives in Munich (moved 2026-06)",
-      "old_content":   "lives in Berlin",
-      "target":        "me/wiki/bio.md",
-      "action":        "supersede",
-      "review_status": "written",
-      "confidence":    "high"
-    },
-    {
-      "content":       "internship ended early",
-      "target":        "me/wiki/bio.md",
-      "action":        "contradict",
-      "review_status": "written",
-      "confidence":    "high"
-    },
-    {
-      "content":       "left Aximon after internship",
-      "target":        "me/wiki/projects.md",
-      "action":        "contradict",
-      "review_status": "queued",
-      "queue_bucket":  "destructive",
-      "confidence":    "medium"
-    },
-    {
-      "content":       "Python 3.12",
-      "target":        "me/wiki/skills.md",
-      "action":        "duplicate",
-      "review_status": "skipped",
-      "confidence":    "high"
-    }
-  ]
+  "action": "new", "mode": "append",
+  "target": { "vault": "me", "page": "wiki/skills.md", "section": "Certifications" },
+  "content": "Passed AWS Solutions Architect exam 2026-05",
+  "candidate_confidence": "high", "needs_review": false,
+  "rationale": "Absent fact."
 }
 EOF
-)
+
+# Decision 2: supersede → review_status=written
+DEC2="$TMPROOT/dec2.json"
+cat > "$DEC2" <<'EOF'
+{
+  "action": "supersede", "mode": "replace",
+  "target": { "vault": "me", "page": "wiki/bio.md", "section": "Bio" },
+  "old_content": "lives in Berlin",
+  "content": "lives in Munich (moved 2026-06)",
+  "candidate_confidence": "high", "needs_review": true,
+  "rationale": "Newer source_date."
+}
+EOF
+
+# Decision 3: contradict → emits TWO facts (written-old + queued-new)
+DEC3="$TMPROOT/dec3.json"
+cat > "$DEC3" <<'EOF'
+{
+  "action": "contradict", "mode": "stale",
+  "target": { "vault": "me", "page": "wiki/projects.md", "section": "Work" },
+  "old_content": "current internship at Aximon",
+  "content": "internship at Aximon ended",
+  "candidate_confidence": "medium", "needs_review": true,
+  "rationale": "Contradicts current state."
+}
+EOF
+
+# Decision 4: duplicate → review_status=skipped
+DEC4="$TMPROOT/dec4.json"
+cat > "$DEC4" <<'EOF'
+{
+  "action": "duplicate", "mode": "none",
+  "target": { "vault": "me", "page": "wiki/skills.md", "section": "Languages" },
+  "content": "Python 3.12",
+  "candidate_confidence": "high", "needs_review": false,
+  "rationale": "Already present."
+}
+EOF
+
+# Run each decision through apply-decision --dry-run and collect fact lines
+FACT_LINES=""
+for dec in "$DEC1" "$DEC2" "$DEC3" "$DEC4"; do
+  lines=$(run_dec "$dec")
+  # Keep only lines that look like JSON objects (run-summary facts)
+  json_lines=$(printf '%s\n' "$lines" | grep -E '^\{' || true)
+  if [ -n "$json_lines" ]; then
+    FACT_LINES=$(printf '%s\n%s' "$FACT_LINES" "$json_lines")
+  fi
+done
+
+# Assert every emitted fact has a flattened (string) target
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  ttype=$(printf '%s' "$line" | jq -r '.target | type' 2>/dev/null || echo "invalid")
+  [ "$ttype" = "string" ] \
+    || fail "RECEIPT seam: emitted fact has non-string .target (type=$ttype, line=$line)"
+done <<< "$FACT_LINES"
+echo "PASS: RECEIPT seam → all apply-decision --dry-run facts have flattened string target"
+
+# Assemble the run-summary JSON from the collected fact lines
+FACTS_JSON=$(printf '%s\n' "$FACT_LINES" | grep -E '^\{' | jq -s '.')
+SUMMARY=$(jq -cn \
+  --arg     run_id        "smoke-2026-06-04T00:00:00Z" \
+  --arg     date          "2026-06-04" \
+  --arg     window_start  "2026-05-28" \
+  --arg     window_end    "2026-06-04" \
+  --argjson chats_scanned 1 \
+  --argjson facts         "$FACTS_JSON" \
+  '{run_id:$run_id, date:$date, window_start:$window_start, window_end:$window_end, chats_scanned:$chats_scanned, facts:$facts}')
 
 RECEIPT_OUT=$(printf '%s' "$SUMMARY" | DREAM_RUNS_DIR="$RUNS_DIR" "$WRITE_RECEIPT" 2>&1)
 
@@ -303,29 +378,34 @@ grep -qE "^## Skipped" "$RECEIPT_FILE" \
 
 echo "PASS: RECEIPT → receipt file has Written / Superseded / Queued / Skipped sections"
 
-# Written section: new(written) + supersede(written) present; contradict must NOT be there
+# Written section: new(written) + supersede(written) present; contradict(written) must NOT be there
 WRITTEN_SEC=$(section_of "$RECEIPT_FILE" '/^## Written/')
 echo "$WRITTEN_SEC" | grep -qiF "AWS Solutions Architect" \
   || fail "RECEIPT: Written section missing new(written) fact"
 echo "$WRITTEN_SEC" | grep -qiF "Munich" \
   || fail "RECEIPT: Written section missing supersede(written) fact"
+# Wikilink check: Written section must contain a [[wikilink]] referencing me/wiki/
+echo "$WRITTEN_SEC" | grep -qE '\[\[me/wiki/' \
+  || fail "RECEIPT: Written section missing [[wikilink]] (got: $WRITTEN_SEC)"
 
-echo "PASS: RECEIPT → Written section has new(written) and supersede(written) facts"
+echo "PASS: RECEIPT → Written section has new(written) and supersede(written) facts with [[wikilink]]s"
 
-# Superseded section: contradict(written) present; must NOT appear in Written
+# Superseded section: contradict(written) old_content present; must NOT appear in Written
 SUPERSEDED_SEC=$(section_of "$RECEIPT_FILE" '/^## Superseded/')
-echo "$SUPERSEDED_SEC" | grep -qiF "internship ended early" \
-  || fail "RECEIPT: Superseded section missing contradict(written) fact"
-if echo "$WRITTEN_SEC" | grep -qiF "internship ended early"; then
+# DEC3 contradict: old_content="current internship at Aximon"
+echo "$SUPERSEDED_SEC" | grep -qiF "current internship at Aximon" \
+  || fail "RECEIPT: Superseded section missing contradict(written) old_content fact"
+if echo "$WRITTEN_SEC" | grep -qiF "current internship at Aximon"; then
   fail "RECEIPT: contradict(written) must NOT appear in Written section"
 fi
 
 echo "PASS: RECEIPT → Superseded section has contradict(written); absent from Written"
 
-# Queued section: queued fact present
+# Queued section: queued contradict new content present
 QUEUED_SEC=$(section_of "$RECEIPT_FILE" '/^## Queued/')
-echo "$QUEUED_SEC" | grep -qiF "left Aximon" \
-  || fail "RECEIPT: Queued section missing queued fact"
+# DEC3 contradict: content="internship at Aximon ended"
+echo "$QUEUED_SEC" | grep -qiF "internship at Aximon ended" \
+  || fail "RECEIPT: Queued section missing queued contradict-new fact"
 
 echo "PASS: RECEIPT → Queued section has queued contradict fact"
 

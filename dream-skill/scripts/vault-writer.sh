@@ -109,7 +109,7 @@ trap 'rmdir "$LOCK_PATH" 2>/dev/null || true' EXIT
 
 # --- ensure page exists ----------------------------------------------------
 if [ ! -f "$PAGE_PATH" ]; then
-  echo "# $(basename "$PAGE" .md | tr '-' ' ' | sed 's/.*/\u&/')" > "$PAGE_PATH"
+  echo "# $(basename "$PAGE" .md | tr '-' ' ' | awk '{print toupper(substr($0,1,1)) substr($0,2)}')" > "$PAGE_PATH"
 fi
 
 # --- append content under section (idempotent) -----------------------------
