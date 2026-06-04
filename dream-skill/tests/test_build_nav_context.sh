@@ -122,4 +122,21 @@ rm -f "$MISSING_CONFIG"
 echo "$OUTPUT" | grep -q "NAV-CONTEXT" || fail "output missing NAV-CONTEXT delimiter"
 echo "PASS: NAV-CONTEXT delimiter present"
 
+# ---------------------------------------------------------------------------
+# Test 9 (smoke): real vaults — if the real config.toml exists, output is bounded
+# ---------------------------------------------------------------------------
+REAL_CONFIG="${DREAM_CONFIG:-$HOME/.claude/dream-skill/config.toml}"
+if [[ -f "$REAL_CONFIG" ]]; then
+  REAL_OUT=$("$BUILDER" --config "$REAL_CONFIG" 2>/dev/null) || true
+  REAL_CHARS=${#REAL_OUT}
+  [ "$REAL_CHARS" -gt 0 ] || fail "real-vault smoke: empty output"
+  [ "$REAL_CHARS" -lt 8000 ] || fail "real-vault smoke: output too large ($REAL_CHARS chars)"
+  echo "$REAL_OUT" | grep -q "NAV-CONTEXT" || fail "real-vault smoke: missing delimiter"
+  # Must not include the removed learning vault (check vault label, not content text)
+  echo "$REAL_OUT" | grep -q "vault: learning" && fail "real-vault smoke: learning vault present (should be absent)" || true
+  echo "PASS: real-vault smoke test (${REAL_CHARS} chars)"
+else
+  echo "SKIP: real config not found at $REAL_CONFIG"
+fi
+
 echo "All build-nav-context.sh tests passed."
