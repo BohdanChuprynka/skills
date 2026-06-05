@@ -75,6 +75,10 @@ dream-errors-*/
 /tmp/
 tmp/
 
+# Internal agent planning / handoff artifacts
+docs/HANDOFF-*.md
+docs/superpowers/
+
 # Local MCP config — contains tokens, never commit
 # (template lives at skills/dream-skill/config/mcp-config.example.json)
 skills/dream-skill/config/mcp-config.json

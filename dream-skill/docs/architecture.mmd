@@ -24,11 +24,11 @@ flowchart TB
     REDUCE["3 · REDUCE — structural merge (no LLM)<br/>dedup exact · confidence promote only"]:::batch
   end
 
-  subgraph CAND["per candidate fact (1:1)"]
+  subgraph CAND["validated candidate batches"]
     direction TB
-    ROUTE{"4 · ROUTE<br/>nav-context + ROUTING.md<br/>status?"}:::route
-    READ["5b · READ PAGE<br/>vaultRoot/page → read target<br/>(empty if new)"]:::route
-    RECON["5c · RECONCILE<br/>candidate vs target_page<br/>→ action"]:::route
+    ROUTE{"4 · ROUTE batches<br/>15 candidates + nav-context<br/>candidate_id exact match"}:::route
+    READ["5b · PAGE GROUPS<br/>group by vault/page<br/>read target once"]:::route
+    RECON["5c · RECONCILE batches<br/>page snapshot + candidates<br/>1 decision / candidate_id"]:::route
   end
 
   APPLY{"7 · APPLY — apply-decision.sh<br/>action → write mode<br/>(dry-run: write nothing)"}:::apply

@@ -7,7 +7,7 @@ version: 0.3.1
 # dream-skill
 
 > This file is read by the LLM at skill invocation time. It contains no executable code.
-> Plans 2 and 3 will append `## Routing` and `## Reconciliation` sections below.
+> The `## Routing` and `## Reconciliation` sections below define the LLM contracts for the batched pipeline.
 
 ## Invocation modes
 
@@ -28,11 +28,12 @@ version: 0.3.1
 Every LLM step in this pipeline runs on **Sonnet** (`model: sonnet` → Sonnet 4.6, `claude-sonnet-4-6`):
 
 - **MAP** (Step 2) — one extraction subagent per chat. Dispatch with `model: sonnet`.
-- **ROUTE** (Step 4) and **RECONCILE** (Step 5c) — per-candidate judgments. Run each as a Sonnet subagent (`model: sonnet`); the isolated context per candidate also keeps the orchestrator lean (the original context-overflow failure mode).
+- **ROUTE** (Step 4) — batched judgments, default 15 candidates per Sonnet subagent (`DREAM_ROUTE_BATCH_SIZE`). Each batch shares one nav-context and must echo every `candidate_id`.
+- **RECONCILE** (Step 5c) — page-grouped judgments, default 25 candidates per target-page Sonnet subagent (`DREAM_RECONCILE_BATCH_SIZE`). Each batch reads one vault page snapshot and must echo every `candidate_id`.
 
-These are high-volume, tightly-specified steps (read one chat → emit candidate JSON; emit one routing JSON; emit one reconciliation JSON) that Sonnet handles well. Only the orchestrator that stitches the run together (the FIND / REDUCE / REVIEW / APPLY / RECEIPT / MARKER plumbing) runs on the session model. If you ever need maximum fidelity on the destructive-edit judgment, RECONCILE is the single step worth temporarily pinning back to a stronger model — but the default is Sonnet everywhere.
+These are high-volume, tightly-specified steps (read one chat → emit candidate JSON; route a small candidate batch; reconcile one target page batch) that Sonnet handles well. Only the orchestrator that stitches the run together (the FIND / REDUCE / REVIEW / APPLY / RECEIPT / MARKER plumbing) runs on the session model. If you ever need maximum fidelity on the destructive-edit judgment, RECONCILE is the single step worth temporarily pinning back to a stronger model — but the default is Sonnet everywhere.
 
-This is a dispatch-level setting (model + per-candidate isolation): it does not change any data contract, so the deterministic test suites are unaffected.
+This is a dispatch-level setting (model + validated batch isolation): it does not change any data contract, so the deterministic test suites are unaffected.
 
 ## HARD RULES — read first, apply always
 
@@ -134,10 +135,18 @@ DREAM_SKILL_HOME="$(dirname "$DREAM_SCRIPTS_DIR")"
 ROUTING_MD="$DREAM_SKILL_HOME/ROUTING.md"
 # Verify all helpers exist + executable; if any missing, fail loud (Rule 3) and stop.
 _MISSING=""
-for s in find-chats.sh write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh advance-marker.sh; do
+for s in find-chats.sh private-state.sh prefilter-transcript.py write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh advance-marker.sh build-route-batches.py validate-route-batch.py build-reconcile-batches.py validate-reconcile-batch.py; do
   [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; _MISSING="$_MISSING $s"; }
 done
+[ -r "$ROUTING_MD" ] || { echo "dream-skill: missing ROUTING.md at $ROUTING_MD" >&2; _MISSING="$_MISSING ROUTING.md"; }
 [ -z "$_MISSING" ] || { echo "dream-skill: aborting — missing scripts:$_MISSING" >&2; exit 1; }
+
+# Private run scratch dir for MAP prefiltered transcripts and batch files.
+DREAM_HOME="${DREAM_HOME:-$HOME/.claude/dream-skill}"
+mkdir -p "$DREAM_HOME/tmp"
+umask 077
+WORKDIR="$(mktemp -d "$DREAM_HOME/tmp/run-XXXXXX")"
+trap 'rm -rf "$WORKDIR"' EXIT
 ```
 4. Parse `~/.claude/dream-skill/config.toml` (override via `${DREAM_CONFIG}` for tests) to resolve vault roots and `reports_dir`. Parse vault names from `^\[vaults\.<name>\]`, then `root =` per block; `reports_dir =` at top level. `config.toml` is the ONLY source of vault roots — no fallback to `CLAUDE.md` grep.
 
@@ -162,24 +171,34 @@ Then re-invoke `"$DREAM_SCRIPTS_DIR/find-chats.sh"` with the chosen flag.
 
 ### Step 2 — MAP
 
-For each batch, dispatch one subagent per transcript path using the Task/Agent tool, **with `model: sonnet`** (see Model policy). Each subagent receives:
+For each batch, prefilter each raw transcript path before dispatch. MAP agents read only the filtered text; the raw transcript path is retained only for provenance:
+
+```bash
+transcript="<absolute raw transcript path>"
+safe_id="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$transcript")"
+FILTERED_TRANSCRIPT="$WORKDIR/map-prefilter-$safe_id.txt"
+SOURCE_DATE="$(python3 -c 'import datetime, pathlib, sys; print(datetime.datetime.fromtimestamp(pathlib.Path(sys.argv[1]).stat().st_mtime).date())' "$transcript")"
+"$DREAM_SCRIPTS_DIR/prefilter-transcript.py" --stats "$transcript" > "$FILTERED_TRANSCRIPT"
+```
+
+For each filtered transcript, dispatch one subagent using the Task/Agent tool, **with `model: sonnet`** (see Model policy). Each subagent receives:
 
 **Dispatch prompt (verbatim — copy into each Task invocation):**
 
-> You are a dream-skill extraction agent. Read the transcript at `<absolute_path>` and extract every fact about Bohdan that belongs in bucket A (additive personal fact) or buckets D/E (queued items), using the extraction taxonomy in SKILL.md.
+> You are a dream-skill extraction agent. Read the filtered transcript at `<filtered_path>` and extract every fact about Bohdan that belongs in bucket A (additive personal fact) or buckets D/E (queued items), using the extraction taxonomy in SKILL.md. Do NOT open the raw transcript. Use the raw transcript path only for provenance: set `source_chat` exactly to `<raw_path>` and set `source_date` exactly to `<source_date>`.
 >
 > Rules:
 > - Apply the five-bucket taxonomy above (A=write-candidate, B/C=drop, D/E=queue).
 > - Output ONLY a JSON array of candidate-fact objects matching this schema exactly (overview §4):
 >   `[{"content":"...","confidence":"high|medium|low","source_chat":"<path>","source_date":"<YYYY-MM-DD>","type":"...","evidence":"...","suggested_section":"..."}]`
 > - Required fields: `content`, `confidence`, `source_chat`, `source_date`. Optional: `type`, `evidence`, `suggested_section`.
-> - `source_date` is the date of this chat (derive from the transcript filename or metadata).
+> - Every output item MUST use `source_chat: "<raw_path>"` and `source_date: "<source_date>"`.
 > - Do NOT include `needs_review`, `target_hint`, or `section` — those are set by routing and reconciliation.
 > - An empty array `[]` is valid for code-only or private chats.
 > - Do NOT invent facts. Do NOT route or reconcile. Extract only.
-> - For monster chats (transcript > ~100 KB): chunk the file into overlapping 40 KB segments, extract from each, then deduplicate within this chat before returning.
+> - If the filtered transcript is still > ~100 KB: chunk the filtered text into overlapping 40 KB segments, extract from each, then deduplicate within this chat before returning.
 
-Each subagent returns a JSON array of candidate facts. Validate the JSON structure using the `validate_candidates` harness (required fields ONLY: `content`, `confidence`, `source_chat`, `source_date`). Any subagent output that is not valid JSON, or is missing any required field, is logged as an extraction error and skipped for this run. Missing optional fields (`type`, `evidence`, `suggested_section`) never cause a candidate to be dropped.
+Each subagent returns a JSON array of candidate facts. Validate the JSON structure using the `validate_candidates` harness (required fields ONLY: `content`, `confidence`, `source_chat`, `source_date`). After validation, normalize provenance deterministically to the raw transcript path and source date so temp file paths can never leak downstream. Any subagent output that is not valid JSON, or is missing any required field, is logged as an extraction error and skipped for this run. Missing optional fields (`type`, `evidence`, `suggested_section`) never cause a candidate to be dropped.
 
 **JSON validation harness — use the helper script (Rule 2), do not re-implement:**
 
@@ -189,6 +208,8 @@ Validation lives in `"$DREAM_SCRIPTS_DIR/validate-candidates.sh"` — the single
 # Validate one subagent's JSON array; VALID is the filtered array, or empty on error.
 VALID=$(printf '%s' "$subagent_json" | "$DREAM_SCRIPTS_DIR/validate-candidates.sh") \
   || { echo "MAP: invalid candidate JSON (not an array) — skipping this transcript" >&2; VALID="[]"; }
+VALID=$(printf '%s' "$VALID" | jq --arg source_chat "$transcript" --arg source_date "$SOURCE_DATE" \
+  'map(.source_chat = $source_chat | .source_date = $source_date)')
 # Or, if sourced:  source "$DREAM_SCRIPTS_DIR/validate-candidates.sh"; VALID=$(validate_candidates "$subagent_json")
 ```
 
@@ -208,29 +229,64 @@ After all MAP subagents complete for a batch, merge their outputs. REDUCE is **s
 
 ### Step 4 — ROUTE
 
-Pass each candidate fact to the routing logic defined in `## Routing` (defined below — appended by Plan 2). Execute the routing prompt as one Sonnet subagent per candidate (`model: sonnet`, see Model policy) so per-candidate nav-context never accumulates in the orchestrator. The routing step resolves each candidate to a `{vault, page, section}` triple (a routing decision per overview §4). If `## Routing` is not yet present in this file, log a gap and queue all candidates as `uncertain`.
+Build stable-ID batches from the reduced candidate array, then pass each batch to the routing logic defined in `## Routing` (defined below). Execute the routing prompt as one Sonnet subagent per batch (`model: sonnet`, see Model policy), default 15 candidates per batch.
+
+```bash
+printf '%s' "$REDUCED_CANDIDATES_JSON" | \
+  "$DREAM_SCRIPTS_DIR/build-route-batches.py" > "$WORKDIR/route-batches.json"
+```
+
+Each route agent receives one `route-batch` object plus the shared nav-context and `ROUTING.md`, and emits one route decision per `candidate_id`. Validate every agent output before fan-in:
+
+```bash
+"$DREAM_SCRIPTS_DIR/validate-route-batch.py" \
+  --batch "$WORKDIR/route-batch-0001.json" < "$AGENT_ROUTE_JSON"
+```
+
+The validator joins routes back to their original candidates and proves the batch output has no missing, extra, duplicated, or malformed `candidate_id`s. Merge validated outputs into one routed-record array. If `## Routing` is not yet present in this file, log a gap and queue all candidates as `uncertain`.
 
 ### Step 5 — RECONCILE
 
-For each routed candidate, perform the following sub-steps (overview §5):
+For the validated routed-record array, perform the following sub-steps (overview §5):
 
-**Step 5a — Route status check:** If the routing decision has `status != "routed"` (i.e. `ambiguous`, `gap`, or similar), mark `needs_review = true`, append to `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` with timestamp + fact content, route to the `uncertain` queue bucket, and skip reconciliation for this candidate.
+**Step 5a — Route status check:** Before building reconcile batches, scan the validated routed-record array. If a routing decision has `status != "routed"` (i.e. `ambiguous`, `gap`, or similar), mark `needs_review = true`, append to `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` with timestamp + fact content, route to the `uncertain` queue bucket, and exclude that candidate from reconciliation.
 
-**Step 5b — Resolve target page:** For candidates with `status = "routed"`, resolve the absolute path:
+**Step 5b — Build page-grouped batches:** Pass the validated routed-record array to the reconcile batch builder:
 ```bash
-abs_path="<config[vault].root>/<routing_decision.page>"
+printf '%s' "$ROUTED_RECORDS_JSON" | \
+  "$DREAM_SCRIPTS_DIR/build-reconcile-batches.py" \
+    --config "$DREAM_CONFIG" \
+    --run-date "<today YYYY-MM-DD>" \
+    > "$WORKDIR/reconcile-batches.json"
 ```
-Read the file at `abs_path` (use empty string `""` if the file does not exist — `vault-writer` will create it on a `new` write).
 
-**Step 5c — RECONCILE prompt:** Pass the following to Plan 3's reconciliation logic (the `## Reconciliation` section, to be appended by Plan 3). Execute it as one Sonnet subagent per candidate (`model: sonnet`, see Model policy):
+`build-reconcile-batches.py` groups by `(vault,page)`, resolves the page through `config.toml`, reads the full page text once per group (empty string if the page does not exist), and preserves each candidate's routed section inside the candidate entry.
+
+**Step 5c — RECONCILE prompt:** Pass each reconcile batch to the `## Reconciliation` logic. Execute it as one Sonnet subagent per target-page batch (`model: sonnet`, see Model policy):
 ```json
 {
-  "candidate":   { "...full candidate-fact object including source_date..." },
+  "batch_id": "reconcile-0001",
+  "target": { "vault": "me", "page": "wiki/bio.md" },
   "target_page": "<full markdown text of the routed vault page, or empty string>",
-  "run_date":    "<today YYYY-MM-DD>"
+  "run_date": "<today YYYY-MM-DD>",
+  "candidates": [
+    {
+      "candidate_id": "c000001",
+      "candidate": { "...full candidate-fact object including source_date..." },
+      "route": { "vault": "me", "page": "wiki/bio.md", "section": "Bio", "routing_confidence": "high" }
+    }
+  ]
 }
 ```
-Each candidate receives a reconciliation decision per overview §4: `action`, `mode`, `target`, `old_content`, `content`, `candidate_confidence`, `needs_review`, `rationale`. Field is `rationale` (not `reason`).
+
+Each agent emits an array with one decision per `candidate_id`. Validate every output before apply:
+
+```bash
+"$DREAM_SCRIPTS_DIR/validate-reconcile-batch.py" \
+  --batch "$WORKDIR/reconcile-batch-0001.json" < "$AGENT_RECONCILE_JSON"
+```
+
+The validator proves every routed candidate received exactly one decision, the decision target matches the batch page and that candidate's routed section, and the reconciliation decision fields satisfy the action/mode/review contract. Each candidate receives a reconciliation decision per overview §4: `action`, `mode`, `target`, `old_content`, `content`, `candidate_confidence`, `needs_review`, `rationale`. Field is `rationale` (not `reason`).
 
 **Step 5d — Apply:** Feed the reconciliation decision to `apply-decision.sh` (Plan 3). `apply-decision.sh` owns the action→mode→vault-writer mapping. The orchestrator does NOT re-implement this mapping — it passes the decision through unchanged.
 
@@ -432,21 +488,31 @@ To reverse all writes from a completed run:
 
 This reads `$DREAM_HOME/undo/<date>.jsonl`, reverses every vault-writer append/replace/stale, removes index entries, and renames the processed log to `.applied-*` to prevent re-runs. See `scripts/apply-undo.sh` and `tests/test_undo.sh`.
 
-<!-- Plans 2 and 3 append ## Routing and ## Reconciliation sections below this line. -->
+<!-- Routing and Reconciliation prompts live below this line. -->
 
 ---
 
 ## Routing
 
-> **When to run:** once per candidate fact, after MAP produces a `candidate-fact` JSON object and before the Reconciliation step.
+> **When to run:** once per ROUTE batch, after REDUCE produces a deduplicated candidate-fact array and before the Reconciliation step.
 
 ### Inputs
 
-1. **`candidate-fact` JSON** — the object from MAP (fields: `content`, `type`, `confidence`, `evidence`, `source_chat`, `source_date`, `suggested_section`).
+1. **`route-batch` JSON** — the object from `build-route-batches.py`, shaped as:
+   ```json
+   {
+     "batch_id": "route-0001",
+     "candidates": [
+       { "candidate_id": "c000001", "candidate": { "...candidate-fact fields..." } }
+     ]
+   }
+   ```
 2. **`nav-context` block** — the output of `"$DREAM_SCRIPTS_DIR/build-nav-context.sh"` (reads `~/.claude/dream-skill/config.toml` by default; override with `--config <toml-path>` for tests). Contains, for each vault: 1-line purpose (from config `description`), `wiki/index.md` entries (up to 40 lines), and a dir-scan listing of pages.
 3. **`ROUTING.md`** — the disambiguation + volatility supplement (read from `$ROUTING_MD`).
 
 ### Routing procedure (follow in order)
+
+For each item in `route-batch.candidates`, route the embedded `candidate` independently using R1-R7 below. Keep the `candidate_id` attached to the output decision. Do not infer one candidate's route from another candidate in the same batch unless they are genuinely the same subject and the nav-context makes the same target canonical.
 
 **Step R1 — Read `$ROUTING_MD` §1 disambiguation rules.** Apply the first matching rule to the candidate fact. Note which rule fired and why.
 
@@ -467,23 +533,27 @@ This reads `$DREAM_HOME/undo/<date>.jsonl`, reverses every vault-writer append/r
 
 ### Output format
 
-Emit **one JSON object** and nothing else:
+Emit **one JSON array** and nothing else. It must contain exactly one object per input `candidate_id`:
 
 ```json
-{
-  "status": "routed",
-  "vault": "<vault-name>",
-  "page": "<relative-path-from-vault-root>",
-  "section": "<section heading>",
-  "routing_confidence": "high | medium | low"
-}
+[
+  {
+    "candidate_id": "c000001",
+    "status": "routed",
+    "vault": "<vault-name>",
+    "page": "<relative-path-from-vault-root>",
+    "section": "<section heading>",
+    "routing_confidence": "high | medium | low"
+  }
+]
 ```
 
 For `ambiguous` or `gap`, set `vault`, `page`, and `section` to `null`.
 
 ### Hard constraints
 
-- Output fields are exactly `status`, `vault`, `page`, `section`, `routing_confidence` — no extras (`canonical_path`, `routing_status`, `needs_review`, etc.).
+- Output item fields are exactly `candidate_id`, `status`, `vault`, `page`, `section`, `routing_confidence` — no extras (`canonical_path`, `routing_status`, `needs_review`, etc.).
+- Every input `candidate_id` MUST appear exactly once. No missing IDs, no duplicate IDs, no invented IDs.
 - `status` values are exactly `"routed"`, `"ambiguous"`, or `"gap"` — no other strings.
 - `page` must be a relative path from the vault root. Never an absolute path.
 - The page must resolve to a CANONICAL page that exists (per nav-context index or dir scan) or be `null`. Never invent a path.
@@ -494,54 +564,76 @@ For `ambiguous` or `gap`, set `vault`, `page`, and `section` to `null`.
 
 ## Reconciliation
 
-> This section is the LLM prompt executed by the orchestrator (Plan 4) once per routed
-> candidate-fact. Input: a `candidate` JSON object, the full text of the `target_page`
-> (as a string), and the `run_date` (ISO-8601, today's date). Output: one JSON object
-> matching the reconciliation-decision contract. Emit the JSON only — no prose.
+> This section is the LLM prompt executed by the orchestrator once per target-page
+> batch. Input: one `target_page` snapshot, `run_date` (ISO-8601, today's date),
+> and an array of routed candidates for that page. Output: one JSON array with one
+> reconciliation decision per `candidate_id`. Emit JSON only — no prose.
 
 ### Input schema
 
 ```json
 {
-  "candidate": {
-    "content":          "Cleveland Clinic internship confirmed for Jun–Aug 2026",
-    "type":             "world-fact | belief | observation | experience",
-    "confidence":       "high | medium | low",
-    "evidence":         "short quote/paraphrase from the source chat",
-    "source_chat":      "<session-id>",
-    "source_date":      "2026-06-01",
-    "suggested_section": "Experience"
-  },
+  "batch_id": "reconcile-0001",
+  "target": { "vault": "me", "page": "wiki/experience.md" },
   "target_page": "<full markdown text of the routed vault page>",
-  "run_date":    "2026-06-03"
+  "run_date": "2026-06-03",
+  "candidates": [
+    {
+      "candidate_id": "c000001",
+      "candidate": {
+        "content": "Cleveland Clinic internship confirmed for Jun-Aug 2026",
+        "type": "world-fact | belief | observation | experience",
+        "confidence": "high | medium | low",
+        "evidence": "short quote/paraphrase from the source chat",
+        "source_chat": "<session-id>",
+        "source_date": "2026-06-01",
+        "suggested_section": "Experience"
+      },
+      "route": {
+        "vault": "me",
+        "page": "wiki/experience.md",
+        "section": "Experience",
+        "routing_confidence": "high"
+      }
+    }
+  ]
 }
 ```
 
-### Output schema (reconciliation-decision)
+### Output schema
 
 ```json
-{
-  "action":               "new | duplicate | supersede | contradict",
-  "mode":                 "append | replace | stale | none",
-  "target": {
-    "vault":   "<vault-name>",
-    "page":    "<relative path, e.g. wiki/experience.md>",
-    "section": "<H2 heading text>"
-  },
-  "old_content":          "<exact existing line text, omit key for 'new' and 'duplicate'>",
-  "content":              "<the new fact line to write, omit key for 'duplicate'>",
-  "candidate_confidence": "high | medium | low",
-  "needs_review":         true,
-  "rationale":            "<one sentence explaining the classification>"
-}
+[
+  {
+    "candidate_id": "c000001",
+    "decision": {
+      "action": "new | duplicate | supersede | contradict",
+      "mode": "append | replace | stale | none",
+      "target": {
+        "vault": "<vault-name>",
+        "page": "<relative path, e.g. wiki/experience.md>",
+        "section": "<H2 heading text>"
+      },
+      "old_content": "<exact existing line text, omit key for 'new' and 'duplicate'>",
+      "content": "<the new fact line to write; use empty string for 'duplicate'>",
+      "candidate_confidence": "high | medium | low",
+      "needs_review": true,
+      "rationale": "<one sentence explaining the classification>"
+    }
+  }
+]
 ```
+
+The validator also accepts the decision fields directly beside `candidate_id`, but the wrapped `{candidate_id, decision}` shape above is preferred.
 
 Field notes (from v2 §4):
 - `action` enum is EXACTLY `new|duplicate|supersede|contradict` (never mode-values).
 - `mode` is `append|replace|stale|none` — use `none` for `duplicate`.
 - `candidate_confidence` is a REQUIRED pass-through of the candidate's `confidence` field; it drives queue bucketing in `apply-decision.sh`.
 - Field is `rationale` (not `reason`).
-- **`needs_review` rule:** `true` for everything EXCEPT `action: new` AND `candidate_confidence: high`. All destructive edits, all contradictions, and all low/medium-confidence new facts go to review.
+- **`needs_review` rule:** `false` for `duplicate`, and false for `action: new` with `candidate_confidence: high`; `true` for destructive edits, contradictions, and low/medium-confidence new facts.
+- `target.vault` and `target.page` come from the batch `target`; `target.section` comes from that candidate's `route.section`.
+- Every input `candidate_id` MUST appear exactly once. No missing IDs, no duplicate IDs, no invented IDs.
 
 ### Action definitions and mode mapping
 
@@ -560,7 +652,7 @@ Field notes (from v2 §4):
 
 1. **User's words in the source chat always win** — if the candidate came from a direct user statement in the session, treat it as authoritative over any existing vault claim.
 2. **Newer `source_date` beats older vault content** — when both a candidate and an existing line reference the same subject+attribute, the one with the later date supersedes. If the existing line has no date marker, treat it as older.
-3. **`confidence: low` (brainstormed/hypothetical) never auto-writes** — force `needs_review: true` regardless of action.
+3. **`confidence: low` (brainstormed/hypothetical) never auto-writes** — force `needs_review: true` for `new`, `supersede`, or `contradict`. `duplicate` still skips with `needs_review: false`.
 4. **Ambiguous precedence → `contradict`** — when you cannot determine which claim is more recent or authoritative, classify as `contradict`, not `supersede`.
 
 ### Volatility guidance
@@ -622,10 +714,10 @@ winner is genuinely unclear → classify as contradict
 
 ### Output rules
 
-- Emit the reconciliation-decision JSON object and nothing else. No explanation, no markdown fencing.
-- Every output object MUST include all required keys: `action`, `mode`, `target`, `content`, `candidate_confidence`, `needs_review`, `rationale`.
+- Emit the reconciliation-decision JSON array and nothing else. No explanation, no markdown fencing.
+- Every decision object MUST include all required keys: `action`, `mode`, `target`, `content`, `candidate_confidence`, `needs_review`, `rationale`.
 - `old_content` is REQUIRED for `supersede` and `contradict`; OMIT the key entirely for `new` and `duplicate`.
 - `content` for `duplicate` MUST be `""` (empty string), not omitted.
-- `target.vault` comes from the routing decision passed in by the orchestrator.
-- `target.page` and `target.section` come from the routing decision; do not re-derive them.
+- `target.vault` and `target.page` come from the batch target; do not re-derive them.
+- `target.section` comes from the candidate's routed section; do not re-derive it.
 - `candidate_confidence` is a verbatim copy of `candidate.confidence` — never change it.

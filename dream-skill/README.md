@@ -50,7 +50,7 @@ The earlier auto-on-close design (v0.2) tried to fix this by firing a headless c
 
 <sub>Diagram source: [`docs/architecture.mmd`](docs/architecture.mmd) (Mermaid). Regenerate with `mmdc -i docs/architecture.mmd -o docs/architecture.png -b white -s 3`.</sub>
 
-The orchestrator (`SKILL.md`, Steps 0–9) runs a nine-stage pipeline. The shape that matters: a **fan-out → fan-in**, then strictly **one decision per candidate fact**.
+The orchestrator (`SKILL.md`, Steps 0–9) runs a nine-stage pipeline. The shape that matters: a **fan-out → validated batch fan-in**, while still preserving strictly **one route and one reconcile decision per candidate fact**.
 
 | Stage | Owner | What happens |
 |---|---|---|
@@ -58,8 +58,8 @@ The orchestrator (`SKILL.md`, Steps 0–9) runs a nine-stage pipeline. The shape
 | **1 · FIND** | `find-chats.sh` | `last-run` marker + window → batches of transcript paths. Default **last 7 days**; `--since` / `--all` (weekly-batched). Private (`--ignore`d) chats excluded. Empty window → receipt "0 chats" and advance. |
 | **2 · MAP** | one subagent per chat | Each isolated subagent reads one transcript, applies the A/B/C/D/E taxonomy (A = write-candidate, B/C = drop, D/E = queue), and emits a JSON array of **candidate facts**. |
 | **3 · REDUCE** | SKILL.md (structural) | Merge all candidate arrays; dedup exact `(content, section)`; count distinct source chats → may **promote a confidence label**. Never clears `needs_review`, never auto-approves. |
-| **4 · ROUTE** | `build-nav-context.sh` + `ROUTING.md` | Per candidate → `{status, vault, page, section}`. `status ∈ routed | ambiguous | gap`. Ambiguous/gap → routing-gaps log + review queue (never a silent guess). |
-| **5 · RECONCILE** | reconciliation prompt | Read the routed target page, then classify the candidate against it: `action ∈ new | duplicate | supersede | contradict`. |
+| **4 · ROUTE** | `build-route-batches.py` + `build-nav-context.sh` + `ROUTING.md` | Batched candidates share one nav-context. Each output must echo every `candidate_id` exactly once and resolve `{status, vault, page, section}`. Ambiguous/gap → routing-gaps log + review queue. |
+| **5 · RECONCILE** | `build-reconcile-batches.py` + reconciliation prompt | Candidates are grouped by target page. Each batch reads one page snapshot and emits one validated `action ∈ new | duplicate | supersede | contradict` decision per `candidate_id`. |
 | **6 · REVIEW** | `queue.sh` | Everything `needs_review` (all destructive edits, all low/medium-confidence news) is walked fact-by-fact in the terminal. |
 | **7 · APPLY** | `apply-decision.sh` → `vault-writer.sh` | Owns `action → mode`: `new`→append, `supersede`→replace (old line preserved in undo), `contradict`→mark old line stale + queue the new one, `duplicate`→skip. |
 | **8 · RECEIPT** | `write-receipt.sh` | Assemble the run summary → `reports_dir/<date>.md` + index line. Buckets: **Written · Superseded · Queued · Skipped**. |
@@ -179,7 +179,7 @@ No. That was v0.2. Capture happens only when *you* run `/dream-skill`. (A legacy
 Read today's receipt in `reports_dir/<date>.md` — it lists every fact Written, Superseded, Queued, or Skipped, with sources. That artifact is the whole design goal.
 
 **Q: How much does a run cost?**
-One subagent per chat in the window, plus the reduce/route/reconcile steps — all inside your normal Claude Code session (covered on Pro/Max/Team). A week with ~10 substantive chats is ~10 subagent dispatches. Narrow the window with `--since` to spend less.
+One subagent per chat in MAP, then batched ROUTE and page-grouped RECONCILE subagents — all inside your normal Claude Code session (covered on Pro/Max/Team). Large candidate sets avoid the old one-agent-per-candidate explosion. Narrow the window with `--since` to spend less.
 
 **Q: I ran it twice — did my vault get polluted?**
 No. `vault-writer.sh` is line-idempotent (exact-match append guard), the queue dedupes by `(title, target)`, and the marker only advances on success. Worst case is wasted work on a re-scan that produces zero new writes.
@@ -215,7 +215,7 @@ which jq                              # must return a path (brew install jq / ap
 
 ## Roadmap
 
-- **v0.3** (current) — on-demand batch sweep, map-reduce extraction, per-candidate reconciliation, terminal review, in-vault receipts, dry-run.
+- **v0.3** (current) — on-demand batch sweep, map-reduce extraction, batched routing, page-grouped reconciliation, terminal review, in-vault receipts, dry-run.
 - **Next** — first-run config wizard; richer receipt diffs; a `volatility`-aware reconcile pass for fast-changing pages.
 
 ## Docs
