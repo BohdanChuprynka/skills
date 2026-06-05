@@ -18,8 +18,13 @@ cd "$(dirname "$0")"
 LIVE_TESTS=(
   test_check_pending.sh      # SessionStart nudge hook
   test_find_chats.sh         # FIND
+  test_prefilter_transcript.sh # MAP prefilter (raw JSONL -> compact text)
+  test_map_prefilter_contract.sh # MAP prompt contract for filtered transcript usage
   test_map_harness.sh        # MAP   (validate_candidates harness)
   test_build_nav_context.sh  # ROUTE (nav-context builder)
+  test_routing_contract.sh   # ROUTE (routing supplement + static prompt contract)
+  test_batch_route.sh        # ROUTE (stable-ID batching + validation)
+  test_batch_reconcile.sh    # RECONCILE (page grouping + validation)
   test_vault_writer.sh       # APPLY (write + --mode + --dry-run)
   test_path_guard.sh         # APPLY safety (vault-root confinement)
   test_apply_decision.sh     # APPLY (action→mode→writer/queue mapping)
@@ -32,9 +37,9 @@ LIVE_TESTS=(
   test_integration_smoke.sh  # E2E: FIND → apply(dry-run) → receipt
 )
 
-# NOTE: REDUCE (SKILL.md Step 3) and the ROUTE/RECONCILE prompts are LLM/orchestrator
-# steps validated by golden fixtures (tests/fixtures/{reduce,routing,reconcile,map}/),
-# not by CI shell tests — they have no executable script to invoke here.
+# NOTE: REDUCE (SKILL.md Step 3) and the ROUTE/RECONCILE prompts themselves are
+# LLM/orchestrator steps validated by golden fixtures. The batch builders and
+# validators are executable shell suites above.
 
 pass=0; fail=0; failed=()
 LOG="$(mktemp /tmp/dream-runall-XXXXXX.log)"
