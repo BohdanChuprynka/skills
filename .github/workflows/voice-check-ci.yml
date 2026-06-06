@@ -1,0 +1,38 @@
+name: voice-check CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "voice-check/**"
+      - ".github/workflows/voice-check-ci.yml"
+  pull_request:
+    paths:
+      - "voice-check/**"
+
+defaults:
+  run:
+    working-directory: voice-check
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -q
