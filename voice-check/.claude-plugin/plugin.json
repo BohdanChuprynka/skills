@@ -1,0 +1,15 @@
+{
+  "name": "voice-check",
+  "version": "0.1.0",
+  "description": "Audit and rewrite drafts in your own voice. Offline, standard-library only, with a measured voice profile and an ROC-AUC discrimination proof.",
+  "author": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "homepage": "https://github.com/BohdanChuprynka/skills/tree/main/voice-check",
+  "repository": "https://github.com/BohdanChuprynka/skills",
+  "license": "MIT",
+  "keywords": ["writing", "voice", "style", "ai-detection", "editing", "claude", "codex"],
+  "commands": "./commands",
+  "skills": "./skills"
+}
