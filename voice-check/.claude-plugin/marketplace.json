@@ -1,0 +1,10 @@
+{
+  "name": "voice-check",
+  "displayName": "Voice Check",
+  "description": "Audit and rewrite drafts in your own voice. Measured profile + deterministic 0-100 score, fully offline.",
+  "version": "0.1.0",
+  "category": "productivity",
+  "tags": ["writing", "voice", "style", "editing"],
+  "icon": "🗣️",
+  "trigger": "/voice-check"
+}
