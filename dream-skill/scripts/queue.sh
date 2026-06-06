@@ -30,7 +30,7 @@ bucket_header() {
 }
 
 cmd_append() {
-  local bucket="" title="" evidence="" confidence="" target=""
+  local bucket="" title="" evidence="" confidence="" target="" id=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --bucket) bucket="$2"; shift 2 ;;
@@ -38,6 +38,7 @@ cmd_append() {
       --evidence) evidence="$2"; shift 2 ;;
       --confidence) confidence="$2"; shift 2 ;;
       --target) target="$2"; shift 2 ;;
+      --id) id="$2"; shift 2 ;;
       *) die "unknown arg: $1" ;;
     esac
   done
@@ -84,13 +85,16 @@ cmd_append() {
   # Build the entry in a temp file (awk -v can't carry newlines)
   local entry_file
   entry_file=$(mktemp)
+  local id_line=""
+  [ -n "$id" ] && id_line="**ID:** $id"$'\n'
+
   cat > "$entry_file" <<EOF
 
 ### $title
 
 **Bucket:** $bucket
 **Confidence:** $confidence
-**Target:** $target
+${id_line}**Target:** $target
 **Captured:** $ts
 
 **Evidence:**

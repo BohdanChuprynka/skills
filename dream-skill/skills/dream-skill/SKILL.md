@@ -135,7 +135,7 @@ DREAM_SKILL_HOME="$(dirname "$DREAM_SCRIPTS_DIR")"
 ROUTING_MD="$DREAM_SKILL_HOME/ROUTING.md"
 # Verify all helpers exist + executable; if any missing, fail loud (Rule 3) and stop.
 _MISSING=""
-for s in find-chats.sh private-state.sh prefilter-transcript.py write-receipt.sh queue.sh vault-writer.sh apply-decision.sh build-nav-context.sh validate-candidates.sh advance-marker.sh build-route-batches.py validate-route-batch.py build-reconcile-batches.py validate-reconcile-batch.py; do
+for s in find-chats.sh private-state.sh prefilter-transcript.py build-map-batches.py write-receipt.sh queue.sh vault-writer.sh apply-decision.sh apply-review-decisions.sh build-nav-context.sh validate-candidates.sh advance-marker.sh build-route-batches.py validate-route-batch.py build-reconcile-batches.py validate-reconcile-batch.py build-review-queue.py serve-review.py; do
   [ -x "$DREAM_SCRIPTS_DIR/$s" ] || { echo "dream-skill: missing $s in $DREAM_SCRIPTS_DIR" >&2; _MISSING="$_MISSING $s"; }
 done
 [ -r "$ROUTING_MD" ] || { echo "dream-skill: missing ROUTING.md at $ROUTING_MD" >&2; _MISSING="$_MISSING ROUTING.md"; }
@@ -171,7 +171,7 @@ Then re-invoke `"$DREAM_SCRIPTS_DIR/find-chats.sh"` with the chosen flag.
 
 ### Step 2 — MAP
 
-For each batch, prefilter each raw transcript path before dispatch. MAP agents read only the filtered text; the raw transcript path is retained only for provenance:
+**Step 2a — Prefilter.** For each batch, prefilter each raw transcript path before dispatch. MAP agents read only the filtered text; the raw transcript path is retained only for provenance:
 
 ```bash
 transcript="<absolute raw transcript path>"
@@ -181,39 +181,57 @@ SOURCE_DATE="$(python3 -c 'import datetime, pathlib, sys; print(datetime.datetim
 "$DREAM_SCRIPTS_DIR/prefilter-transcript.py" --stats "$transcript" > "$FILTERED_TRANSCRIPT"
 ```
 
-For each filtered transcript, dispatch one subagent using the Task/Agent tool, **with `model: sonnet`** (see Model policy). Each subagent receives:
+Collect every prefiltered transcript into a manifest array of `{"raw","filtered","source_date"}` objects (`$MAP_MANIFEST_JSON`).
 
-**Dispatch prompt (verbatim — copy into each Task invocation):**
+**Step 2b — Build single-Read MAP units.** The Read tool rejects any file whose content exceeds ~25,000 tokens. A large filtered transcript therefore forces an extraction agent into many windowed Read calls, and the API re-bills the whole accumulated context on every turn — the **multi-turn multiplier**. In a real run, one 963 KB chat cost ~1.5M tokens (read across ~16 windows) and produced **zero** candidate facts. `build-map-batches.py` removes the multiplier *without dropping content*: big transcripts are split on line boundaries into overlapping ≤85 KB **chunks** (one agent reads one chunk in a single Read; no agent re-reads another's chunk, so content enters context exactly once); small transcripts are first-fit packed into ≤85 KB **bundles** (dozens of tiny chats collapse into a handful of agents). Every original line lands in at least one unit (chunk overlap keeps boundary-spanning facts whole). Unit tested via `tests/test_build_map_batches.sh`.
 
-> You are a dream-skill extraction agent. Read the filtered transcript at `<filtered_path>` and extract every fact about Bohdan that belongs in bucket A (additive personal fact) or buckets D/E (queued items), using the extraction taxonomy in SKILL.md. Do NOT open the raw transcript. Use the raw transcript path only for provenance: set `source_chat` exactly to `<raw_path>` and set `source_date` exactly to `<source_date>`.
+```bash
+printf '%s' "$MAP_MANIFEST_JSON" | \
+  "$DREAM_SCRIPTS_DIR/build-map-batches.py" --workdir "$WORKDIR" > "$WORKDIR/map-units.json"
+```
+
+Each descriptor is `{"batch_id","kind":"chunk","unit_path","source_chat","source_date","part","of"}` (a slice of one chat) or `{"batch_id","kind":"bundle","unit_path","members":[{"source_chat","source_date"}]}` (several chats, with in-band `===== DREAM-MAP-UNIT source_chat=... source_date=... =====` separators). Dispatch ONE subagent per unit using the Task/Agent tool, **with `model: sonnet`** (see Model policy).
+
+**Dispatch prompt (verbatim — fill `<unit_path>`, and for chunk units `<source_chat>` / `<source_date>`):**
+
+> You are a dream-skill extraction agent. Read the MAP unit at `<unit_path>` with a SINGLE Read call — it is ≤85 KB and fits in one read. Do NOT make multiple Read calls, do NOT re-read the file, do NOT open any raw transcript. Extract every fact about Bohdan that belongs in bucket A (additive personal fact) or buckets D/E (queued items), using the extraction taxonomy in SKILL.md.
+>
+> Provenance:
+> - If the unit contains `===== DREAM-MAP-UNIT source_chat=<path> source_date=<date> =====` separator lines, it bundles several chats: attribute each fact to the `source_chat` and `source_date` of the separator block the fact came from.
+> - Otherwise the unit is one slice of a single chat: set `source_chat` exactly to `<source_chat>` and `source_date` exactly to `<source_date>` on every fact.
 >
 > Rules:
 > - Apply the five-bucket taxonomy above (A=write-candidate, B/C=drop, D/E=queue).
 > - Output ONLY a JSON array of candidate-fact objects matching this schema exactly (overview §4):
 >   `[{"content":"...","confidence":"high|medium|low","source_chat":"<path>","source_date":"<YYYY-MM-DD>","type":"...","evidence":"...","suggested_section":"..."}]`
 > - Required fields: `content`, `confidence`, `source_chat`, `source_date`. Optional: `type`, `evidence`, `suggested_section`.
-> - Every output item MUST use `source_chat: "<raw_path>"` and `source_date: "<source_date>"`.
 > - Do NOT include `needs_review`, `target_hint`, or `section` — those are set by routing and reconciliation.
-> - An empty array `[]` is valid for code-only or private chats.
+> - An empty array `[]` is valid for code-only or private units.
 > - Do NOT invent facts. Do NOT route or reconcile. Extract only.
-> - If the filtered transcript is still > ~100 KB: chunk the filtered text into overlapping 40 KB segments, extract from each, then deduplicate within this chat before returning.
 
-Each subagent returns a JSON array of candidate facts. Validate the JSON structure using the `validate_candidates` harness (required fields ONLY: `content`, `confidence`, `source_chat`, `source_date`). After validation, normalize provenance deterministically to the raw transcript path and source date so temp file paths can never leak downstream. Any subagent output that is not valid JSON, or is missing any required field, is logged as an extraction error and skipped for this run. Missing optional fields (`type`, `evidence`, `suggested_section`) never cause a candidate to be dropped.
+Each subagent returns a JSON array of candidate facts. Validate the JSON structure using the `validate_candidates` harness (required fields ONLY: `content`, `confidence`, `source_chat`, `source_date`), then normalize provenance deterministically **by unit kind** so temp file paths can never leak and mis-attribution is caught. Any subagent output that is not valid JSON, or is missing any required field, is logged as an extraction error and skipped. Missing optional fields (`type`, `evidence`, `suggested_section`) never cause a candidate to be dropped.
 
 **JSON validation harness — use the helper script (Rule 2), do not re-implement:**
 
-Validation lives in `"$DREAM_SCRIPTS_DIR/validate-candidates.sh"` — the single source of truth (unit-tested via `tests/test_map_harness.sh`, which sources this same script; golden inputs in `tests/fixtures/map/`). It filters a candidate array to items carrying all 4 required fields and errors on non-array input. Run it per subagent output:
+Validation lives in `"$DREAM_SCRIPTS_DIR/validate-candidates.sh"` — the single source of truth (unit-tested via `tests/test_map_harness.sh`, which sources this same script; golden inputs in `tests/fixtures/map/`). It filters a candidate array to items carrying all 4 required fields and errors on non-array input. Run it per unit output, then apply kind-specific normalization:
 
 ```bash
-# Validate one subagent's JSON array; VALID is the filtered array, or empty on error.
+# Validate one unit's JSON array; VALID is the filtered array, or empty on error.
 VALID=$(printf '%s' "$subagent_json" | "$DREAM_SCRIPTS_DIR/validate-candidates.sh") \
-  || { echo "MAP: invalid candidate JSON (not an array) — skipping this transcript" >&2; VALID="[]"; }
-VALID=$(printf '%s' "$VALID" | jq --arg source_chat "$transcript" --arg source_date "$SOURCE_DATE" \
+  || { echo "MAP: invalid candidate JSON (not an array) — skipping this unit" >&2; VALID="[]"; }
+
+# chunk unit → overwrite provenance with the descriptor's pinned raw path + date:
+VALID=$(printf '%s' "$VALID" | jq --arg source_chat "$unit_source_chat" --arg source_date "$unit_source_date" \
   'map(.source_chat = $source_chat | .source_date = $source_date)')
-# Or, if sourced:  source "$DREAM_SCRIPTS_DIR/validate-candidates.sh"; VALID=$(validate_candidates "$subagent_json")
+
+# bundle unit → keep only candidates whose source_chat is a declared member and
+# pin its source_date from that member; mis-attributed candidates are dropped:
+VALID=$(printf '%s' "$VALID" | jq --argjson members "$members_json" \
+  '[ .[] | . as $c | ($members[] | select(.source_chat == $c.source_chat)) as $m
+     | $c + {source_date: $m.source_date} ]')
 ```
 
-It checks ONLY the 4 required fields (`content`, `confidence`, `source_chat`, `source_date`); optional fields (`type`, `evidence`, `suggested_section`) never cause a drop.
+It checks ONLY the 4 required fields (`content`, `confidence`, `source_chat`, `source_date`); optional fields (`type`, `evidence`, `suggested_section`) never cause a drop. Chunk overlap can surface a boundary fact in two adjacent units — REDUCE (Step 3) dedups by exact `(content, suggested_section)`, so duplicates collapse automatically.
 
 ### Step 3 — REDUCE
 
@@ -288,42 +306,58 @@ Each agent emits an array with one decision per `candidate_id`. Validate every o
 
 The validator proves every routed candidate received exactly one decision, the decision target matches the batch page and that candidate's routed section, and the reconciliation decision fields satisfy the action/mode/review contract. Each candidate receives a reconciliation decision per overview §4: `action`, `mode`, `target`, `old_content`, `content`, `candidate_confidence`, `needs_review`, `rationale`. Field is `rationale` (not `reason`).
 
-**Step 5d — Apply:** Feed the reconciliation decision to `apply-decision.sh` (Plan 3). `apply-decision.sh` owns the action→mode→vault-writer mapping. The orchestrator does NOT re-implement this mapping — it passes the decision through unchanged.
+**Step 5d — Apply:** Feed the reconciliation decision to `apply-decision.sh` (Plan 3). `apply-decision.sh` owns the action→mode→vault-writer mapping. The orchestrator does NOT re-implement this mapping — it passes the decision through unchanged. Always pass `--candidate-id <candidate_id>` so queued items get a sidecar JSON written to `$DREAM_HOME/queue/sidecars/` (needed by the web review UI in Step 6).
+
+```bash
+"$DREAM_SCRIPTS_DIR/apply-decision.sh" \
+  --vault        "<abs vault root>" \
+  --decision     "<path-to-decision.json>" \
+  --undo-log     "$DREAM_UNDO_LOG" \
+  --candidate-id "<candidate_id>"
+```
 
 ### Step 6 — REVIEW
 
-Invoke the terminal review flow from `"$DREAM_SCRIPTS_DIR/queue.sh" list` for the user to approve / edit / skip / discard each queued item. (`queue.sh` was populated in Step 5d by `apply-decision.sh`.) Facts approved during review are added to the APPLY list; discarded facts are removed from the queue.
+Launch the web flip-card review UI. Medium and low confidence items queued in Step 5d are shown as swipeable cards. The user approves (→), discards (←), or defers to next run (↑) each fact.
 
-**Review UI per entry:**
+**Step 6a — Build the review queue JSON:**
 
+```bash
+REVIEW_INPUT="$DREAM_HOME/queue/review-input.json"
+REVIEW_DECISIONS="$DREAM_HOME/queue/review-decisions.json"
+python3 "$DREAM_SCRIPTS_DIR/build-review-queue.py" \
+  --pending-md    "$DREAM_QUEUE_FILE" \
+  --sidecars-dir  "$DREAM_HOME/queue/sidecars" \
+  --output        "$REVIEW_INPUT" \
+  --existing-decisions "$REVIEW_DECISIONS"
 ```
-[N/M] <bucket>: <title>
 
-  Evidence:   "<quote>"
-  Target:     <vault-relative-path>
-  Confidence: <high|medium|low>
+**Step 6b — Launch the server (blocks until user hits "Finish"):**
 
-[a]pprove  [e]dit  [s]kip  [d]iscard  [q]uit
+```bash
+python3 "$DREAM_SCRIPTS_DIR/serve-review.py" \
+  --queue     "$REVIEW_INPUT" \
+  --decisions "$REVIEW_DECISIONS" \
+  --web       "$DREAM_SKILL_HOME/web" \
+  --port 5174
+# Server blocks here. Opens http://localhost:5174/ in the browser automatically.
+# When user clicks "Finish — hand back to Claude", POST /api/shutdown fires and serve-review.py exits.
 ```
 
-**Approve (`a`):** Promote to the APPLY list for this run. Call `"$DREAM_SCRIPTS_DIR/apply-decision.sh"` with the stored decision JSON + `--undo-log "$DREAM_UNDO_LOG"`. Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove` to clear the entry.
+Tell the user: *"Opening review UI at http://localhost:5174/ — use → to approve, ← to discard, ↑ to defer to next run. Click 'Finish' when done."*
 
-**Edit (`e`) — free-form field editor:** Prompt: `What to edit? Comma-separated field:value pairs. Valid fields: title, evidence, target, confidence, bucket.` Parse and validate. Re-show full updated entry. Prompt `[a]pply / [r]e-edit / [d]iscard`. On apply: `"$DREAM_SCRIPTS_DIR/queue.sh" remove` (original key) + `"$DREAM_SCRIPTS_DIR/queue.sh" append` (new values). Do NOT auto-approve after edit.
+**Step 6c — Apply decisions after the server exits:**
 
-**Skip (`s`):** Leave in queue. Advance.
-
-**Discard (`d`):** Call `"$DREAM_SCRIPTS_DIR/queue.sh" remove`. Advance.
-
-**Quit (`q`):** Stop walking. Remaining entries stay queued. Jump to RECEIPT.
-
-**Summary at end of REVIEW:**
+```bash
+REVIEW_FACTS=$("$DREAM_SCRIPTS_DIR/apply-review-decisions.sh" \
+  --decisions    "$REVIEW_DECISIONS" \
+  --sidecars-dir "$DREAM_HOME/queue/sidecars" \
+  --undo-log     "$DREAM_UNDO_LOG")
+# $REVIEW_FACTS: JSON fact lines from approved writes (same format as Step 5d output)
+# Append these to the RECEIPT fact lines collected in Step 7.
 ```
-Dream queue review complete.
-- Approved: X
-- Edited:   Y  (still queued; review again to approve)
-- Discarded: Z
-- Skipped (still queued): W
-```
+
+**Skip review (dry-run or empty queue):** If `--dry-run` is active or `review-input.json` contains 0 undecided entries, skip Steps 6a–6c — no server is launched.
 
 ### Step 7 — APPLY
 

@@ -35,15 +35,17 @@ VAULT=""
 DECISION=""
 UNDO_LOG=""
 DRY_RUN=0
+CANDIDATE_ID=""
 
 die() { echo "apply-decision: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --vault)    VAULT="$2";    shift 2 ;;
-    --decision) DECISION="$2"; shift 2 ;;
-    --undo-log) UNDO_LOG="$2"; shift 2 ;;
-    --dry-run)  DRY_RUN=1;     shift ;;
+    --vault)        VAULT="$2";        shift 2 ;;
+    --decision)     DECISION="$2";     shift 2 ;;
+    --undo-log)     UNDO_LOG="$2";     shift 2 ;;
+    --dry-run)      DRY_RUN=1;         shift ;;
+    --candidate-id) CANDIDATE_ID="$2"; shift 2 ;;
     *) die "unknown arg: $1" ;;
   esac
 done
@@ -104,6 +106,17 @@ _bucket_for_confidence() {
 # Build optional --dry-run flag to pass down to sub-tools
 _dry_flag() { [ "$DRY_RUN" = "1" ] && echo "--dry-run" || true; }
 
+# Write sidecar JSON for web review UI (only when --candidate-id provided, not dry-run)
+_write_sidecar() {
+  [ -n "$CANDIDATE_ID" ] || return 0
+  [ "$DRY_RUN" = "1" ]   && return 0
+  local sdir="${DREAM_HOME:-$HOME/.claude/dream-skill}/queue/sidecars"
+  mkdir -p "$sdir"
+  jq --arg cid "$CANDIDATE_ID" --arg vroot "$VAULT" \
+     '. + {candidate_id: $cid, vault_root: $vroot}' \
+     "$DECISION" > "$sdir/$CANDIDATE_ID.json"
+}
+
 # --- Dispatch ---
 case "$action" in
 
@@ -114,11 +127,13 @@ case "$action" in
       if [ "$DRY_RUN" = "1" ]; then
         echo "apply-decision [dry-run]: would queue action=new bucket=$bucket title='$content' target=${VAULT}/${page}#${section}"
       else
+        _write_sidecar
         "$QUEUE_SH" append \
           --bucket "$bucket" \
           --title  "$content" \
           --evidence "$rationale" \
           --confidence "$candidate_confidence" \
+          --id     "${CANDIDATE_ID:-}" \
           --target "${VAULT}/${page}#${section}"
       fi
       _emit_fact "$content" "" "new" "queued" "$bucket"
@@ -157,11 +172,13 @@ case "$action" in
     if [ "$DRY_RUN" = "1" ]; then
       echo "apply-decision [dry-run]: would queue action=supersede bucket=destructive title='$content' target=${VAULT}/${page}#${section}"
     else
+      _write_sidecar
       "$QUEUE_SH" append \
         --bucket destructive \
         --title  "$content" \
         --evidence "$rationale" \
         --confidence "$candidate_confidence" \
+        --id     "${CANDIDATE_ID:-}" \
         --target "${VAULT}/${page}#${section}"
     fi
     _emit_fact "$content" "$old_content" "supersede" "written" "destructive"
@@ -185,11 +202,13 @@ case "$action" in
     if [ "$DRY_RUN" = "1" ]; then
       echo "apply-decision [dry-run]: would queue action=contradict bucket=destructive title='$content' target=${VAULT}/${page}#${section}"
     else
+      _write_sidecar
       "$QUEUE_SH" append \
         --bucket destructive \
         --title  "$content" \
         --evidence "$rationale" \
         --confidence "$candidate_confidence" \
+        --id     "${CANDIDATE_ID:-}" \
         --target "${VAULT}/${page}#${section}"
     fi
     # Emit TWO run-summary facts:

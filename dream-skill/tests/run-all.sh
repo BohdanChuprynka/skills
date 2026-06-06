@@ -19,7 +19,8 @@ LIVE_TESTS=(
   test_check_pending.sh      # SessionStart nudge hook
   test_find_chats.sh         # FIND
   test_prefilter_transcript.sh # MAP prefilter (raw JSONL -> compact text)
-  test_map_prefilter_contract.sh # MAP prompt contract for filtered transcript usage
+  test_build_map_batches.sh  # MAP units (single-Read chunks/bundles; anti-multiplier)
+  test_map_prefilter_contract.sh # MAP prompt contract for single-Read unit usage
   test_map_harness.sh        # MAP   (validate_candidates harness)
   test_build_nav_context.sh  # ROUTE (nav-context builder)
   test_routing_contract.sh   # ROUTE (routing supplement + static prompt contract)

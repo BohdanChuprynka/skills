@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>dream-skill · review</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg:           #0a0b0d;
+    --bg-elev-1:    #101216;
+    --bg-elev-2:    #15171b;
+    --bg-elev-3:    #1c1f24;
+    --border:       #24272d;
+    --border-soft:  #1a1c20;
+    --border-bright: #2e323a;
+
+    --text:         #f0f2f4;
+    --text-2:       #a8acb4;
+    --text-3:       #6b7079;
+    --text-4:       #3f434a;
+
+    --accent:       #10b981;
+    --accent-soft:  rgba(16, 185, 129, 0.10);
+    --accent-line:  rgba(16, 185, 129, 0.35);
+
+    --reject:       #e85d75;
+    --reject-soft:  rgba(232, 93, 117, 0.10);
+    --defer:        #f59e0b;
+    --defer-soft:   rgba(245, 158, 11, 0.10);
+    --link:         #60a5fa;
+    --link-soft:    rgba(96, 165, 250, 0.10);
+
+    --conf-high:    #10b981;
+    --conf-med:     #f59e0b;
+    --conf-low:     #6b7079;
+
+    --sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: "Geist Mono", "SF Mono", Menlo, ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv11", "ss01", "ss03";
+    letter-spacing: -0.005em;
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* ─────────── Top bar ─────────── */
+  .topbar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border-soft);
+    background: var(--bg);
+    z-index: 10;
+    position: relative;
+    flex-shrink: 0;
+    min-height: 67px;
+  }
+  .brand {
+    font-family: var(--sans);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brand-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: inline-block;
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .progress { display: flex; align-items: center; gap: 14px; }
+  .progress-text {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .progress-text strong { color: var(--text); font-weight: 600; }
+  .progress-bar {
+    width: 200px; height: 2px;
+    background: var(--border-soft);
+    border-radius: 1px;
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-fill {
+    position: absolute; inset: 0;
+    background: var(--accent);
+    transform-origin: left;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .actions-top { display: flex; justify-content: flex-end; gap: 8px; }
+  .top-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    padding: 8px 14px;
+    font-family: var(--sans);
+    font-size: 13px; font-weight: 500;
+    letter-spacing: -0.005em;
+    cursor: pointer;
+    transition: all 0.15s;
+    border-radius: 6px;
+  }
+  .top-btn:hover { border-color: var(--border-bright); color: var(--text); background: var(--bg-elev-1); }
+  .top-btn.primary {
+    background: var(--accent); border-color: var(--accent);
+    color: #07120e; font-weight: 600;
+  }
+  .top-btn.primary:hover { background: #0fd693; border-color: #0fd693; }
+
+  /* ─────────── Stage / cards ─────────── */
+  .stage {
+    position: relative;
+    flex: 1 1 0; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 32px;
+    perspective: 1400px;
+    overflow: hidden;
+  }
+  .card {
+    position: absolute;
+    width: min(680px, 100%);
+    max-height: 100%;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 36px 34px;
+    overflow-y: auto;
+    transition: transform 0.36s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.36s ease;
+    transform-origin: center;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.02) inset,
+      0 20px 50px -20px rgba(0,0,0,0.6),
+      0 8px 16px -8px rgba(0,0,0,0.4);
+  }
+  .card.current  { z-index: 5; }
+  .card.behind-1 { transform: scale(0.97) translateY(-10px); opacity: 0.5; pointer-events: none; z-index: 2; }
+  .card.behind-2 { transform: scale(0.94) translateY(-20px); opacity: 0.2; pointer-events: none; z-index: 1; }
+  .card.swipe-right { transform: translateX(140%) rotate(5deg);  opacity: 0; }
+  .card.swipe-left  { transform: translateX(-140%) rotate(-5deg); opacity: 0; }
+  .card.swipe-up    { transform: translateY(-130%) scale(0.94);  opacity: 0; }
+
+  /* ─────────── Card meta ─────────── */
+  .meta-row {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0;
+    margin-bottom: 28px; padding-bottom: 22px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .meta-cell {
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 0 18px 0 0; margin-right: 18px;
+    border-right: 1px solid var(--border-soft);
+  }
+  .meta-cell:last-of-type { border-right: none; margin-right: 0; padding-right: 0; }
+  .meta-label {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.04em; color: var(--text-4); text-transform: lowercase; line-height: 1;
+  }
+  .meta-value {
+    font-family: var(--sans); font-size: 14px; font-weight: 500;
+    color: var(--text); letter-spacing: -0.005em; line-height: 1;
+    display: inline-flex; align-items: center;
+  }
+  .conf-dot {
+    display: inline-block; width: 7px; height: 7px;
+    border-radius: 50%; margin-right: 6px; vertical-align: middle; transform: translateY(-1px);
+  }
+  .conf-dot.high   { background: var(--conf-high); box-shadow: 0 0 6px rgba(16,185,129,0.6); }
+  .conf-dot.medium { background: var(--conf-med);  box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+  .conf-dot.low    { background: var(--conf-low); }
+
+  /* ─────────── Path ─────────── */
+  .path-wrap { margin-bottom: 28px; }
+  .path-label {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.04em; color: var(--text-4); margin-bottom: 8px; text-transform: lowercase;
+  }
+  .path {
+    font-family: var(--mono); font-size: 18px; font-weight: 500;
+    line-height: 1.4; color: var(--text); letter-spacing: -0.01em; word-break: break-all;
+  }
+  .path .section-hint { color: var(--text-3); font-size: 14px; font-weight: 400; }
+
+  /* ─────────── Diff ─────────── */
+  .diff {
+    background: var(--bg-elev-1);
+    border-radius: 8px; border: 1px solid var(--border-soft);
+    padding: 20px 22px; margin-bottom: 24px;
+  }
+  .diff-verb {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 14px; display: inline-block;
+  }
+  .diff-line {
+    font-family: var(--mono); font-size: 13px; line-height: 1.55;
+    color: var(--text); word-break: break-all; padding: 3px 0;
+    display: flex; gap: 10px;
+  }
+  .diff-line .sigil { color: var(--text-4); font-weight: 500; width: 12px; flex-shrink: 0; user-select: none; }
+  .diff-line.before { color: var(--reject); }
+  .diff-line.before .sigil { color: var(--reject); }
+  .diff-line.before .text { text-decoration: line-through; text-decoration-color: rgba(232,93,117,0.5); text-decoration-thickness: 1px; }
+  .diff-line.after  { color: var(--accent); }
+  .diff-line.after .sigil { color: var(--accent); }
+  .diff-note {
+    font-family: var(--sans); font-size: 12.5px; color: var(--text-3);
+    margin-top: 14px; line-height: 1.55; padding-top: 14px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  /* ─────────── Context ─────────── */
+  .context-label {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.04em; color: var(--text-4); margin-bottom: 10px; text-transform: lowercase;
+  }
+  .context {
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.65;
+    color: var(--text-3); background: var(--bg-elev-1);
+    border-radius: 6px; padding: 14px 16px; border: 1px solid var(--border-soft);
+    white-space: pre-wrap; max-height: 130px; overflow-y: auto;
+  }
+
+  /* ─────────── Action bar ─────────── */
+  .actionbar {
+    height: 88px; flex-shrink: 0;
+    border-top: 1px solid var(--border-soft);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    gap: 12px; padding: 0 28px;
+  }
+  .act {
+    background: var(--bg-elev-1); border: 1px solid var(--border);
+    color: var(--text); padding: 14px 22px; border-radius: 10px;
+    cursor: pointer; transition: all 0.15s; font-family: var(--sans);
+    display: inline-flex; align-items: center; gap: 10px;
+    min-width: 140px; justify-content: center;
+  }
+  .act:hover { background: var(--bg-elev-2); border-color: var(--border-bright); transform: translateY(-1px); }
+  .act .kbd {
+    font-family: var(--mono); font-size: 11px; font-weight: 500;
+    color: var(--text-3); padding: 2px 6px;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--bg); line-height: 1;
+  }
+  .act .label { font-size: 13px; font-weight: 500; letter-spacing: -0.005em; }
+  .act.no:hover { border-color: var(--reject); background: var(--reject-soft); }
+  .act.no:hover .kbd  { border-color: var(--reject); color: var(--reject); }
+  .act.no:hover .label { color: var(--reject); }
+  .act.hold:hover { border-color: var(--defer); background: var(--defer-soft); }
+  .act.hold:hover .kbd  { border-color: var(--defer); color: var(--defer); }
+  .act.hold:hover .label { color: var(--defer); }
+  .act.go:hover { background: var(--accent); border-color: var(--accent); }
+  .act.go:hover .kbd   { background: rgba(255,255,255,0.15); border-color: transparent; color: #07120e; }
+  .act.go:hover .label { color: #07120e; }
+
+  /* ─────────── Modal ─────────── */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(8,9,11,0.7);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .modal-backdrop.open { opacity: 1; pointer-events: auto; }
+  .modal {
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px 32px 24px; width: min(460px, 90%);
+    box-shadow: 0 24px 60px -20px rgba(0,0,0,0.7);
+    transform: translateY(8px); transition: transform 0.22s;
+  }
+  .modal-backdrop.open .modal { transform: translateY(0); }
+  .modal h3 { font-size: 19px; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 10px; }
+  .modal p  { font-size: 13.5px; line-height: 1.55; color: var(--text-2); margin-bottom: 6px; }
+  .modal p.muted { color: var(--text-3); font-size: 12.5px; }
+  .modal .stats {
+    margin: 18px 0 22px; padding: 14px 16px;
+    background: var(--bg-elev-1); border-radius: 8px; border: 1px solid var(--border-soft);
+    font-family: var(--mono); font-size: 12.5px; color: var(--text-2); line-height: 1.8;
+  }
+  .modal .stats .num { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  .modal .stats .lbl-go   { color: var(--accent); }
+  .modal .stats .lbl-no   { color: var(--reject); }
+  .modal .stats .lbl-hold { color: var(--defer); }
+  .modal-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal-btn {
+    padding: 9px 18px; border-radius: 8px;
+    font-family: var(--sans); font-size: 13px; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border);
+    background: transparent; color: var(--text-2); transition: all 0.15s;
+  }
+  .modal-btn:hover { border-color: var(--border-bright); color: var(--text); }
+  .modal-btn.primary { background: var(--accent); border-color: var(--accent); color: #07120e; font-weight: 600; }
+  .modal-btn.primary:hover { background: #0fd693; border-color: #0fd693; }
+
+  /* ─────────── Summary ─────────── */
+  .summary {
+    width: min(560px, 100%);
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    border-radius: 14px; padding: 36px 40px 32px;
+    box-shadow: 0 20px 60px -20px rgba(0,0,0,0.6), 0 8px 16px -8px rgba(0,0,0,0.4);
+  }
+  .summary .eyebrow {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px;
+  }
+  .summary h2 {
+    font-size: 30px; font-weight: 600; line-height: 1.15;
+    letter-spacing: -0.025em; margin-bottom: 10px;
+  }
+  .summary .lede { font-size: 14px; line-height: 1.55; color: var(--text-2); margin-bottom: 28px; }
+  .summary .stat-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+    background: var(--bg-elev-1); border: 1px solid var(--border-soft);
+    border-radius: 10px; margin-bottom: 24px; overflow: hidden;
+  }
+  .summary .stat { padding: 18px 0; text-align: center; border-right: 1px solid var(--border-soft); }
+  .summary .stat:last-child { border-right: none; }
+  .summary .stat .num {
+    font-size: 28px; font-weight: 600; line-height: 1;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  }
+  .summary .stat .lbl {
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-top: 8px;
+  }
+  .summary .stat.approve .num { color: var(--accent); }
+  .summary .stat.reject  .num { color: var(--reject); }
+  .summary .stat.defer   .num { color: var(--defer); }
+  .summary-buttons { display: flex; gap: 8px; }
+  .apply-btn {
+    flex: 1; background: var(--accent); color: #07120e;
+    border: 1px solid var(--accent); padding: 13px 20px; border-radius: 9px;
+    font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+  }
+  .apply-btn:hover { background: #0fd693; border-color: #0fd693; }
+
+  /* ─────────── Utility ─────────── */
+  .hidden { display: none !important; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-4); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="brand-dot"></span>dream-skill</div>
+  <div class="progress hidden">
+    <span class="progress-text"><strong id="progressNow">1</strong> of <span id="progressTotal">0</span></span>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill" style="transform:scaleX(0)"></div></div>
+  </div>
+  <div class="actions-top hidden">
+    <button class="top-btn" onclick="confirmFinishLater()">Finish later</button>
+    <button class="top-btn primary" onclick="confirmFinishNow()">Finish</button>
+  </div>
+</header>
+
+<main class="stage" id="stage"></main>
+
+<div class="actionbar hidden" id="actionbar">
+  <button class="act no"   onclick="decide('reject')">
+    <span class="kbd">←</span><span class="label">Discard</span>
+  </button>
+  <button class="act hold" onclick="decide('defer')">
+    <span class="kbd">↑</span><span class="label">Next run</span>
+  </button>
+  <button class="act go"   onclick="decide('approve')">
+    <span class="kbd">→</span><span class="label">Approve</span>
+  </button>
+</div>
+
+<div class="modal-backdrop" id="modalFinish">
+  <div class="modal">
+    <h3>Finish review now?</h3>
+    <p>Claude will write approved facts to your vaults and log undo entries. Skipped and deferred entries stay in the queue for next time.</p>
+    <div class="stats" id="finishStats"></div>
+    <div class="modal-buttons">
+      <button class="modal-btn" onclick="closeModal('modalFinish')">Cancel</button>
+      <button class="modal-btn primary" onclick="confirmedFinish()">Finish &amp; hand back</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modalLater">
+  <div class="modal">
+    <h3>Finish later?</h3>
+    <p>No vault changes applied yet. Your decisions so far will be saved.</p>
+    <p class="muted">All undecided + deferred entries will be shown next time you run /dream-skill.</p>
+    <div class="stats" id="laterStats"></div>
+    <div class="modal-buttons">
+      <button class="modal-btn" onclick="closeModal('modalLater')">Cancel</button>
+      <button class="modal-btn primary" onclick="confirmedLater()">Save &amp; exit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentIdx = 0;
+let decisions = {};
+let QUEUE = [];
+let total = 0;
+
+async function bootstrap() {
+  try {
+    const r = await fetch('/api/queue');
+    if (r.ok) {
+      await loadQueue(await r.json());
+      return;
+    }
+    if (r.status === 404) { renderNoQueue(); return; }
+  } catch (err) {
+    renderNoQueue();
+  }
+}
+
+async function loadQueue(data) {
+  QUEUE = (data.entries || []).filter(e => e.category !== 'auto');
+  // Restore prior decisions
+  QUEUE.forEach(e => { if (e.decided && e.decision) decisions[e.id] = e.decision; });
+  total = QUEUE.length;
+  currentIdx = 0;
+  while (currentIdx < total && decisions[QUEUE[currentIdx].id]) currentIdx++;
+
+  document.querySelector('.topbar .progress').classList.remove('hidden');
+  document.querySelector('.actions-top').classList.remove('hidden');
+  document.getElementById('progressTotal').textContent = total;
+
+  if (total === 0) { renderEmpty(); return; }
+  document.getElementById('actionbar').classList.remove('hidden');
+  renderCards();
+}
+
+function renderNoQueue() {
+  document.getElementById('stage').innerHTML = `
+    <div class="summary">
+      <div class="eyebrow">empty queue</div>
+      <h2>Nothing queued for review.</h2>
+      <p class="lede">Run <code>/dream-skill</code> inside Claude Code to sync your conversations to the vault. Medium and low confidence facts will appear here.</p>
+    </div>
+  `;
+}
+
+function renderEmpty() {
+  document.getElementById('actionbar').classList.add('hidden');
+  document.getElementById('progressFill').style.transform = 'scaleX(1)';
+  document.getElementById('progressNow').textContent = '0';
+  document.getElementById('progressTotal').textContent = '0';
+  document.getElementById('stage').innerHTML = `
+    <div class="summary">
+      <div class="eyebrow">All done</div>
+      <h2>Nothing to review.</h2>
+      <p class="lede">All queued facts have been decided. Run <code>/dream-skill</code> any time to sync more.</p>
+    </div>
+  `;
+}
+
+function renderCards() {
+  const stage = document.getElementById('stage');
+  stage.innerHTML = '';
+  if (currentIdx >= total) { renderSummary(false); return; }
+
+  for (let offset = 2; offset >= 0; offset--) {
+    const idx = currentIdx + offset;
+    if (idx >= total) continue;
+    const card = document.createElement('article');
+    card.className = 'card';
+    if (offset === 0) card.classList.add('current');
+    if (offset === 1) card.classList.add('behind-1');
+    if (offset === 2) card.classList.add('behind-2');
+    card.dataset.idx = idx;
+    card.innerHTML = buildCard(QUEUE[idx]);
+    stage.appendChild(card);
+  }
+  updateProgress();
+}
+
+function buildCard(e) {
+  const d = e.diff || {};
+  const verb = escHtml(d.verb || 'APPEND');
+
+  let diffInner = '';
+  if (d.before && d.after) {
+    diffInner = `
+      <div class="diff-line before"><span class="sigil">−</span><span class="text">${escHtml(d.before)}</span></div>
+      <div class="diff-line after"><span class="sigil">+</span><span class="text">${escHtml(d.after)}</span></div>`;
+  } else if (d.addLine) {
+    diffInner = `<div class="diff-line after"><span class="sigil">+</span><span class="text">${escHtml(d.addLine)}</span></div>`;
+  } else if (d.removeLine) {
+    diffInner = `<div class="diff-line before"><span class="sigil">−</span><span class="text">${escHtml(d.removeLine)}</span></div>`;
+  }
+
+  const note = d.note ? `<div class="diff-note">${escHtml(d.note)}</div>` : '';
+  const sectionHint = e.target_section ? `<span class="section-hint"> → ${escHtml(e.target_section)}</span>` : '';
+
+  return `
+    <div class="meta-row">
+      <div class="meta-cell">
+        <span class="meta-label">type</span>
+        <span class="meta-value">${escHtml(e.signal_label || e.signal || '')}</span>
+      </div>
+      <div class="meta-cell">
+        <span class="meta-label">confidence</span>
+        <span class="meta-value"><span class="conf-dot ${escHtml(e.confidence)}"></span>${escHtml(e.confidence)}</span>
+      </div>
+      <div class="meta-cell">
+        <span class="meta-label">vault</span>
+        <span class="meta-value">${escHtml(e.vault || '')}</span>
+      </div>
+    </div>
+
+    <div class="path-wrap">
+      <div class="path-label">target</div>
+      <div class="path">${escHtml(e.target_file || '')}${sectionHint}</div>
+    </div>
+
+    <div class="diff">
+      <div class="diff-verb">${verb}</div>
+      ${diffInner}
+      ${note}
+    </div>
+
+    <div>
+      <div class="context-label">evidence</div>
+      <pre class="context">${escHtml(e.context || '')}</pre>
+    </div>
+  `;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updateProgress() {
+  document.getElementById('progressNow').textContent = currentIdx + 1;
+  document.getElementById('progressFill').style.transform = `scaleX(${currentIdx / total})`;
+}
+
+function decide(action) {
+  if (currentIdx >= total) return;
+  const entry = QUEUE[currentIdx];
+  decisions[entry.id] = action;
+
+  fetch('/api/decide', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: entry.id, decision: action }),
+  }).catch(() => {});
+
+  const cur = document.querySelector('.card.current');
+  if (cur) {
+    if (action === 'approve') cur.classList.add('swipe-right');
+    else if (action === 'reject') cur.classList.add('swipe-left');
+    else cur.classList.add('swipe-up');
+  }
+  setTimeout(() => { currentIdx++; renderCards(); }, 320);
+}
+
+function getCounts() {
+  const c = { approve: 0, reject: 0, defer: 0 };
+  Object.values(decisions).forEach(d => { if (c[d] !== undefined) c[d]++; });
+  c.undecided = total - Object.keys(decisions).filter(id => QUEUE.find(e => e.id === id)).length;
+  return c;
+}
+
+function buildStats(includeUndecided) {
+  const c = getCounts();
+  const carry = c.defer + (includeUndecided ? c.undecided : 0);
+  return `
+    <span class="num">${c.approve}</span> <span class="lbl-go">approved</span> · will write to vault<br>
+    <span class="num">${c.reject}</span> <span class="lbl-no">discarded</span> · removed from queue<br>
+    <span class="num">${carry}</span> <span class="lbl-hold">carrying over</span> · re-shown next run
+  `;
+}
+
+function confirmFinishNow()  { document.getElementById('finishStats').innerHTML = buildStats(true);  document.getElementById('modalFinish').classList.add('open'); }
+function confirmFinishLater(){ document.getElementById('laterStats').innerHTML  = buildStats(true);  document.getElementById('modalLater').classList.add('open'); }
+function closeModal(id)      { document.getElementById(id).classList.remove('open'); }
+function confirmedFinish()   { closeModal('modalFinish'); renderSummary(false); }
+function confirmedLater()    { closeModal('modalLater');  renderSummary(true); }
+
+function renderSummary(earlyExit) {
+  document.getElementById('actionbar').classList.add('hidden');
+  document.getElementById('progressFill').style.transform = 'scaleX(1)';
+  const c = getCounts();
+  const carry = c.defer + (earlyExit ? c.undecided : 0);
+  const eyebrow = earlyExit ? 'Saved' : 'Complete';
+  const headline = earlyExit ? 'See you next time' : 'Review complete';
+  const lede = earlyExit
+    ? `${Object.keys(decisions).length} of ${total} reviewed. Nothing applied yet. ${carry} entries queued for next run.`
+    : c.approve
+      ? `${total} reviewed. ${c.approve} fact${c.approve === 1 ? '' : 's'} approved — Claude will write them to your vaults.`
+      : `${total} reviewed. Nothing approved — closing exits without vault changes.`;
+
+  document.getElementById('stage').innerHTML = `
+    <div class="summary">
+      <div class="eyebrow">${eyebrow}</div>
+      <h2>${headline}</h2>
+      <p class="lede">${lede}</p>
+      <div class="stat-row">
+        <div class="stat approve"><div class="num">${c.approve}</div><div class="lbl">approved</div></div>
+        <div class="stat reject"><div class="num">${c.reject}</div><div class="lbl">discarded</div></div>
+        <div class="stat defer"><div class="num">${carry}</div><div class="lbl">next run</div></div>
+      </div>
+      <div class="summary-buttons">
+        <button class="apply-btn" onclick="cleanExit()">${earlyExit ? 'Save &amp; exit' : 'Finish — hand back to Claude'}</button>
+      </div>
+    </div>
+  `;
+}
+
+async function cleanExit() {
+  try { await fetch('/api/shutdown', { method: 'POST' }); } catch {}
+  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-3);font-family:ui-monospace,monospace;font-size:14px;background:#0a0b0d">Goodbye. You can close this tab.</div>';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
+    return;
+  }
+  if (document.querySelector('.modal-backdrop.open')) return;
+  if (currentIdx >= total) return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); decide('approve'); }
+  else if (e.key === 'ArrowLeft')  { e.preventDefault(); decide('reject'); }
+  else if (e.key === 'ArrowUp')    { e.preventDefault(); decide('defer'); }
+});
+
+bootstrap();
+</script>
+
+</body>
+</html>
