@@ -4,130 +4,139 @@ description: >
   Use when the user says "plan my day", "plan today", "plan tomorrow",
   "draft tomorrow's calendar", "run calendar-plan", "/calendar-plan",
   "schedule today", "schedule tomorrow", or wants to build a practical
-  daily plan from Google Calendar, a Notion task page, Gmail signals, and
-  a local Calendar Context note. Target date is resolved by local clock
-  time: morning/afternoon runs (before 16:00) plan TODAY; late-evening
-  runs (20:00+) plan TOMORROW; the 16:00–20:00 window defaults to
-  tomorrow and is called out in the draft. Explicit user wording
-  ("today" / "tomorrow" / a named day) always wins. Two modes:
-  /calendar-plan (draft first, ask before writing) and /calendar-plan auto
-  (apply safe planning blocks directly, pause for risky changes). Pairs
-  with a scheduled launchd job that fires the auto mode each evening.
-  Do NOT use for general scheduling questions, calendar Q&A, or anything
-  that does not involve writing planning blocks to Google Calendar.
+  daily plan and write events into Google Calendar. Target date is
+  resolved by local clock at invocation: <16:00 → today; ≥16:00 →
+  tomorrow. Explicit user wording ("today" / "tomorrow" / a named day)
+  always wins. Single mode: draft first, write on approval. Calendar is
+  the ONLY data source — no Notion, no Gmail, no other MCPs. Do NOT use
+  for general scheduling questions or calendar Q&A that does not involve
+  writing planning blocks to Google Calendar.
 ---
 
 # Calendar Plan
 
-Create a simple, calendar-ready day plan from existing commitments and goal sequence.
+Write a practical day plan as Google Calendar events from the user's stated goals + the existing fixed calendar.
 
-Before each run, read `~/.config/calendar-plan/preferences.md` (the personal config path outside the skill repo). Treat that file as the source for user-specific calendar IDs, task source names, daily defaults, commute assumptions, and calendar routing. Keep this `SKILL.md` generic. If the file is missing, fall back to the example at `config/settings.example.conf` and warn the user.
+Before each run, read `~/.config/calendar-plan/preferences.md` for calendar IDs, category routing, daily defaults, and commute assumptions. Read `~/.config/calendar-plan/observed-patterns.md` for inferred-from-history defaults (gym slots, meal cadence, deep-work block lengths). Keep this `SKILL.md` generic — personalization lives in those two files.
 
-## Modes
+## Mode
 
-- `/calendar-plan`: draft first. Gather context, propose the plan, then wait for user approval before creating or updating calendar events.
-- `/calendar-plan auto`: apply safe planning blocks directly. Pause only for risky or ambiguous actions.
+Single mode: draft first, write on approval.
 
-Safe actions in auto mode:
+1. Resolve target date.
+2. Read existing fixed events on target date across all configured calendars.
+3. Ask the user for goals if not already provided in the prompt.
+4. Propose a schedule with times + category labels.
+5. On user approval, write events to Google Calendar using correct category routing.
+6. Re-query after write. Report events created + flag any overlaps or anomalies.
 
-- Create new calendar blocks for clear tasks from the configured task sequence source.
-- Add reasonable buffers, meals, breaks, and commute holds around fixed commitments.
-- Adjust only newly proposed planning blocks before writing them.
-
-Pause before:
-
-- Deleting events.
-- Moving or rewriting existing non-planning events.
-- Mass-rescheduling.
-- Acting on unclear locations, unclear priorities, hard overlaps, or missing configured task-source context.
+No auto mode. No launchd. User invokes manually.
 
 ## Sources
 
-Use these sources in order:
+Google Calendar is the ONLY data source consulted by this skill. Notion, Gmail, file-based task lists, or other MCPs are NOT read.
 
-0. `~/.config/calendar-plan/preferences.md`: configured accounts, source names, defaults, commute assumptions, and calendar routing.
-1. Calendar sources listed in preferences: fixed meetings, existing blocks, locations, all-day events, busy windows.
-2. Task sequence source listed in preferences: canonical daily goals and their sequence.
-3. Email source listed in preferences: recent and important signals for meetings, deadlines, errands, replies, or commitments that may not be on calendar.
-4. User prompt: extra constraints, goals, energy notes, or changes for this run.
+Inputs the skill uses on each run:
 
-If a connector is unavailable, state the gap and continue with available sources. In `/calendar-plan auto`, do not write calendar blocks when the missing source could materially change the day.
+1. `~/.config/calendar-plan/preferences.md` — calendar IDs, category → calendar map, daily defaults, commute assumptions.
+2. `~/.config/calendar-plan/observed-patterns.md` — patterns learned from past calendar history (separate file, append-only).
+3. Existing events on the target date across all configured calendars — treated as hard constraints.
+4. User prompt — goals, fixed commitments, energy notes, overrides for this run.
 
-## Run Context
+If a calendar account or calendar ID is unavailable, state the gap explicitly and stop until resolved. Do not silently fall back to a single calendar.
 
-- Resolve the target date and timezone explicitly before reading or writing calendar events. State the resolved date in the draft so the user can catch a mistake before any write.
-- Default the target date by the **local clock time at the moment of the run**, not by assuming "next day". The point is to match the user's intent: morning planning is for the day ahead of you; late-night planning is for the day waking up to.
-  - **00:01 to 16:00 local (just past midnight through mid-afternoon)** → plan for **today**, the current calendar date. Example: a run started Monday 08:00 places blocks on Monday.
-  - **20:00 to 24:00 local (late evening through midnight)** → plan for **tomorrow**, the next calendar date. Example: a run started Monday 22:00 places blocks on Tuesday.
-  - **16:00 to 20:00 local (late afternoon transition window)** → ambiguous. Default to **tomorrow**, but call this out explicitly in the draft (`Resolved target date: <date> — clock is in the 16:00–20:00 window, defaulted to tomorrow; say "plan today" to flip.`) so the user can override in one line. Scheduled launchd runs fire in the evening and resolve naturally to tomorrow under this rule.
-- Explicit user wording always overrides the clock-based default. "Plan today" / "today" → current calendar date. "Plan tomorrow" / "tomorrow" / "schedule tomorrow" → next calendar date. A named day ("plan Friday") → that specific date. Never invert these — if the user said "today", do not silently shift to tomorrow because the clock is late.
-- Before writing, inspect existing events on all configured calendars for the target date. Also peek at the following morning when late-night blocks may spill over, and at the previous evening when early-morning runs may inherit unfinished commitments.
-- If a previous Calendar Plan run already wrote blocks for the target date, compare those blocks with the current calendar before adding more. Treat user edits, deletions, merges, and time shifts as preference signal for the new plan.
+## Target Date Resolution
+
+Resolve by local clock at invocation time.
+
+- `00:01 - 15:59 local` → **today** (current calendar date).
+- `16:00 - 23:59 local` → **tomorrow** (next calendar date).
+
+Explicit user wording always overrides the clock-based default:
+
+- "today" / "plan today" → current calendar date.
+- "tomorrow" / "plan tomorrow" → next calendar date.
+- Named day ("plan Saturday") → that specific date.
+
+State the resolved target date and the reasoning ("clock = 22:14 → defaulted to tomorrow") in the draft so the user can catch a mistake before any write.
+
+## Categories
+
+Four categories. Each routes to one calendar per `preferences.md`.
+
+| Category | Covers |
+|---|---|
+| Productive | Self-directed work, deep work, side projects, outreach, open-source contributions, any non-paid technical grind |
+| Job | Paid employer time (current paid role + any future paid work for someone else) |
+| School | School subjects, CCP coursework, exams, rec letters, college applications, anything academic |
+| Personal | Gym, family, partner, drive, errands, recovery, social, meals when standalone |
+
+The Productive ↔ Job split is conceptual (paid vs self-directed); both may route to the same calendar per user config — see `preferences.md`. Differentiate via event titles, not separate calendars.
+
+If a block doesn't fit any category cleanly, ask the user before defaulting to a fallback calendar.
 
 ## Planning Rules
 
 - Treat existing Google Calendar events as hard constraints unless the user explicitly asks to change them.
-- Plan around existing calendar blocks; do not overwrite or ignore them.
-- Read today's entry/section in the configured task sequence source first.
-- Preserve the configured task-source order as intentional sequence data.
-- Do not infer task placement from task type or topic. For example, do not assume commits, study, admin, or errands belong early or late unless task-source order, calendar constraints, deadlines, commute, or user instructions say so.
+- Plan around fixed blocks; never overwrite or ignore them.
 - Prefer fewer useful blocks over a packed ideal day.
-- Include realistic transition time between blocks.
-- Avoid creating many short adjacent blocks when one clear work block plus a named outcome would better match the user's actual behavior.
-- Account for meals, short breaks, and recovery space when the day is long.
-- Keep focused work blocks sized realistically; split oversized tasks instead of making one huge event.
-- Use email only to surface real obligations or likely tasks, not to overrule the configured task sequence without a clear reason.
-- For exam or appointment days, protect the fixed commitment first, add commute/check-in/reset time, then schedule only the most important follow-up work.
-- If the calendar contains a stale or contradictory exam/deadline event, pause and ask before deleting it. Do not leave two conflicting exam events silently.
+- Realistic transitions between blocks — at least 5-10 min when switching context, location, or category.
+- Account for meals, short breaks, and recovery space on long days.
+- Keep focused work blocks realistically sized — split oversized tasks instead of one huge event.
+- Honor energy windows from `preferences.md` when placing flexible blocks.
+- For exam, job, or appointment days, protect the fixed commitment first, add commute and reset time, then schedule the most important follow-up work.
+- If the calendar contains a stale or contradictory event, pause and ask before deleting it. Never leave two conflicting events silently.
 
 ## Daily Defaults
 
-- Load daily defaults from `~/.config/calendar-plan/preferences.md` before placing flexible blocks.
-- Do not schedule ordinary planning blocks before the configured wake-up time unless the calendar already has a fixed commitment or the user explicitly asks.
-- Add recurring preference blocks from `~/.config/calendar-plan/preferences.md` even when the task source omits them.
-- Place focus work according to configured energy windows when possible.
+Load from `~/.config/calendar-plan/preferences.md` and `~/.config/calendar-plan/observed-patterns.md` before placing flexible blocks.
+
+- Wake-up time defaults (weekday/weekend) come from `preferences.md`.
+- Do not schedule ordinary planning blocks before wake-up unless the calendar has a fixed commitment or the user explicitly asks.
+- Recurring preference blocks (workouts, deep-work blocks, closure tasks) are added even if the user did not name them in this run's goals.
+- Place focused work in the configured golden hours when possible; reserve lower-energy windows for procedural / lower-cognitive tasks.
 - If preferences conflict with fixed calendar events or explicit user instructions, fixed events and explicit user instructions win.
 
 ## Commute Handling
 
-- If an event has a physical location or a task clearly requires travel, reserve commute time before and after it.
-- Use commute assumptions from `~/.config/calendar-plan/preferences.md` when available.
-- If exact commute cannot be determined, use a conservative local buffer and mark the assumption in the draft.
-- In `/calendar-plan auto`, pause before writing commute-sensitive blocks when the location is ambiguous or the buffer could affect fixed events.
-- Do not create impossible back-to-back location changes.
+- Reserve commute time before and after any event with a physical location.
+- Use commute assumptions from `preferences.md`.
+- If exact commute is unknown, use a conservative local buffer and mark the assumption in the draft.
+- Never create impossible back-to-back location changes.
 
 ## Draft Output
 
-For `/calendar-plan`, return:
+For each invocation, return in this order:
 
-1. Connected account/calendar used.
-2. Fixed calendar events for the day.
-3. Task sequence found for today.
-4. Email-derived obligations, if any.
-5. Proposed agenda with times.
-6. Calendar changes that would be created or updated.
-7. Any assumptions or conflicts.
+1. Resolved target date (with reasoning if clock-derived).
+2. Fixed events already on the target date across all configured calendars.
+3. User-stated goals for the day (echo back).
+4. Proposed agenda with times + category labels.
+5. List of events to be created (title, calendar, start, end).
+6. Any assumptions, conflicts, or open questions.
 
 Ask for approval before writing.
 
 ## Calendar Write Rules
 
-- Use plain task names as event titles, e.g. `AP Study`.
-- Do not prefix titles with `Plan:`, `Focus:`, or similar tags.
-- Put brief rationale/source notes in the event description when useful, not in the title.
-- Create each block on the matching calendar from `~/.config/calendar-plan/preferences.md` instead of defaulting to primary.
-- If no configured calendar mapping fits, use the configured fallback calendar or pause when the choice could matter.
-- Prefer creating new planning blocks over editing existing fixed events.
-- Never create overlapping planning blocks across configured calendars unless the overlap is an intentional transparent hold and the reason is stated.
-- After writing, re-query the target date across all configured calendars and report any remaining overlaps, stale duplicates, or blocks that differ from the intended plan.
-- When writing, report exactly what was created or changed, including the calendar used for each block.
+- Use plain task names as event titles ("Cold outreach", "Gym", "Feature build"). No "Plan:" / "Focus:" prefixes.
+- Put rationale or sub-tasks in the event description, not the title.
+- Write each block to the calendar matching its category per `preferences.md`.
+- Never create overlapping planning blocks across calendars unless the overlap is an intentional transparent hold and the reason is stated in the description.
+- After writing, re-query the target date across all configured calendars. Report:
+  - Events created (with calendar used for each)
+  - Any remaining overlaps
+  - Stale duplicates
+  - Anything that differs from the intended plan
+- Report exactly what was written.
 
 ## Learning From Runs
 
-- Calendar Plan memory is append-only by default. Add dated observations; do not replace prior history unless the user explicitly requests compaction.
-- Capture durable preferences, recurring corrections, and repeated user edits. Do not store private transcript dumps or irrelevant work-output telemetry.
-- When actual calendar edits show a repeated pattern, update `~/.config/calendar-plan/preferences.md` instead of relying on memory alone.
-- If the user has to manually refine the same class of block twice, treat that as a planner bug to fix in preferences or this skill.
+- Append observed patterns to `~/.config/calendar-plan/observed-patterns.md` after meaningful recon runs or when the user's edits reveal a recurring preference.
+- This file is append-only by default. Add dated observations; do not replace prior history unless the user explicitly requests compaction.
+- Capture: repeated user edits, recurring corrections, durable preferences inferred from history.
+- Do not store private transcript dumps or irrelevant work-output telemetry.
+- If the user has to manually refine the same class of block twice, treat that as a planner bug to fix in `preferences.md` or this skill.
 
 ## Quality Bar
 
@@ -135,6 +144,6 @@ A good calendar plan:
 
 - Makes the next action obvious.
 - Respects the real calendar.
-- Follows the configured task sequence.
+- Honors the user's stated goals + the category routing.
 - Leaves enough buffer to execute without constant replanning.
 - Explains tradeoffs only when needed.
