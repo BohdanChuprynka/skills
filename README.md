@@ -23,6 +23,7 @@ Each skill is independent: install one without the others. All MIT licensed. All
 | [**calendar-plan-skill**](./calendar-plan-skill) | Dual-target (Claude Code + Codex CLI) daily calendar planner. Drafts tomorrow's calendar from your Obsidian vault, Google Calendar, Gmail, and a local context note. Two modes: `/calendar-plan` (draft, confirm, apply) and `/calendar-plan auto` (apply safe blocks directly). Ships with a launchd job for evening auto-runs. | Symlink |
 | [**sync-phone**](./sync-phone) | iPhone voice-dictation pipeline. Drains an iCloud-shared dictation sink, summarizes the raw transcripts, routes bullets into the right Obsidian vault, archives the source, clears the inbox. Pairs with an iPhone Shortcut for the capture side. | Symlink |
 | [**transcribe-audio**](./transcribe-audio) | Audio file to clean transcript to optional LLM summary to optional Obsidian note. OpenAI Whisper backend. Auto-chunks files past the 25 MB API limit, primes the recognizer with custom technical vocabulary, ships three summary styles. Strong on Ukrainian, Russian, English, and code-switching. | Symlink |
+| [**voice-check**](./voice-check) | Audit and rewrite drafts so they sound like you, not generic AI. Builds a measured voice profile from your own writing, scores any draft 0-100 against it, and flags AI tells, corporate words, em dashes, leftover filler, and sentence-length drift — each with a fix. Offline, zero-dependency, with an ROC-AUC proof that it separates your writing from AI. Claude Code + Codex CLI. | `./setup.sh` |
 
 ## Install
 
