@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Per-user data: corpus + generated profile stay local. Only synthetic
+# fixtures under examples/ and tests/ are committed.
+/data/input/*
+!/data/input/README.md
+!/data/input/.gitkeep
+/data/corpus/
+/data/profiles/
