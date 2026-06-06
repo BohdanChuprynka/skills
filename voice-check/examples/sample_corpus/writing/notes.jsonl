@@ -1,0 +1,8 @@
+{"kind": "polished_writing", "text": "Shipped the export fix this morning. It's live. Ping me if anything looks off."}
+{"kind": "polished_writing", "text": "Quick update. The migration's done. We dropped two old tables and the API's faster now. No downtime."}
+{"kind": "polished_writing", "text": "I read the doc. Two things don't add up. The retry logic loops forever, and the timeout's too short. Let's fix both before launch."}
+{"kind": "polished_writing", "text": "Thanks for the review. You're right about the naming. I'll rename it and push again tonight."}
+{"kind": "polished_writing", "text": "Heads up. The build broke on main. I reverted the last commit and it's green again. We'll dig into the real cause tomorrow."}
+{"kind": "polished_writing", "text": "Short version: it works, but it's slow. The query scans the whole table. I'll add an index and measure."}
+{"kind": "polished_writing", "text": "I don't think we need the cache yet. It adds risk and we're not at that scale. Let's wait until the numbers say so."}
+{"kind": "polished_writing", "text": "Got the demo working. It's rough but it makes the point. I'll clean it up before Friday."}
