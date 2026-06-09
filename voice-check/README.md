@@ -46,8 +46,9 @@ echo "Let's leverage synergies to delve into this." \
 /voice-check
 ```
 
-Audit by default. `--rewrite` adds a deterministic baseline rewrite; the skill
-layers an LLM rewrite on top, grounded in the same signals.
+The CLI audits by default; `--rewrite` adds a deterministic baseline rewrite.
+The skill goes further: it reports the findings, then immediately delivers an
+LLM rewrite on top, grounded in the same signals — no confirmation step.
 
 ## Input formats
 

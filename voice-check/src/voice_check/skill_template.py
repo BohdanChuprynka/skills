@@ -19,8 +19,8 @@ description: Audit and rewrite a draft in the user's real voice using their gene
 # voice-check
 
 Audit and rewrite drafts so they sound like the user's real voice, using the
-deterministic voice profile in this repo. Default to **Audit**; switch to
-**Rewrite** only when the user asks.
+deterministic voice profile in this repo. Report the findings, then immediately
+deliver the rewritten draft in the user's voice — do not ask permission first.
 
 ## Inputs
 - Profile: `{profile_rules}` and `{profile_md}`.
@@ -36,12 +36,15 @@ deterministic voice profile in this repo. Default to **Audit**; switch to
    ```
    You can also pipe text on stdin instead of `--draft`.
 2. If you do NOT have shell access, apply the rules in this file directly.
-3. **Audit mode:** report the score, each violation with its fix, and what
-   already matches the voice. Do not rewrite.
-4. **Rewrite mode:** produce a revised draft that fixes every hard violation and
-   as many soft ones as possible, WITHOUT inventing facts or changing meaning.
-   Preserve the user's rhythm and directness. End with a 1-2 line rationale tied
-   to the rules below.
+3. **Report:** the score, each violation with its fix, and what already matches
+   the voice.
+4. **Rewrite (always — deliver it without asking):** produce a revised draft that
+   fixes every hard violation and as many soft ones as possible, WITHOUT inventing
+   facts or changing meaning. Preserve the user's rhythm and directness. The
+   rewritten draft is the real deliverable. The only things that stop it:
+   out-of-scope input (code/docs), or a fix that would require fabrication — then
+   apply the honest version and flag what to verify. End with a 1-2 line rationale
+   tied to the rules below.
 
 ## This voice in brief
 - Written target derived from: **{derived_from}**.

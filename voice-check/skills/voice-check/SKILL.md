@@ -1,11 +1,11 @@
 ---
 name: voice-check
-description: Audit and rewrite a draft so it sounds like the user's real writing, not generic AI. Wraps the offline `voice-check` CLI (a measured voice profile + a deterministic 0-100 score). Use whenever the user says "/voice-check", "does this sound like me", "make this sound like me", "voice check this", "de-AI this draft", or asks to audit or rewrite an email, post, message, or essay in their own voice. Reports by default; rewrites only when asked.
+description: Audit and rewrite a draft so it sounds like the user's real writing, not generic AI. Wraps the offline `voice-check` CLI (a measured voice profile + a deterministic 0-100 score). Use whenever the user says "/voice-check", "does this sound like me", "make this sound like me", "voice check this", "de-AI this draft", or asks to audit or rewrite an email, post, message, or essay in their own voice. Reports the findings, then immediately delivers the rewritten draft in the user's voice.
 ---
 
 # voice-check
 
-Wrapper around the offline `voice-check` CLI. The CLI scores a draft 0–100 against the user's **measured voice profile** and flags concrete signals: em dashes, corporate words, generic-AI tells, leftover spoken filler, sentence-length drift, and missing contractions. Your job is the judgment the CLI cannot do: which findings matter, and (only when asked) a rewrite that fixes them without changing meaning.
+Wrapper around the offline `voice-check` CLI. The CLI scores a draft 0–100 against the user's **measured voice profile** and flags concrete signals: em dashes, corporate words, generic-AI tells, leftover spoken filler, sentence-length drift, and missing contractions. Your job is the judgment the CLI cannot do: which findings matter, and a rewrite that fixes them without changing meaning — delivered every time, not on request.
 
 ## Mental model
 
@@ -28,8 +28,8 @@ The user has a voice profile built from their own writing (`voice-check profile`
    # pasted text:  echo "<draft>" | voice-check check --profile ~/.config/voice-check/profile
    # --rewrite → adds a deterministic baseline rewrite;  --format json → raw signals
    ```
-3. **Audit mode (default):** report the score, each violation with its fix, and what already matches the voice. Do not rewrite.
-4. **Rewrite mode (only when asked):** produce a revised draft that fixes every hard violation and as many soft ones as possible, WITHOUT inventing facts or changing meaning. Preserve the user's rhythm and directness. Use the CLI's `--rewrite` output as a baseline, then improve it with judgment. End with a 1–2 line rationale tied to the findings.
+3. **Report:** give the score, each violation with its fix, and what already matches the voice.
+4. **Then immediately deliver the rewrite — without asking first.** Produce a revised draft that fixes every hard violation and as many soft ones as possible, WITHOUT inventing facts or changing meaning. Preserve the user's rhythm and directness. Use the CLI's `--rewrite` output as a baseline, then improve it with judgment. End with a 1–2 line rationale tied to the findings. The rewritten draft is the real deliverable and comes last. The only things that stop a rewrite: the draft is out of scope (code/docs), or a fix would require fabricating facts — then apply the honest version and flag in one line what to verify.
 
 ## When to invoke
 

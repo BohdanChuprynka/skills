@@ -3,6 +3,15 @@
 All notable changes to voice-check are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/). Semantic versioning.
 
+## [Unreleased]
+
+### Changed
+- Skill and slash command now report the findings and then **immediately deliver
+  the rewritten draft** in the user's voice, instead of rewriting only when asked.
+  The only things that stop the auto-rewrite: out-of-scope input (code/docs), or a
+  fix that would require fabricating facts (apply the honest version and flag what
+  to verify).
+
 ## [0.1.0] - 2026-06-06
 
 Initial release.
