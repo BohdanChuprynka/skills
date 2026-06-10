@@ -24,6 +24,7 @@ Each skill is independent: install one without the others. All MIT licensed. All
 | [**sync-phone**](./sync-phone) | iPhone voice-dictation pipeline. Drains an iCloud-shared dictation sink, summarizes the raw transcripts, routes bullets into the right Obsidian vault, archives the source, clears the inbox. Pairs with an iPhone Shortcut for the capture side. | Symlink |
 | [**transcribe-audio**](./transcribe-audio) | Audio file to clean transcript to optional LLM summary to optional Obsidian note. OpenAI Whisper backend. Auto-chunks files past the 25 MB API limit, primes the recognizer with custom technical vocabulary, ships three summary styles. Strong on Ukrainian, Russian, English, and code-switching. | Symlink |
 | [**voice-check**](./voice-check) | Audit and rewrite drafts so they sound like you, not generic AI. Builds a measured voice profile from your own writing, scores any draft 0-100 against it, and flags AI tells, corporate words, em dashes, leftover filler, and sentence-length drift — each with a fix. Offline, zero-dependency, with an ROC-AUC proof that it separates your writing from AI. Claude Code + Codex CLI. | `./setup.sh` |
+| [**session-continue**](./session-continue) | Import a Claude Code, Codex, or other `continues`-supported coding session into the current agent thread by source and session id. Supports `$session-continue from claude ...` in Codex and `/session-continue from codex ...` in Claude Code. | `./setup.sh` |
 
 ## Install
 
@@ -58,6 +59,17 @@ Then inside Claude Code:
 
 Each skill's README documents its own prerequisites (jq, Python, MCP servers, OAuth tokens, etc.) and config files.
 
+### Setup-script install
+
+For dual-runtime skills that need to copy files into Codex, run their installer:
+
+```bash
+cd <skill-name>
+./setup.sh
+```
+
+Currently: `voice-check`, `session-continue`.
+
 ## Skill structure
 
 Every skill in this repo follows the same shape:
@@ -86,6 +98,7 @@ The double `skills/<skill-name>/` path is the convention Claude Code uses to dis
 | calendar-plan-skill | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | sync-phone | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | transcribe-audio | ✓ | ✓ | ✓ | ✓ | WSL2 |
+| session-continue | ✓ | ✓ | ✓ | ✓ | WSL2 |
 
 All bash + Python. Windows users need WSL2 or Git Bash.
 
