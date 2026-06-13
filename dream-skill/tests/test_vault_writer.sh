@@ -333,5 +333,69 @@ grep -q "safe entry" "$IDX_OUTSIDE/index.md" && { rm -rf "$IDX_OUTSIDE" "$IDX_VA
 rm -rf "$IDX_OUTSIDE" "$IDX_VAULT"
 echo "PASS: skips index update when index.md is a leaf symlink (no outside write)"
 
+# Test 21: content with backslashes is written/replaced verbatim and stays idempotent.
+# Regression: awk -v interprets C-style escapes (\n \t \\ \d …), which both
+# corrupted the written line AND broke grep -Fxq idempotency (raw content never
+# matched the escape-mangled line, so append re-fired and replace silently no-op'd).
+BSLASH_VAULT=$(mktemp -d "/tmp/dream-bslash-XXXXXX")
+mkdir -p "$BSLASH_VAULT/wiki"
+printf '# Bslash\n\n## Notes\n' > "$BSLASH_VAULT/wiki/bslash.md"
+BSLASH_CONTENT='win path C:\new\test and regex \d+ and tab\there'
+
+"$WRITER" --vault "$BSLASH_VAULT" --page "wiki/bslash.md" --section "Notes" \
+  --content "$BSLASH_CONTENT" --undo-log "$BSLASH_VAULT/undo.jsonl"
+grep -Fxq -- "- $BSLASH_CONTENT" "$BSLASH_VAULT/wiki/bslash.md" \
+  || fail "backslash append not written verbatim (awk -v escape corruption)"
+
+"$WRITER" --vault "$BSLASH_VAULT" --page "wiki/bslash.md" --section "Notes" \
+  --content "$BSLASH_CONTENT" --undo-log "$BSLASH_VAULT/undo.jsonl"
+BSLASH_COUNT=$(grep -Fc -- "- $BSLASH_CONTENT" "$BSLASH_VAULT/wiki/bslash.md")
+[ "$BSLASH_COUNT" -eq 1 ] || fail "backslash append duplicated (count=$BSLASH_COUNT; idempotency broke)"
+echo "PASS: backslash append written verbatim and idempotent"
+
+# replace + undo round-trip with backslashes (covers vault-writer replace + apply-undo)
+cat > "$BSLASH_VAULT/wiki/brep.md" <<'EOF'
+# Brep
+
+## Status
+- alpha\beta\gamma
+EOF
+"$WRITER" --vault "$BSLASH_VAULT" --page "wiki/brep.md" --section "Status" \
+  --mode replace --old-content 'alpha\beta\gamma' --content 'delta\tau\omega' \
+  --undo-log "$BSLASH_VAULT/undo-rep.jsonl"
+grep -Fxq -- '- delta\tau\omega' "$BSLASH_VAULT/wiki/brep.md" \
+  || fail "backslash replace did not write new line verbatim"
+grep -Fxq -- '- alpha\beta\gamma' "$BSLASH_VAULT/wiki/brep.md" \
+  && fail "backslash replace left the old line in place (match miss)"
+bash "$SCRIPT_DIR/../scripts/apply-undo.sh" "$BSLASH_VAULT/undo-rep.jsonl" >/dev/null
+grep -Fxq -- '- alpha\beta\gamma' "$BSLASH_VAULT/wiki/brep.md" \
+  || fail "undo did not restore backslash line verbatim"
+rm -rf "$BSLASH_VAULT"
+echo "PASS: backslash replace + undo round-trip verbatim"
+
+# Test 22: a stale lock left by a crashed holder (PID dead, EXIT trap bypassed) is
+# reclaimed, not wedged forever. Pre-seed the page's lock dir with a dead holder PID.
+STALE_VAULT=$(mktemp -d "/tmp/dream-stale-XXXXXX")
+mkdir -p "$STALE_VAULT/wiki"
+printf '# Stale\n\n## Notes\n' > "$STALE_VAULT/wiki/stale-lock.md"
+STALE_LOCKDIR=$(mktemp -d "/tmp/dream-stale-locks-XXXXXX")
+if command -v shasum >/dev/null 2>&1; then
+  H=$(printf '%s' "$STALE_VAULT/wiki/stale-lock.md" | shasum -a 1 | awk '{print $1}')
+else
+  H=$(printf '%s' "$STALE_VAULT/wiki/stale-lock.md" | cksum | awk '{print $1}')
+fi
+mkdir -p "$STALE_LOCKDIR/$H"
+# Guaranteed-dead PID: spawn a trivial process and reap it.
+sh -c 'exit 0' & DEADPID=$!; wait "$DEADPID" 2>/dev/null || true
+echo "$DEADPID" > "$STALE_LOCKDIR/$H/pid"
+
+DREAM_VAULT_LOCK_DIR="$STALE_LOCKDIR" "$WRITER" --vault "$STALE_VAULT" \
+  --page "wiki/stale-lock.md" --section "Notes" --content "reclaimed write" \
+  --undo-log "$STALE_VAULT/undo.jsonl"
+grep -q "reclaimed write" "$STALE_VAULT/wiki/stale-lock.md" \
+  || fail "stale lock with dead holder PID was not reclaimed (write blocked)"
+rm -rf "$STALE_VAULT" "$STALE_LOCKDIR"
+echo "PASS: stale lock with dead holder PID is reclaimed"
+
 echo
 echo "All vault-writer.sh tests passed."

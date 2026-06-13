@@ -13,8 +13,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import signal
 import sys
+import threading
 import webbrowser
 from pathlib import Path
 from threading import Timer
@@ -29,6 +31,11 @@ DEFAULT_DREAM_HOME = Path.home() / ".claude" / "dream-skill"
 DEFAULT_QUEUE = DEFAULT_DREAM_HOME / "queue" / "review-input.json"
 DEFAULT_DECISIONS = DEFAULT_DREAM_HOME / "queue" / "review-decisions.json"
 
+# Flask's dev server is threaded; serialize the read-modify-write of the
+# decisions file so concurrent swipe handlers can't drop/clobber writes.
+_decisions_lock = threading.Lock()
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
 
 def load_decisions(p: Path) -> dict:
     if not p.exists():
@@ -41,11 +48,36 @@ def load_decisions(p: Path) -> dict:
 
 def save_decisions(p: Path, d: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(d, indent=2))
+    # Atomic write: a reader during a plain write_text can observe a truncated
+    # file and load_decisions would silently reset it to {}.
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(d, indent=2))
+    os.replace(tmp, p)
 
 
-def make_app(queue_path: Path, decisions_path: Path, web_dir: Path) -> Flask:
+def make_app(queue_path: Path, decisions_path: Path, web_dir: Path, token: str) -> Flask:
     app = Flask(__name__, static_folder=str(web_dir), static_url_path="")
+    app.config["DREAM_TOKEN"] = token
+
+    @app.before_request
+    def _guard_api():
+        # Only the data API needs guarding; the static shell is harmless.
+        if not request.path.startswith("/api/"):
+            return None
+        # DNS-rebinding defense: Host must be loopback.
+        host = (request.host or "").rsplit(":", 1)[0]
+        if host not in _LOOPBACK_HOSTS:
+            return jsonify({"error": "invalid host"}), 403
+        # CSRF defense: require the per-run token (not a cookie, so a cross-site
+        # page cannot have it auto-attached and cannot read it).
+        supplied = request.headers.get("X-CSRF-Token") or request.args.get("token", "")
+        # .encode() both sides: compare_digest raises TypeError on non-ASCII str,
+        # which would surface as a 500 instead of a clean 403.
+        if not supplied or not secrets.compare_digest(
+            supplied.encode("utf-8"), app.config["DREAM_TOKEN"].encode("utf-8")
+        ):
+            return jsonify({"error": "forbidden"}), 403
+        return None
 
     @app.route("/")
     def index():
@@ -57,41 +89,49 @@ def make_app(queue_path: Path, decisions_path: Path, web_dir: Path) -> Flask:
     def api_queue():
         if not queue_path.exists():
             return jsonify({"error": "review-input.json not found — run /dream-skill first"}), 404
-        q = json.loads(queue_path.read_text())
+        try:
+            q = json.loads(queue_path.read_text())
+        except json.JSONDecodeError:
+            return jsonify({"error": "review-input.json is not valid JSON"}), 500
         decisions = load_decisions(decisions_path)
         for e in q.get("entries", []):
-            if e["id"] in decisions:
+            eid = e.get("id")
+            if eid is not None and eid in decisions:
                 e["decided"] = True
-                e["decision"] = decisions[e["id"]]
+                e["decision"] = decisions[eid]
         return jsonify(q)
 
     @app.post("/api/decide")
     def api_decide():
-        body = request.get_json(force=True) or {}
+        body = request.get_json(silent=True) or {}
         entry_id = body.get("id")
         decision = body.get("decision")
         if not entry_id or decision not in ("approve", "reject", "defer"):
             return jsonify({"error": "id + decision (approve|reject|defer) required"}), 400
-        decisions = load_decisions(decisions_path)
-        decisions[entry_id] = decision
-        save_decisions(decisions_path, decisions)
-        return jsonify({"ok": True, "saved": {entry_id: decision}, "total": len(decisions)})
+        with _decisions_lock:
+            decisions = load_decisions(decisions_path)
+            decisions[entry_id] = decision
+            save_decisions(decisions_path, decisions)
+            total = len(decisions)
+        return jsonify({"ok": True, "saved": {entry_id: decision}, "total": total})
 
     @app.post("/api/batch-decide")
     def api_batch_decide():
-        body = request.get_json(force=True) or {}
+        body = request.get_json(silent=True) or {}
         incoming = body.get("decisions", {})
         if not isinstance(incoming, dict):
             return jsonify({"error": "decisions must be an object"}), 400
-        decisions = load_decisions(decisions_path)
-        added = 0
-        for entry_id, decision in incoming.items():
-            if decision not in ("approve", "reject", "defer"):
-                continue
-            decisions[entry_id] = decision
-            added += 1
-        save_decisions(decisions_path, decisions)
-        return jsonify({"ok": True, "saved": added, "total": len(decisions)})
+        with _decisions_lock:
+            decisions = load_decisions(decisions_path)
+            added = 0
+            for entry_id, decision in incoming.items():
+                if decision not in ("approve", "reject", "defer"):
+                    continue
+                decisions[entry_id] = decision
+                added += 1
+            save_decisions(decisions_path, decisions)
+            total = len(decisions)
+        return jsonify({"ok": True, "saved": added, "total": total})
 
     @app.get("/api/decisions")
     def api_decisions():
@@ -116,9 +156,13 @@ def main() -> int:
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
 
-    app = make_app(args.queue, args.decisions, args.web)
-    url = f"http://localhost:{args.port}/"
+    # Per-run CSRF token. The UI reads it from the URL and echoes it on every
+    # /api/* call; without it the data API rejects the request.
+    token = secrets.token_urlsafe(32)
+    app = make_app(args.queue, args.decisions, args.web, token)
+    url = f"http://localhost:{args.port}/?token={token}"
     print(f"dream-skill review UI → {url}")
+    print("  (open the URL above — the token gates the review API)")
     if not args.no_browser:
         Timer(0.8, lambda: webbrowser.open(url)).start()
     app.run(host="127.0.0.1", port=args.port, debug=False)

@@ -85,12 +85,14 @@ cd skills/transcribe-audio
 
 `setup.sh`:
 1. Checks ffmpeg, uv, python
-2. Copies `.env.example` → `.env`
+2. Copies `.env.example` → `~/.config/transcribe-audio/.env` (the canonical location, chmod 600)
 3. Installs the `transcribe-audio` CLI globally via `uv tool install`
 4. Symlinks the Claude Code skill + slash command into `~/.claude/`
 5. Optionally runs `transcribe-audio init` (interactive wizard for defaults)
 
-Edit `.env` and set `OPENAI_API_KEY=sk-...` before first run.
+Edit `~/.config/transcribe-audio/.env` and set `OPENAI_API_KEY=sk-...` before first run
+(or `export OPENAI_API_KEY=...`). The CLI only reads the canonical `~/.config` `.env` or an
+explicit `--env-file`; a `.env` left in the repo or working directory is intentionally ignored.
 
 ## Usage
 
@@ -141,7 +143,7 @@ All commands accept `--help` for full flag listings.
 Three layers, in order of precedence (later wins):
 
 1. **`~/.config/transcribe-audio/config.yaml`** — your defaults (written by `transcribe-audio init`)
-2. **`.env`** in the repo — secrets only (`OPENAI_API_KEY`, optional `OBSIDIAN_VAULT_PATH`)
+2. **`~/.config/transcribe-audio/.env`** (or exported env vars) — secrets only (`OPENAI_API_KEY`, optional `OBSIDIAN_VAULT_PATH`)
 3. **CLI flags** — per-call overrides
 
 Example `config.yaml`:

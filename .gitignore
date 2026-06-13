@@ -2,3 +2,18 @@ calendar-plan-workspace/
 
 # macOS
 .DS_Store
+
+# Secrets / credentials — monorepo-wide catch-all (gitignore is recursive, so this
+# also protects subdirs like session-continue/ that have no .gitignore of their own).
+# Per-skill .gitignores still apply; this is defense-in-depth against an accidental
+# `git add` of a key file anywhere in the tree.
+.env
+*.env
+local.env
+credentials.json
+token.json
+*.pem
+*.key
+# …but keep the tracked templates.
+!*.example
+!*.env.example

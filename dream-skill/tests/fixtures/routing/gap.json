@@ -3,7 +3,7 @@
   "_description": "A fact about a topic not covered by any vault → status gap",
   "input": {
     "candidate": {
-      "content": "The Cleveland Clinic campus cafeteria closes at 7pm on weekdays",
+      "content": "The Northwind Clinic campus cafeteria closes at 7pm on weekdays",
       "type": "observation",
       "confidence": "high",
       "evidence": "cafeteria closes at 7",

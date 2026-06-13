@@ -32,6 +32,23 @@ def test_chunk_returns_original_when_under_limit(short_test_mp3: Path, tmp_path:
     assert chunks == [short_test_mp3]
 
 
+def test_chunk_handles_filename_with_percent_and_glob_chars(
+    short_test_mp3: Path, tmp_path: Path
+) -> None:
+    """A '%' breaks ffmpeg's segment pattern and '[' breaks Path.glob; the input
+    stem must never reach either. Copy the fixture to a hostile name and chunk it."""
+    import shutil
+
+    hostile = tmp_path / "50% off [meeting].mp3"
+    shutil.copy(short_test_mp3, hostile)
+    info = probe_audio(hostile)
+    chunks = chunk_audio(info, chunk_size_mb=0, output_dir=tmp_path / "chunks")
+    assert len(chunks) >= 1
+    for c in chunks:
+        assert c.exists()
+        assert c.suffix == ".mp3"
+
+
 def test_chunk_splits_when_over_limit(short_test_mp3: Path, tmp_path: Path) -> None:
     # Force chunking by setting a tiny limit. Even a 3-sec file at 64 kbps is
     # ~24 KB; with limit 0.01 MB (10 KB) we expect ≥1 chunk and the function

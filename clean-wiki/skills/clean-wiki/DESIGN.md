@@ -19,7 +19,12 @@ Six Obsidian vaults written to by `dream-skill`, `sync-wiki`, `sync-phone`, and 
 
 Detection signals come from two places:
 
-### Source A — Mechanical audit pass (this skill, scan.py)
+### Source A — Mechanical audit pass (historical: `scan.py`; now done by Claude sub-agents)
+
+> The `scan.py` / `apply.py` references in this section and the `Auto-detected by`
+> column below are v1 (removed). The signal taxonomy itself still applies — Claude
+> sub-agents now produce these signals and the `/api/decide` review server (`serve.py`)
+> replaces the old `/apply` endpoint. See SKILL.md for the live flow.
 
 Pure-rules signals that need no semantic judgment. Phase 1 covers 8:
 

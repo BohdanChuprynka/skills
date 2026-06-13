@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -102,7 +103,12 @@ def load_sidecar(sidecars_dir: Path, candidate_id: str) -> dict | None:
 
 
 def build_entry(raw: dict, sidecar: dict | None, existing_decisions: dict) -> dict:
-    cid = raw["id"] or f"md-{abs(hash(raw['title'] + raw['target']))}"
+    # Stable digest (NOT builtin hash(), which is per-process randomized via
+    # PYTHONHASHSEED): a fallback id must be identical across runs so resume /
+    # existing-decisions keyed by id still match on the next invocation.
+    cid = raw["id"] or "md-" + hashlib.sha1(
+        (raw["title"] + raw["target"]).encode("utf-8")
+    ).hexdigest()[:12]
     confidence = raw["confidence"] or "medium"
     bucket = raw["bucket"] or "uncertain"
     title = raw["title"]

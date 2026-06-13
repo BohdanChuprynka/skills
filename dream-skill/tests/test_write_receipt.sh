@@ -43,7 +43,7 @@ SUMMARY=$(cat <<'EOF'
   "chats_scanned": 4,
   "facts": [
     {
-      "content":       "Cleveland Clinic internship confirmed for Jun–Aug 2026",
+      "content":       "Northwind Clinic internship confirmed for Jun–Aug 2026",
       "target":        "me/wiki/experience.md",
       "action":        "new",
       "review_status": "written",
@@ -124,7 +124,7 @@ grep -A5 "^## Written" "$RECEIPT" | grep -q "lives in Berlin" \
 grep -A5 "^## Superseded" "$RECEIPT" | grep -q "lives in Berlin" \
   && fail "Supersede (written) fact incorrectly appears in Superseded section — must be in Written only"
 # new(written) also in Written
-grep -A5 "^## Written" "$RECEIPT" | grep -q "Cleveland Clinic" \
+grep -A5 "^## Written" "$RECEIPT" | grep -q "Northwind Clinic" \
   || fail "Written section missing new fact (action=new, review_status=written)"
 echo "PASS: supersede(written) in Written; contradict(written) in Superseded — DISTINCT sections confirmed"
 

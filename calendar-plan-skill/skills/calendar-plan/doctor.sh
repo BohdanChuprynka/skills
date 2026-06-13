@@ -53,13 +53,13 @@ else
 fi
 
 # 5. preferences.md (personal config, lives outside skill repo by default)
-PREFS_PATH="${PLANNING_PREFS:-$HOME/.config/calendar-plan/preferences.md}"
+PREFS_PATH="${PLANNING_PREFS:-${XDG_CONFIG_HOME:-$HOME/.config}/calendar-plan/preferences.md}"
 if [[ ! -f "$PREFS_PATH" ]] && [[ -f "$CONFIG_DIR/planning-preferences.md" ]]; then
   PREFS_PATH="$CONFIG_DIR/planning-preferences.md"
 fi
 if [[ -f "$PREFS_PATH" ]]; then
-  if grep -q "<REPLACE_WITH" "$PREFS_PATH" 2>/dev/null; then
-    report FAIL "preferences.md" "$PREFS_PATH still contains <REPLACE_WITH...> placeholders"
+  if grep -qE "<REPLACE_WITH|<your-|<Calendar Label|<HH:MM" "$PREFS_PATH" 2>/dev/null; then
+    report FAIL "preferences.md" "$PREFS_PATH still contains <...> placeholders — edit it with real values"
   else
     report PASS "preferences.md" "$PREFS_PATH ok"
   fi

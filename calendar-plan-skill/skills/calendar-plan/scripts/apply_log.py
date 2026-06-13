@@ -25,13 +25,46 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-CREATED_RE = re.compile(r"\b(created?|added?)\b.{0,80}?(\d{1,2}:\d{2})", re.IGNORECASE)
-CHANGED_RE = re.compile(r"\b(updated?|changed?|moved?)\b.{0,80}?(\d{1,2}:\d{2})", re.IGNORECASE)
+# Capture the text between the verb and the time so the memory line records WHAT
+# happened (the event), not a bare "?" placeholder.
+CREATED_RE = re.compile(r"\b(created?|added?)\b(.{0,80}?)(\d{1,2}:\d{2})", re.IGNORECASE)
+CHANGED_RE = re.compile(r"\b(updated?|changed?|moved?)\b(.{0,80}?)(\d{1,2}:\d{2})", re.IGNORECASE)
 PAUSE_RE = re.compile(r"\b(pause(?:d)?|skipping|not writing|waiting on)\b", re.IGNORECASE)
 CONNECTOR_RE = re.compile(
     r"(notion|gmail|google-?calendar|filesystem)[^a-zA-Z0-9]{1,20}(ok|fail|unauthorized|missing|degraded|partial|unavailable|error)",
     re.IGNORECASE,
 )
+
+
+def _clean_ctx(ctx: str) -> str:
+    """Tidy the text captured between a verb and a time into an event label."""
+    ctx = re.sub(r"\s+", " ", ctx)
+    ctx = re.sub(r"\b(at|to|on|for|the)\s*$", "", ctx, flags=re.IGNORECASE)
+    ctx = ctx.strip(" :-—'\"()[]")
+    return ctx or "(event)"
+
+
+def build_action_lines(text: str) -> list[str]:
+    """Derive the `actions_taken:` bullet lines from a run-log body.
+
+    Heuristic prose parsing — best-effort, never destructive. Each create/change
+    line records the captured event context and time rather than a placeholder.
+    """
+    created = CREATED_RE.findall(text)
+    changed = CHANGED_RE.findall(text)
+    paused = PAUSE_RE.search(text) is not None
+
+    if not (created or changed) and paused:
+        return ["- pause-no-write: planner reported a pause and did not write"]
+    if not (created or changed):
+        return ["- (no create/change verbs detected in log)"]
+
+    lines: list[str] = []
+    for _verb, ctx, when in created[:20]:
+        lines.append(f"- created {_clean_ctx(ctx)} @ {when}")
+    for _verb, ctx, when in changed[:20]:
+        lines.append(f"- changed {_clean_ctx(ctx)} @ {when}")
+    return lines
 
 
 def main() -> int:
@@ -43,8 +76,6 @@ def main() -> int:
 
     text = args.run_log.read_text(encoding="utf-8", errors="replace")
 
-    created = CREATED_RE.findall(text)
-    changed = CHANGED_RE.findall(text)
     paused = PAUSE_RE.search(text) is not None
     connectors = {m[0].lower().replace("-", ""): m[1].lower() for m in CONNECTOR_RE.findall(text)}
 
@@ -67,15 +98,7 @@ def main() -> int:
         lines.append("- planner paused at least once (see log for reason)")
     lines.append("")
     lines.append("actions_taken:")
-    if not (created or changed) and paused:
-        lines.append("- pause-no-write: planner reported a pause and did not write")
-    elif not (created or changed):
-        lines.append("- (no create/change verbs detected in log)")
-    else:
-        for verb, when in created[:20]:
-            lines.append(f"- created  ?  {when}  (parsed from log)")
-        for verb, when in changed[:20]:
-            lines.append(f"- changed  ?  {when}  (parsed from log)")
+    lines.extend(build_action_lines(text))
 
     lines.append("")
 

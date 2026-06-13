@@ -83,13 +83,13 @@ echo "PASS: simplified role/content transcript is filtered correctly"
 # Mixed content arrays: keep text blocks in order, drop tool_result in the same array.
 MIXED="$TMPROOT/mixed.jsonl"
 cat > "$MIXED" <<'EOF'
-{"type":"user","message":{"role":"user","content":[{"type":"text","text":"I accepted the Cleveland Clinic sprint scope."},{"type":"tool_result","tool_use_id":"x","content":"MIXED_BLOB_SHOULD_DROP"},{"type":"text","text":"The deadline is June 14."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"I accepted the Northwind Clinic sprint scope."},{"type":"tool_result","tool_use_id":"x","content":"MIXED_BLOB_SHOULD_DROP"},{"type":"text","text":"The deadline is June 14."}]}}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Noted."},{"type":"thinking","thinking":"MIXED_THINKING_SHOULD_DROP"},{"type":"tool_use","id":"y","name":"bash","input":{"cmd":"echo nope"}}]}}
 EOF
 MIXED_OUT="$TMPROOT/mixed.out"
 "$PREFILTER" "$MIXED" > "$MIXED_OUT"
 cat > "$TMPROOT/mixed.expected" <<'EOF'
-USER: I accepted the Cleveland Clinic sprint scope.
+USER: I accepted the Northwind Clinic sprint scope.
 The deadline is June 14.
 ASST: Noted.
 EOF

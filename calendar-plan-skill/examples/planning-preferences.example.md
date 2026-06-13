@@ -2,7 +2,7 @@
 
 User-specific data for the `calendar-plan` skill. Keep `SKILL.md` generic; put personalization here.
 
-> **Copy this file** to `<skill-install-dir>/config/planning-preferences.md` and edit. The real file is gitignored.
+> **Copy this file** to `~/.config/calendar-plan/preferences.md` and edit (`setup.sh` does this for you). The real file is gitignored.
 
 ## Source Order
 

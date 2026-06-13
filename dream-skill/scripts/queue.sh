@@ -57,7 +57,8 @@ cmd_append() {
   # Dedupe: skip if BOTH title AND target appear in the SAME queue block.
   # Two independent greps would false-positive when title matches entry A and
   # target matches entry B — a novel (title,target) pair would be silently dropped.
-  if awk -v tt="### $title" -v tg="**Target:** $target" '
+  if tt="### $title" tg="**Target:** $target" awk '
+    BEGIN { tt = ENVIRON["tt"]; tg = ENVIRON["tg"] }
     /^### / { in_b=1; has_t=0; has_g=0 }
     in_b && $0==tt { has_t=1 }
     in_b && $0==tg { has_g=1 }
@@ -161,7 +162,8 @@ cmd_remove() {
 
   # Block-scan: read entry blocks (### TITLE ... --- terminator). Drop the
   # block iff BOTH the title line AND the target line match. Keep all others.
-  awk -v target_title="### $title" -v target_target="**Target:** $target" '
+  target_title="### $title" target_target="**Target:** $target" awk '
+    BEGIN { target_title = ENVIRON["target_title"]; target_target = ENVIRON["target_target"] }
     function flush_block(   should_keep) {
       if (in_block) {
         should_keep = !(seen_title && seen_target)

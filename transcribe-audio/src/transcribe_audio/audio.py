@@ -104,8 +104,12 @@ def chunk_audio(
     if max_chunk_seconds < 60:
         max_chunk_seconds = 60  # never less than 1 min
 
-    base = info.path.stem
-    pattern = output_dir / f"{base}_chunk_%03d.mp3"
+    # Use a fixed, metacharacter-free basename: ffmpeg's segment muxer interprets
+    # '%' in the output path as a format specifier, and Path.glob below treats
+    # '[' ']' '*' '?' as patterns. Reusing the input stem (which may contain any of
+    # these) corrupts the segment template or makes the glob silently miss files.
+    # output_dir is a dedicated per-run directory, so a constant name is safe.
+    pattern = output_dir / "chunk_%03d.mp3"
 
     subprocess.run(
         [
@@ -131,7 +135,7 @@ def chunk_audio(
         check=True,
     )
 
-    chunks = sorted(output_dir.glob(f"{base}_chunk_*.mp3"))
+    chunks = sorted(output_dir.glob("chunk_*.mp3"))
     if not chunks:
         raise RuntimeError(f"ffmpeg produced no chunks from {info.path}")
     return chunks

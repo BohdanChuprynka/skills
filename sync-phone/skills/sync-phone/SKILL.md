@@ -150,3 +150,4 @@ When the bullet is about *the user themselves* (preferences, identity, current s
 - Do not delete `iphone-raw.md` or `ingest.md` (truncate only — the iPhone Shortcut needs `iphone-raw.md` to exist as an append target).
 - Do not write to a vault without reading its `CLAUDE.md` first.
 - Do not invent metrics, dates, or facts not present in the raw dictation. If transcription is ambiguous, preserve the ambiguity in the bullet rather than guessing.
+- Do not exfiltrate dictated content to the network. Everything stays on the local machine and within the user's existing iCloud sync; dictated notes are personal and must never be sent to an external service.

@@ -78,7 +78,9 @@ while IFS= read -r line; do
       # undo: find the current (post-replace) line "- $NEW" and write the original
       # "- $OLD" back. If it isn't present (already reverted / page changed), skip.
       if [ -f "$PAGE_PATH" ] && grep -Fxq -- "- $NEW" "$PAGE_PATH"; then
-        awk -v old="- $NEW" -v new="- $OLD" '
+        # ENVIRON (not awk -v) so backslashes in the line survive verbatim.
+        old="- $NEW" new="- $OLD" awk '
+          BEGIN { old = ENVIRON["old"]; new = ENVIRON["new"] }
           { if ($0 == old) print new; else print }
         ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"
         REVERTED=$((REVERTED + 1))

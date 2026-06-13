@@ -24,6 +24,13 @@ def test_slugify_handles_ukrainian_cyrillic() -> None:
     assert "про" in out
 
 
+def test_slugify_preserves_mixed_latin_and_cyrillic() -> None:
+    # Regression: the ASCII-fold path dropped the Cyrillic half of a mixed title.
+    out = slugify("Meeting Зустріч")
+    assert "meeting" in out
+    assert "зустріч" in out
+
+
 def test_slugify_truncates_long_input() -> None:
     long = "word " * 50
     assert len(slugify(long, max_len=20)) <= 20
@@ -103,3 +110,32 @@ def test_write_obsidian_note_errors_when_vault_unset(
     transcription = _make_transcription(tmp_path)
     with pytest.raises(ValueError, match="vault_path not set"):
         write_obsidian_note(transcription, None, config)
+
+
+def test_write_obsidian_note_does_not_clobber_same_day(
+    fake_openai_key: str, tmp_path: Path
+) -> None:
+    """Re-transcribing the same title on the same day must not overwrite the prior note."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    config = Config(openai_api_key=fake_openai_key, vault_path=vault)
+    transcription = _make_transcription(tmp_path)
+
+    p1 = write_obsidian_note(transcription, None, config, title="Repeat")
+    p1.write_text("FIRST", encoding="utf-8")
+    p2 = write_obsidian_note(transcription, None, config, title="Repeat")
+
+    assert p1 != p2
+    assert p1.exists() and p2.exists()
+    assert p1.read_text(encoding="utf-8") == "FIRST"  # untouched
+
+
+def test_write_obsidian_note_rejects_traversal_subdir(
+    fake_openai_key: str, tmp_path: Path
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    config = Config(openai_api_key=fake_openai_key, vault_path=vault)
+    transcription = _make_transcription(tmp_path)
+    with pytest.raises(ValueError, match="escape|outside|vault"):
+        write_obsidian_note(transcription, None, config, subdir="../../escape")

@@ -63,12 +63,10 @@ else
   green "  ✓ $CANONICAL_ENV already exists (not overwriting)"
 fi
 
-# Also create a repo-local .env for in-repo development work, if missing.
-if [ ! -f "$SCRIPT_DIR/.env" ]; then
-  cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
-  chmod 600 "$SCRIPT_DIR/.env"
-  green "  ✓ Also created $SCRIPT_DIR/.env (for in-repo development)"
-fi
+# NOTE: we deliberately do NOT create a repo-local $SCRIPT_DIR/.env. The CLI only
+# reads the canonical path above (or an explicit env_file / exported vars), so a
+# stray key file in the repo tree would be dead weight and a leak risk. For
+# in-repo dev, export OPENAI_API_KEY or point at the canonical .env.
 echo
 
 # --- 3. Install CLI via uv
@@ -88,7 +86,7 @@ mkdir -p "$CLAUDE_SKILLS_DIR" "$CLAUDE_COMMANDS_DIR"
 SKILL_SRC="$SCRIPT_DIR/skills/$SKILL_NAME"
 SKILL_LINK="$CLAUDE_SKILLS_DIR/$SKILL_NAME"
 if [ -L "$SKILL_LINK" ] || [ -e "$SKILL_LINK" ]; then
-  rm -f "$SKILL_LINK"
+  rm -rf "$SKILL_LINK"
 fi
 ln -s "$SKILL_SRC" "$SKILL_LINK"
 green "  ✓ Linked $SKILL_LINK → $SKILL_SRC"
