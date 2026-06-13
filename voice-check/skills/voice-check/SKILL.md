@@ -9,11 +9,11 @@ Wrapper around the offline `voice-check` CLI. The CLI scores a draft 0–100 aga
 
 ## Mental model
 
-The user has a voice profile built from their own writing (`voice-check profile`). You hand a draft to `voice-check check`; it returns an explainable score plus violations, each with a fix. You interpret that, and on request produce a rewrite that stays in their voice.
+The user has a voice profile built from their own writing (`voice-check profile`). You hand a draft to `voice-check check`; it returns an explainable score plus violations, each with a fix. You interpret that, then produce a rewrite that stays in their voice every time.
 
 ## Prerequisites
 
-- The `voice-check` CLI is installed (this skill's `setup.sh` does that).
+- The `voice-check` CLI is installed (the repo's `voice-check/setup.sh` does that).
 - A profile exists. Default location: `~/.config/voice-check/profile`. If it is missing, tell the user to build one from a folder of their own writing:
   ```bash
   voice-check profile --input <dir-of-their-writing> --out ~/.config/voice-check/profile
