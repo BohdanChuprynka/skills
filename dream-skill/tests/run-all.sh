@@ -22,6 +22,7 @@ LIVE_TESTS=(
   test_build_map_batches.sh  # MAP units (single-Read chunks/bundles; anti-multiplier)
   test_map_prefilter_contract.sh # MAP prompt contract for single-Read unit usage
   test_map_harness.sh        # MAP   (validate_candidates harness)
+  test_reduce_dedup.sh       # REDUCE (exact + conservative TF-IDF near-dup)
   test_build_nav_context.sh  # ROUTE (nav-context builder)
   test_routing_contract.sh   # ROUTE (routing supplement + static prompt contract)
   test_batch_route.sh        # ROUTE (stable-ID batching + validation)
