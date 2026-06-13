@@ -74,8 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build dream-skill ROUTE batches.")
     parser.add_argument(
         "--size",
-        default=os.environ.get("DREAM_ROUTE_BATCH_SIZE", "15"),
-        help="maximum candidates per route agent batch (default: 15)",
+        default=os.environ.get("DREAM_ROUTE_BATCH_SIZE", "25"),
+        # A/B validated 2026-06-13: at 25, ROUTE cost was ~2010 tok/candidate vs
+        # ~2879 at 15 (the shared nav-context + ROUTING.md is re-read once per batch,
+        # so fewer, larger batches amortize it) — ~30% cheaper with routing quality
+        # unchanged. 25 keeps per-agent attention sound; do not push much past this.
+        help="maximum candidates per route agent batch (default: 25)",
     )
     args = parser.parse_args(argv)
 

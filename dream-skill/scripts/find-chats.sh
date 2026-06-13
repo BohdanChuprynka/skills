@@ -95,7 +95,7 @@ case "$MODE" in
       if [ -z "$oldest_ts" ] || [ "$fmtime" -lt "$oldest_ts" ]; then
         oldest_ts="$fmtime"
       fi
-    done < <(find "$PROJECTS_ROOT" -name "*.jsonl" -print0 2>/dev/null)
+    done < <(find "$PROJECTS_ROOT" -name "*.jsonl" -not -path '*/subagents/*' -print0 2>/dev/null)
     if [ -n "$oldest_ts" ] && [ "$oldest_ts" -gt 0 ]; then
       window_start="$oldest_ts"
     else
@@ -131,7 +131,11 @@ emit_batch() {
       [ "$state" = "ignore" ] && continue
       echo "$f"
     fi
-  done < <(find "$PROJECTS_ROOT" -name "*.jsonl" -print0 2>/dev/null | sort -z)
+  # Exclude subagent + workflow transcripts: the human never speaks in them (the
+  # "user" turn is a synthetic dispatch prompt), so they carry no persona signal —
+  # they are work-output telemetry, explicitly out of scope. Workflows nest under
+  # subagents/, so one glob covers both. This is ~73% of all transcripts.
+  done < <(find "$PROJECTS_ROOT" -name "*.jsonl" -not -path '*/subagents/*' -print0 2>/dev/null | sort -z)
 }
 
 if [ "$WINDOW_DAYS" -le "$BATCH_SIZE" ]; then
