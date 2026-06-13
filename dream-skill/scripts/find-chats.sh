@@ -91,7 +91,7 @@ case "$MODE" in
     # Fall back to 5 years ago if no files exist yet.
     oldest_ts=""
     while IFS= read -r -d '' f; do
-      fmtime=$(stat -f "%m" "$f" 2>/dev/null || stat -c "%Y" "$f" 2>/dev/null || echo 0)
+      fmtime=$(stat -c "%Y" "$f" 2>/dev/null || stat -f "%m" "$f" 2>/dev/null || echo 0)
       if [ -z "$oldest_ts" ] || [ "$fmtime" -lt "$oldest_ts" ]; then
         oldest_ts="$fmtime"
       fi
@@ -120,7 +120,7 @@ emit_batch() {
   echo "BATCH:${bs_fmt}:${be_fmt}"
   # enumerate chats whose mtime falls in [batch_start, batch_end)
   while IFS= read -r -d '' f; do
-    fmtime=$(stat -f "%m" "$f" 2>/dev/null || stat -c "%Y" "$f" 2>/dev/null || echo 0)
+    fmtime=$(stat -c "%Y" "$f" 2>/dev/null || stat -f "%m" "$f" 2>/dev/null || echo 0)
     if [ "$fmtime" -ge "$batch_start" ] && [ "$fmtime" -lt "$batch_end" ]; then
       # skip --ignore'd chats
       if [ -x "$PRIVATE_STATE" ]; then
