@@ -17,12 +17,20 @@ out=$(printf '%s' '[
 n=$(printf '%s' "$out" | jq length); c=$(printf '%s' "$out" | jq -r '.[0].confidence'); sc=$(printf '%s' "$out" | jq -r '.[0].source_chat_count')
 { [ "$n" = 1 ] && [ "$c" = medium ] && [ "$sc" = 2 ]; } && ok "exact dup collapses, 2 chats -> medium, source_chat_count=2" || no "exact dup ($n,$c,$sc)"
 
-# 2) near-verbatim restatement merges at default threshold
-out=$(printf '%s' '[
- {"content":"Bohdan switched his primary editor back to VS Code from Cursor","confidence":"high","source_chat":"A","source_date":"2026-06-13"},
- {"content":"Bohdan switched his primary editor back to VS Code from Cursor recently","confidence":"medium","source_chat":"B","source_date":"2026-06-13"}
-]' | "$DEDUP")
-[ "$(printf '%s' "$out" | jq length)" = 1 ] && ok "near-verbatim restatement merges" || no "near-dup did not merge ($(printf '%s' "$out" | jq length))"
+# 2) near-verbatim restatement merges at default threshold.
+#    The near-dup layer needs scikit-learn; reduce-dedup.py falls back to exact-only
+#    without it (a run is never blocked). CI installs only jq, not sklearn, so this
+#    assertion is gated on sklearn being importable — otherwise it is skipped, matching
+#    the script's documented graceful-degradation contract.
+if python3 -c "import sklearn" >/dev/null 2>&1; then
+  out=$(printf '%s' '[
+   {"content":"Bohdan switched his primary editor back to VS Code from Cursor","confidence":"high","source_chat":"A","source_date":"2026-06-13"},
+   {"content":"Bohdan switched his primary editor back to VS Code from Cursor recently","confidence":"medium","source_chat":"B","source_date":"2026-06-13"}
+  ]' | "$DEDUP")
+  [ "$(printf '%s' "$out" | jq length)" = 1 ] && ok "near-verbatim restatement merges (sklearn)" || no "near-dup did not merge ($(printf '%s' "$out" | jq length))"
+else
+  echo "SKIP: near-dup merge — scikit-learn not installed (reduce-dedup falls back to exact-only)"
+fi
 
 # 3) distinct facts about the same subject are PRESERVED (no false merge)
 out=$(printf '%s' '[
