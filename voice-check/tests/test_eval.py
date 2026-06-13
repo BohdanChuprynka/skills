@@ -58,6 +58,17 @@ class EvaluateTests(unittest.TestCase):
         after = sum(d["after_score"] for d in demo) / len(demo)
         self.assertGreater(after, before)
 
+    def test_default_negatives_dir_exists(self):
+        # Regression: the default pointed at src/examples/contrast (one level too
+        # shallow), which doesn't exist, so eval silently loaded zero negatives.
+        self.assertTrue(ev._DEFAULT_NEGATIVES.is_dir(), f"missing: {ev._DEFAULT_NEGATIVES}")
+
+    def test_evaluate_uses_default_negatives_when_none_given(self):
+        # No negatives_dir → must fall back to the packaged contrast set and still
+        # discriminate, not silently degrade to AUC 0.5 on an empty negatives list.
+        res = ev.evaluate(ROOT / "examples" / "sample_corpus", train_frac=0.6, seed=7)
+        self.assertGreaterEqual(res["discrimination"]["auc"], 0.8)
+
 
 class AiIfyTests(unittest.TestCase):
     def test_ai_ify_adds_tells_and_lowers_score(self):

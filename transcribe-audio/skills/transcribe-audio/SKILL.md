@@ -116,7 +116,7 @@ For a generic user without that setup, leave it in the configured inbox.
 
 ## Errors you may see
 
-- **`OPENAI_API_KEY not set`** → tell the user to edit `.env` in the repo and add their key, then re-run.
+- **`OPENAI_API_KEY not set`** → tell the user to add their key to `~/.config/transcribe-audio/.env` (or `export OPENAI_API_KEY=...`), then re-run. A `.env` in the repo/working dir is intentionally NOT read.
 - **`ffmpeg not found`** → `brew install ffmpeg` on macOS.
 - **`File not found`** → user gave a bad path. Search common locations and ask.
 - **`File too large` even after chunking** → unlikely; means chunking failed. Re-run with `--formats txt` and report.

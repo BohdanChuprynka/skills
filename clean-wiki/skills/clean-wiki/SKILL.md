@@ -125,7 +125,7 @@ Save vault selection to `data/preferences.json` for next run's default.
 bash clean-wiki.sh
 ```
 
-Server starts at `http://localhost:5173`, browser opens directly to the swipe view (no picker — queue is already populated). Tell the user how many findings are queued.
+The server starts on port 5173 and auto-opens the browser to the swipe view (no picker — queue is already populated). The opened URL carries a one-time `?token=…` that gates the review API (CSRF/DNS-rebinding defense), so the user must use the auto-opened tab — a bare `http://localhost:5173` will be rejected. Tell the user how many findings are queued.
 
 ### Step 5 — Wait for the user to finish
 

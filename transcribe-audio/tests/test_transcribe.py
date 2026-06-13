@@ -54,6 +54,26 @@ def test_transcription_result_to_vtt_format() -> None:
     assert "00:00:00.000 --> 00:00:01.000" in vtt
 
 
+def test_build_kwargs_whisper_uses_verbose_json() -> None:
+    from transcribe_audio.transcribe import _build_transcribe_kwargs
+
+    kw = _build_transcribe_kwargs("whisper-1", None, None)
+    assert kw["response_format"] == "verbose_json"
+    assert kw["timestamp_granularities"] == ["segment"]
+
+
+def test_build_kwargs_4o_models_omit_verbose_json() -> None:
+    """gpt-4o-transcribe / -mini only accept json|text; verbose_json + timestamps 400."""
+    from transcribe_audio.transcribe import _build_transcribe_kwargs
+
+    for model in ("gpt-4o-transcribe", "gpt-4o-mini-transcribe"):
+        kw = _build_transcribe_kwargs(model, "en", "vocab")
+        assert kw["response_format"] == "json"
+        assert "timestamp_granularities" not in kw
+        assert kw["language"] == "en"
+        assert kw["prompt"] == "vocab"
+
+
 def test_transcribe_file_calls_api_with_correct_args(
     short_test_mp3: Path, fake_openai_key: str
 ) -> None:

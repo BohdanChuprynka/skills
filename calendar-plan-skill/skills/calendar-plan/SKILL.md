@@ -49,7 +49,7 @@ If a calendar account or calendar ID is unavailable, state the gap explicitly an
 
 Resolve by local clock at invocation time.
 
-- `00:01 - 15:59 local` → **today** (current calendar date).
+- `00:00 - 15:59 local` → **today** (current calendar date).
 - `16:00 - 23:59 local` → **tomorrow** (next calendar date).
 
 Explicit user wording always overrides the clock-based default:

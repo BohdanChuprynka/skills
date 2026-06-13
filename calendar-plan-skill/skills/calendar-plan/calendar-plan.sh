@@ -42,7 +42,9 @@ TIMEZONE=""
 CRON_HOUR=""
 CALENDAR_CONTEXT=""
 TASK_SOURCE_NAME=""
-DEFAULT_MODE="auto"
+# Default to draft (report-only). The SKILL.md contract is "draft first, write on
+# approval"; unattended auto-writes must be an explicit opt-in (--mode auto).
+DEFAULT_MODE="draft"
 EXTRA_ADD_DIRS=""
 
 # Load settings.conf if present
@@ -56,7 +58,7 @@ fi
 : "${MODEL:=claude-sonnet-4-6}"
 : "${TIMEZONE:=America/New_York}"
 : "${CRON_HOUR:=22}"
-: "${DEFAULT_MODE:=auto}"
+: "${DEFAULT_MODE:=draft}"
 
 # ============================================================
 # CLI parsing
@@ -135,7 +137,7 @@ if [[ ! -f "$PROMPT_FILE" ]]; then
   fi
 fi
 
-PLANNING_PREFS="${PLANNING_PREFS:-$HOME/.config/calendar-plan/preferences.md}"
+PLANNING_PREFS="${PLANNING_PREFS:-${XDG_CONFIG_HOME:-$HOME/.config}/calendar-plan/preferences.md}"
 if [[ ! -f "$PLANNING_PREFS" ]]; then
   # legacy fallback for installs that still keep prefs inside the skill repo
   if [[ -f "$CONFIG_DIR/planning-preferences.md" ]]; then

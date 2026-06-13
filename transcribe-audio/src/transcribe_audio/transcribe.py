@@ -58,6 +58,29 @@ def _fmt_vtt(seconds: float) -> str:
     return _fmt_srt(seconds).replace(",", ".")
 
 
+def _build_transcribe_kwargs(
+    model: str, language: str | None, initial_prompt: str | None
+) -> dict:
+    """Assemble the transcription request kwargs for the given model.
+
+    Only whisper-1 supports `verbose_json` + `timestamp_granularities` (needed for
+    segment-level SRT/VTT). The gpt-4o-transcribe / gpt-4o-mini-transcribe models
+    accept only `json` | `text` and reject the verbose form with a 400, so they
+    fall back to plain `json` (no per-segment timestamps).
+    """
+    api_kwargs: dict = {"model": model}
+    if model.startswith("gpt-4o"):
+        api_kwargs["response_format"] = "json"
+    else:
+        api_kwargs["response_format"] = "verbose_json"
+        api_kwargs["timestamp_granularities"] = ["segment"]
+    if language and language != "auto":
+        api_kwargs["language"] = language
+    if initial_prompt:
+        api_kwargs["prompt"] = initial_prompt
+    return api_kwargs
+
+
 def _transcribe_single(
     client: OpenAI,
     file_path: Path,
@@ -67,15 +90,7 @@ def _transcribe_single(
     time_offset: float = 0.0,
 ) -> TranscriptionResult:
     """Single Whisper API call. Returns segments with optional time offset."""
-    api_kwargs: dict = {
-        "model": model,
-        "response_format": "verbose_json",
-        "timestamp_granularities": ["segment"],
-    }
-    if language and language != "auto":
-        api_kwargs["language"] = language
-    if initial_prompt:
-        api_kwargs["prompt"] = initial_prompt
+    api_kwargs = _build_transcribe_kwargs(model, language, initial_prompt)
 
     with open(file_path, "rb") as f:
         response = client.audio.transcriptions.create(file=f, **api_kwargs)

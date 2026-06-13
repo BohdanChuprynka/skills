@@ -10,7 +10,7 @@
     {
       "name": "dream-skill",
       "description": "Auto-record Claude Code conversations to your Obsidian vault. Confident facts written on session close; uncertain or destructive edits queued for manual review.",
-      "version": "0.2.0",
+      "version": "0.3.1",
       "source": "./",
       "category": "productivity",
       "author": {

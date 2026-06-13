@@ -46,3 +46,6 @@ coverage.xml
 
 # Local Obsidian sample vault
 examples/sample-vault/.obsidian/
+
+# Generated pytest audio fixture (conftest regenerates it on demand via ffmpeg)
+tests/fixtures/

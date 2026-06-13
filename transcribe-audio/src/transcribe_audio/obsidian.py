@@ -24,12 +24,11 @@ def slugify(text: str, max_len: int = 60) -> str:
     """
     if not text:
         return "untitled"
-    # Transliterate Cyrillic + drop combining marks.
-    nfkd = unicodedata.normalize("NFKD", text)
-    ascii_text = nfkd.encode("ascii", "ignore").decode("ascii")
-    # If pure Cyrillic, ascii_text may be empty — fall back to original.
-    base = ascii_text if ascii_text.strip() else text
-    base = base.lower()
+    # NFKD decomposes accented Latin into base letter + combining marks; the
+    # keep-regex below drops the marks (folding é→e) while leaving Cyrillic intact.
+    # Applying it to the original text keeps BOTH scripts in a mixed title instead
+    # of discarding the Cyrillic half (the old ASCII-fold path lost it).
+    base = unicodedata.normalize("NFKD", text).lower()
     base = re.sub(r"[^a-z0-9Ѐ-ӿ\s-]", "", base)  # keep latin, cyrillic, digits, ws, dash
     base = re.sub(r"\s+", "-", base.strip())
     base = re.sub(r"-+", "-", base)
@@ -64,10 +63,26 @@ def write_obsidian_note(
     now_iso = datetime.now().isoformat(timespec="seconds")
     slug = slugify(title)
     filename = config.obsidian_filename_pattern.format(date=today, slug=slug) + ".md"
+    # The pattern comes from config and is .format()-ed, so guard against a value
+    # that injects a path separator and escapes the target directory.
+    if "/" in filename or "\\" in filename:
+        raise ValueError(f"obsidian_filename_pattern produced a path separator: {filename!r}")
 
-    target_dir = config.vault_path / (subdir or config.obsidian_inbox_subdir)
+    vault_root = config.vault_path.resolve()
+    target_dir = (config.vault_path / (subdir or config.obsidian_inbox_subdir)).resolve()
+    if target_dir != vault_root and vault_root not in target_dir.parents:
+        raise ValueError(f"subdir {subdir!r} escapes the vault root {vault_root}")
     target_dir.mkdir(parents=True, exist_ok=True)
+
     target_path = target_dir / filename
+    # Never clobber an existing note (e.g. re-transcribing the same file the same
+    # day); suffix -1, -2, … until a free name is found.
+    if target_path.exists():
+        stem, suffix = target_path.stem, target_path.suffix
+        n = 1
+        while target_path.exists():
+            target_path = target_dir / f"{stem}-{n}{suffix}"
+            n += 1
 
     env = Environment(
         loader=FileSystemLoader(TEMPLATE_DIR),

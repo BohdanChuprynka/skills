@@ -1133,33 +1133,55 @@ let QUEUE = MOCK_QUEUE;
 let total = QUEUE.length;
 let HAS_BACKEND = false;
 
+// The server issues a per-run token in the page URL (?token=…). Echo it on every
+// /api/* call so cross-site pages (which can't read this URL) can't forge requests.
+const API_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+// Strip ?token from the address bar/history once captured (it lives on in API_TOKEN
+// for fetches) so it can't leak via Referer, terminal scrollback, or browser history.
+if (API_TOKEN && window.history && window.history.replaceState) {
+  const _u = new URL(window.location.href);
+  _u.searchParams.delete('token');
+  window.history.replaceState({}, document.title, _u.pathname + _u.search + _u.hash);
+}
+function apiFetch(path, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {}, { 'X-CSRF-Token': API_TOKEN });
+  return fetch(path, Object.assign({}, opts, { headers }));
+}
+
 let ALL_ENTRIES = [];     // unfiltered, all categories
 let AUTO_ENTRIES = [];    // mechanical, batch-applicable
 let preflightHandled = false;
 
 async function bootstrap() {
+  let r;
   try {
-    const r = await fetch('/api/queue');
-    if (r.ok) {
-      HAS_BACKEND = true;
-      await loadQueueAndStart();
-      return;
-    }
-    if (r.status === 404) {
-      HAS_BACKEND = true;
-      renderNoQueue();
-      return;
-    }
+    r = await apiFetch('/api/queue');
   } catch (err) {
+    // fetch threw → no server at all (page opened as a file:// preview). Only
+    // here do we fall back to mock data, clearly in preview mode.
     console.log('No backend — preview mode with mock data.');
+    ALL_ENTRIES = MOCK_QUEUE;
+    QUEUE = MOCK_QUEUE.filter(e => e.category !== 'auto');
+    AUTO_ENTRIES = MOCK_QUEUE.filter(e => e.category === 'auto');
+    total = QUEUE.length;
+    document.getElementById('progressTotal').textContent = total;
+    renderCards();
+    return;
   }
-  // Fallback: mock data when serving the file directly (no Flask)
-  ALL_ENTRIES = MOCK_QUEUE;
-  QUEUE = MOCK_QUEUE.filter(e => e.category !== 'auto');
-  AUTO_ENTRIES = MOCK_QUEUE.filter(e => e.category === 'auto');
-  total = QUEUE.length;
-  document.getElementById('progressTotal').textContent = total;
-  renderCards();
+  if (r.ok) {
+    HAS_BACKEND = true;
+    await loadQueueAndStart();
+    return;
+  }
+  if (r.status === 404) {
+    HAS_BACKEND = true;
+    renderNoQueue();
+    return;
+  }
+  // The server responded with an error (e.g. 403 missing/invalid token, 500).
+  // Surface it instead of silently dropping into fake mock data.
+  HAS_BACKEND = true;
+  renderBackendError(r.status);
 }
 
 function renderNoQueue() {
@@ -1171,6 +1193,22 @@ function renderNoQueue() {
       <div class="eyebrow">empty queue</div>
       <h2>Nothing queued for review.</h2>
       <p class="lede">Run <code>/clean-wiki</code> inside Claude Code to scan your vaults. When the scan finishes, this page will populate with findings to swipe through.</p>
+    </div>
+  `;
+}
+
+function renderBackendError(status) {
+  document.querySelector('.topbar .progress').classList.add('hidden');
+  document.querySelector('.actions-top').classList.add('hidden');
+  document.getElementById('actionbar').classList.add('hidden');
+  const hint = status === 403
+    ? 'The review API rejected this page (missing or invalid token). Open the exact URL the server printed in your terminal — it carries a one-time <code>?token=…</code> that gates the API. A bare <code>localhost:5173</code> will not work.'
+    : 'The review server returned an error. Check the terminal where you launched it.';
+  document.getElementById('stage').innerHTML = `
+    <div class="picker">
+      <div class="eyebrow">backend error ${status}</div>
+      <h2>Couldn't load the review queue.</h2>
+      <p class="lede">${hint}</p>
     </div>
   `;
 }
@@ -1226,7 +1264,7 @@ function groupFindingsByPage(entries) {
 }
 
 async function loadQueueAndStart() {
-  const r = await fetch('/api/queue');
+  const r = await apiFetch('/api/queue');
   if (!r.ok) { renderEmpty(); return; }
   const data = await r.json();
   ALL_ENTRIES = data.entries || [];
@@ -1303,18 +1341,18 @@ function renderPreflight() {
       else if (d.before && d.after) detail = '− ' + escapeHtml(d.before.slice(0, 60)) + '  →  + ' + escapeHtml(d.after.slice(0, 60));
       else if (d.addLine) detail = '+ ' + escapeHtml(d.addLine.slice(0, 120));
       const obsidianUrl = `obsidian://open?vault=${encodeURIComponent(e.vault)}&file=${encodeURIComponent(e.target_file.replace(/\.md$/, ''))}`;
-      return `<div class="detail-item ${skipped ? 'skipped' : ''}" onclick="toggleSkipItem('${e.id}', event)">
+      return `<div class="detail-item ${skipped ? 'skipped' : ''}" onclick="toggleSkipItem('${jsAttr(e.id)}', event)">
         <div class="item-check"></div>
         <div class="item-info">
           <div class="item-path">${escapeHtml(e.target_file)}${lineRef}</div>
           ${detail ? `<div class="item-detail">${detail}</div>` : ''}
         </div>
-        <div class="vault-tag">${e.vault}</div>
+        <div class="vault-tag">${escapeHtml(e.vault)}</div>
         <a class="item-open" href="${obsidianUrl}" title="Open in Obsidian" onclick="event.stopPropagation()">↗</a>
       </div>`;
     }).join('');
 
-    return `<div class="signal-row ${expanded ? 'expanded' : ''}" onclick="toggleCategory('${sig}')">
+    return `<div class="signal-row ${expanded ? 'expanded' : ''}" onclick="toggleCategory('${jsAttr(sig)}')">
         <div>
           <div class="name">${info.name}</div>
           <div class="desc">${info.desc}</div>
@@ -1373,7 +1411,7 @@ async function applyAllAuto() {
     batchDecisions[e.id] = SKIPPED_AUTO_IDS.has(e.id) ? 'defer' : 'approve';
   });
   try {
-    await fetch('/api/batch-decide', {
+    await apiFetch('/api/batch-decide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decisions: batchDecisions }),
@@ -1391,25 +1429,13 @@ async function applyAllAuto() {
   await loadQueueAndStart();
 }
 
-function reviewAutoOneByOne() {
-  // Merge auto entries back into QUEUE for swipe review
-  QUEUE = ALL_ENTRIES.filter(e => !decisions[e.id]);
-  total = QUEUE.length;
-  preflightHandled = true;
-  currentIdx = 0;
-  document.getElementById('progressTotal').textContent = total;
-  document.getElementById('actionbar').classList.remove('hidden');
-  if (total > 0) renderCards();
-  else renderEmpty();
-}
-
 function skipAuto() {
   // Defer all auto entries (will re-appear next month) and go to judgment swipe
   preflightHandled = true;
   if (HAS_BACKEND) {
     const batch = {};
     AUTO_ENTRIES.forEach(e => { batch[e.id] = 'defer'; });
-    fetch('/api/batch-decide', {
+    apiFetch('/api/batch-decide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decisions: batch }),
@@ -1474,7 +1500,7 @@ function renderCardContent(e) {
       const checked = GROUP_CHECKS[subId] !== false;
       return `
       <div class="diff group-finding ${checked ? '' : 'unchecked'}">
-        <div class="find-check" onclick="toggleGroupFinding('${subId}', event)"></div>
+        <div class="find-check" onclick="toggleGroupFinding('${jsAttr(subId)}', event)"></div>
         <div class="diff-verb">${escapeHtml(sf.verb)} · ${idx + 1} of ${e._sub_findings.length}</div>
         ${renderDiff(sf)}
         ${sf.note ? `<div class="diff-note">${escapeHtml(sf.note)}</div>` : ''}
@@ -1495,22 +1521,22 @@ function renderCardContent(e) {
     <div class="meta-row">
       <div class="meta-cell">
         <span class="meta-label">edit</span>
-        <span class="meta-value">${e.signal_label}</span>
+        <span class="meta-value">${escapeHtml(e.signal_label)}</span>
       </div>
       <div class="meta-cell">
         <span class="meta-label">importance</span>
-        <span class="meta-value"><span class="conf-dot ${e.confidence}"></span>${e.confidence}</span>
+        <span class="meta-value"><span class="conf-dot ${escapeHtml(e.confidence)}"></span>${escapeHtml(e.confidence)}</span>
       </div>
       <div class="meta-cell">
         <span class="meta-label">vault</span>
-        <span class="meta-value">${e.vault}</span>
+        <span class="meta-value">${escapeHtml(e.vault)}</span>
       </div>
       ${deferred}
     </div>
 
     <div class="path-wrap">
       <div class="path-label">file</div>
-      <div class="path">${e.target_file}${line}</div>
+      <div class="path">${escapeHtml(e.target_file)}${line}</div>
     </div>
 
     ${diffBlocks}
@@ -1552,7 +1578,26 @@ function highlightContext(s) {
 }
 
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Escape a value for interpolation inside a single-quoted JS string that itself
+// sits in a double-quoted HTML attribute, e.g. onclick="fn('${jsAttr(id)}')".
+// Backslash + quote are JS-string escapes; &"<> are HTML-entity-escaped so the
+// browser decodes them back to the literal value the handler then looks up.
+function jsAttr(s) {
+  return String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function updateProgress() {
@@ -1579,7 +1624,7 @@ function decide(action) {
       batch[id] = perId;
     });
     if (HAS_BACKEND) {
-      fetch('/api/batch-decide', {
+      apiFetch('/api/batch-decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decisions: batch }),
@@ -1588,7 +1633,7 @@ function decide(action) {
   } else {
     decisions[entry.id] = action;
     if (HAS_BACKEND) {
-      fetch('/api/decide', {
+      apiFetch('/api/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: entry.id, decision: action }),
@@ -1616,8 +1661,14 @@ function openInObsidian() {
 
 function getCounts() {
   const c = { approve: 0, reject: 0, defer: 0 };
-  Object.values(decisions).forEach(d => c[d]++);
-  c.undecided = total - Object.keys(decisions).length;
+  Object.values(decisions).forEach(d => { if (c[d] !== undefined) c[d]++; });
+  // Count over decision-UNITS, not cards: a grouped card writes one decision key
+  // per sub-finding, so `total` (cards) − keys (sub-ids) could go negative. The
+  // universe is every id that can be decided = judgment sub-findings + auto entries.
+  const units = QUEUE.flatMap(e => e._is_group ? e._sub_ids : [e.id])
+    .concat(AUTO_ENTRIES.map(e => e.id));
+  const decided = units.filter(id => decisions[id]).length;
+  c.undecided = Math.max(0, units.length - decided);
   return c;
 }
 
@@ -1676,7 +1727,7 @@ function renderSummary(earlyExit) {
 
 async function cleanExit() {
   if (HAS_BACKEND) {
-    try { await fetch('/api/shutdown', { method: 'POST' }); } catch {}
+    try { await apiFetch('/api/shutdown', { method: 'POST' }); } catch {}
   }
   document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-3);font-family:ui-monospace,monospace;font-size:14px;background:#0a0b0d">Goodbye. You can close this tab.</div>';
 }

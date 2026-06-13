@@ -13,7 +13,7 @@ from rich.prompt import Confirm, Prompt
 
 from transcribe_audio import __version__
 from transcribe_audio.audio import probe_audio
-from transcribe_audio.config import CONFIG_FILE, load_config, write_config
+from transcribe_audio.config import Config, get_config_file, load_config, write_config
 from transcribe_audio.obsidian import write_obsidian_note
 from transcribe_audio.summarize import summarize_text
 from transcribe_audio.transcribe import estimate_cost_usd, transcribe_file
@@ -43,6 +43,12 @@ def main_callback(
     pass
 
 
+def _resolve_summary_style(value: str | None, config: Config) -> str:
+    """An explicit --summary-style/--style flag wins; otherwise fall back to the
+    configured default_summary_style instead of a hardcoded 'brief'."""
+    return value or config.default_summary_style
+
+
 # =================================================================================
 # transcribe
 # =================================================================================
@@ -69,12 +75,13 @@ def transcribe(
         bool, typer.Option("--summary/--no-summary", help="Also generate an LLM summary.")
     ] = False,
     summary_style: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--summary-style",
-            help="Built-in: brief, detailed, action_items. Or path to a custom template.",
+            help="Built-in: brief, detailed, action_items. Or path to a custom template. "
+            "Defaults to config's default_summary_style.",
         ),
-    ] = "brief",
+    ] = None,
     obsidian: Annotated[
         bool,
         typer.Option(
@@ -102,6 +109,7 @@ def transcribe(
 ) -> None:
     """Transcribe an audio file."""
     config = load_config()
+    summary_style = _resolve_summary_style(summary_style, config)
     file = file.expanduser().resolve()
 
     if not file.exists():
@@ -210,15 +218,18 @@ def transcribe(
 def summarize(
     file: Annotated[Path, typer.Argument(help="Path to a .txt transcript file.")],
     style: Annotated[
-        str,
+        str | None,
         typer.Option(
-            "--style", help="brief | detailed | action_items | path-to-template-file"
+            "--style",
+            help="brief | detailed | action_items | path-to-template-file. "
+            "Defaults to config's default_summary_style.",
         ),
-    ] = "brief",
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
 ) -> None:
     """Run a summary on an existing transcript .txt file."""
     config = load_config()
+    style = _resolve_summary_style(style, config)
     file = file.expanduser().resolve()
     if not file.exists():
         console.print(f"[red]File not found: {file}[/red]")
@@ -306,20 +317,21 @@ app.add_typer(config_app, name="config")
 @config_app.command("show")
 def config_show() -> None:
     """Print current config."""
-    if not CONFIG_FILE.exists():
+    config_file = get_config_file()
+    if not config_file.exists():
         console.print(
-            f"[yellow]No config file yet at {CONFIG_FILE}. "
+            f"[yellow]No config file yet at {config_file}. "
             f"Run [bold]transcribe-audio init[/bold].[/yellow]"
         )
         raise typer.Exit()
-    console.print(f"[dim]{CONFIG_FILE}[/dim]\n")
-    console.print(CONFIG_FILE.read_text())
+    console.print(f"[dim]{config_file}[/dim]\n")
+    console.print(config_file.read_text())
 
 
 @config_app.command("path")
 def config_path() -> None:
     """Print the path to the config file."""
-    console.print(str(CONFIG_FILE))
+    console.print(str(get_config_file()))
 
 
 # =================================================================================

@@ -10,8 +10,19 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "transcribe-audio"
-CONFIG_FILE = CONFIG_DIR / "config.yaml"
+
+def get_config_dir() -> Path:
+    """Resolve the config directory at call time.
+
+    Computed per-call (not at import) so that HOME / XDG_CONFIG_HOME changes —
+    e.g. test isolation via monkeypatch — are always honored.
+    """
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "transcribe-audio"
+
+
+def get_config_file() -> Path:
+    """Path to the yaml config file, resolved at call time."""
+    return get_config_dir() / "config.yaml"
 
 
 class Config(BaseModel):
@@ -47,26 +58,23 @@ def load_config(env_file: Path | None = None) -> Config:
 
     .env search order (first match wins):
       1. Explicit `env_file` argument
-      2. ~/.config/transcribe-audio/.env       (canonical for installed CLI)
-      3. ./.env in current working directory   (handy when developing in-repo)
-      4. <repo>/.env relative to the source    (works only for `uv pip install -e .`)
+      2. ~/.config/transcribe-audio/.env       (canonical for the installed CLI)
+
+    A `.env` sitting in the current working directory or the repo tree is
+    deliberately NOT auto-loaded: doing so let a `.env` planted in any directory
+    the CLI happened to run from silently substitute the API key or redirect the
+    Obsidian vault path. Export the variables (or pass `env_file`) for ad-hoc use.
     """
+    canonical_env = get_config_dir() / ".env"
     if env_file and env_file.exists():
         load_dotenv(env_file)
-    else:
-        candidates = [
-            CONFIG_DIR / ".env",
-            Path.cwd() / ".env",
-            Path(__file__).parents[2] / ".env",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                load_dotenv(candidate)
-                break
+    elif canonical_env.exists():
+        load_dotenv(canonical_env)
 
     data: dict = {}
-    if CONFIG_FILE.exists():
-        data = yaml.safe_load(CONFIG_FILE.read_text()) or {}
+    config_file = get_config_file()
+    if config_file.exists():
+        data = yaml.safe_load(config_file.read_text()) or {}
 
     # Env overrides
     if api_key := os.environ.get("OPENAI_API_KEY"):
@@ -84,12 +92,14 @@ def load_config(env_file: Path | None = None) -> Config:
 
 def write_config(config_data: dict) -> Path:
     """Write yaml config. Used by `transcribe-audio init`."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    config_dir = get_config_dir()
+    config_file = get_config_file()
+    config_dir.mkdir(parents=True, exist_ok=True)
     # Strip secrets — never write API key to yaml
     safe = {k: v for k, v in config_data.items() if k != "openai_api_key"}
     # Path objects → strings for yaml
     for k, v in safe.items():
         if isinstance(v, Path):
             safe[k] = str(v)
-    CONFIG_FILE.write_text(yaml.safe_dump(safe, sort_keys=False, default_flow_style=False))
-    return CONFIG_FILE
+    config_file.write_text(yaml.safe_dump(safe, sort_keys=False, default_flow_style=False))
+    return config_file

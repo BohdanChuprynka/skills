@@ -18,7 +18,9 @@ from typing import Optional
 from voice_check import checks, lexicons, profile as profile_mod, rewrite
 from voice_check.corpus import EDITED, POLISHED, RAW_SPEECH, load_corpus
 
-_DEFAULT_NEGATIVES = Path(__file__).resolve().parents[1] / "examples" / "contrast"
+# eval.py lives at <pkg-root>/src/voice_check/eval.py, so the packaged examples/
+# dir is parents[2] (the package root), NOT parents[1] (the src/ dir).
+_DEFAULT_NEGATIVES = Path(__file__).resolve().parents[2] / "examples" / "contrast"
 
 # Inverse of mechanical_polish, used ONLY to build content-matched negatives:
 # degrade a clean sentence into generic-AI style (same content, AI styling).
@@ -188,6 +190,12 @@ def evaluate(
     else:
         neg_dir = Path(negatives_dir) if negatives_dir else _DEFAULT_NEGATIVES
         negatives = [r.text for r in load_corpus(neg_dir)]
+        if not negatives:
+            # Loudly refuse rather than silently returning AUC 0.5 from an empty set.
+            raise FileNotFoundError(
+                f"no negative records loaded from {neg_dir} — eval cannot discriminate. "
+                "Pass --negatives <dir> with records, or use --content-matched."
+            )
         negative_mode = "independent_generic_ai"
 
     discrimination = run_discrimination(test_texts, negatives, rules)

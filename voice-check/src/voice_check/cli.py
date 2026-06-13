@@ -8,11 +8,22 @@ in scripts/ delegate here so there is one source of truth.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from voice_check import checks, corpus, profile, report, rewrite, skill_template
 from voice_check import eval as ev
+
+
+def _default_profile_dir() -> str:
+    """Default profile location: the canonical installed path if it exists,
+    otherwise the repo-local data/profiles for in-repo development. A bare
+    `voice-check check` run outside the repo would otherwise fail on a missing
+    relative data/profiles dir."""
+    xdg = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    canonical = Path(xdg) / "voice-check" / "profile"
+    return str(canonical) if canonical.exists() else "data/profiles"
 
 
 def cmd_profile(args) -> int:
@@ -99,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_check = sub.add_parser("check", help="Audit a draft against your voice profile.")
     p_check.add_argument("--draft", help="Path to a draft file.")
     p_check.add_argument("--text", help="Draft text passed inline.")
-    p_check.add_argument("--profile", default="data/profiles", help="Profile directory.")
+    p_check.add_argument("--profile", default=_default_profile_dir(), help="Profile directory.")
     p_check.add_argument("--format", choices=["text", "json"], default="text")
     p_check.add_argument("--rewrite", action="store_true", help="Include the mechanical baseline rewrite.")
     p_check.add_argument("--strict", action="store_true", help="Exit 1 when score < --min-score.")
@@ -107,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_check.set_defaults(func=cmd_check)
 
     p_build = sub.add_parser("build-skill", help="Generate the /voice-check skill from a profile.")
-    p_build.add_argument("--profile", default="data/profiles")
+    p_build.add_argument("--profile", default=_default_profile_dir())
     p_build.add_argument("--out", default="skills/voice-check")
     p_build.add_argument("--targets", default="claude,codex", help="Comma list: claude,codex.")
     p_build.set_defaults(func=cmd_build_skill)

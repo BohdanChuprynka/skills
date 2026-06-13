@@ -100,11 +100,26 @@ if command -v shasum >/dev/null 2>&1; then
 else
   PAGE_HASH=$(printf '%s' "$PAGE_PATH" | cksum | awk '{print $1}')
 fi
-LOCK_PATH="${DREAM_VAULT_LOCK_DIR:-/tmp/dream-vault-locks}/$PAGE_HASH"
-mkdir -p "$(dirname "$LOCK_PATH")" 2>/dev/null || true
+# User-scoped lock dir (uid suffix) instead of a world-shared /tmp/dream-vault-locks
+# path — avoids cross-user collisions and symlink-bait on shared hosts.
+LOCK_BASE="${DREAM_VAULT_LOCK_DIR:-${TMPDIR:-/tmp}/dream-vault-locks-$(id -u)}"
+LOCK_PATH="$LOCK_BASE/$PAGE_HASH"
+mkdir -p "$LOCK_BASE" 2>/dev/null || true
 
 LOCK_RETRIES=20
 while ! mkdir "$LOCK_PATH" 2>/dev/null; do
+  # Reclaim a stale lock: if the recorded holder PID is gone (crash / SIGKILL
+  # bypassed the EXIT trap), the lock would otherwise wedge every future run.
+  # Serialize the reclaim behind its own guard so two waiters can't both delete
+  # a directory the other just re-acquired (which would double-acquire the lock).
+  if mkdir "$LOCK_PATH.reclaim" 2>/dev/null; then
+    holder=""
+    [ -f "$LOCK_PATH/pid" ] && holder="$(cat "$LOCK_PATH/pid" 2>/dev/null || true)"
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$LOCK_PATH" 2>/dev/null || true
+    fi
+    rmdir "$LOCK_PATH.reclaim" 2>/dev/null || true
+  fi
   LOCK_RETRIES=$((LOCK_RETRIES - 1))
   if [ "$LOCK_RETRIES" -le 0 ]; then
     echo "vault-writer: lock timeout on $PAGE_PATH" >&2
@@ -112,7 +127,10 @@ while ! mkdir "$LOCK_PATH" 2>/dev/null; do
   fi
   sleep 0.1
 done
-trap 'rmdir "$LOCK_PATH" 2>/dev/null || true' EXIT
+# Record holder PID atomically (temp + mv) so a waiter never reads a partial pid.
+printf '%s\n' "$$" > "$LOCK_PATH/.pid.tmp" 2>/dev/null \
+  && mv -f "$LOCK_PATH/.pid.tmp" "$LOCK_PATH/pid" 2>/dev/null || true
+trap 'rm -rf "$LOCK_PATH" 2>/dev/null || true' EXIT
 
 # Defense-in-depth: never write THROUGH a symlinked page target. The guard already
 # rejects this, but the create-if-missing redirect below would otherwise follow a
@@ -136,8 +154,11 @@ if [ "$MODE" = "append" ]; then
       # Section exists → append immediately under it, before next ## or EOF.
       # awk: emit lines as-is; after finding our section, on the NEXT blank
       # line or next ## or EOF, insert the new line.
-      awk -v section="## $SECTION" -v newline="$APPEND_LINE" '
-        BEGIN { inserted = 0; in_section = 0 }
+      # Pass section/content via the environment (ENVIRON), NOT awk -v: -v
+      # processes C-style backslash escapes (\n \t \\ \d …), which corrupts any
+      # fact containing a backslash and breaks the grep -Fxq idempotency above.
+      section="## $SECTION" newline="$APPEND_LINE" awk '
+        BEGIN { inserted = 0; in_section = 0; section = ENVIRON["section"]; newline = ENVIRON["newline"] }
         {
           if ($0 == section) { print; in_section = 1; next }
           if (in_section && !inserted && /^## / && $0 != section) {
@@ -175,7 +196,9 @@ else
   NEW_LINE="- $FINAL_CONTENT"
 
   if grep -Fxq -- "$OLD_LINE" "$PAGE_PATH"; then
-    awk -v old="$OLD_LINE" -v new="$NEW_LINE" '
+    # ENVIRON (not awk -v) so backslashes in the line content survive verbatim.
+    old="$OLD_LINE" new="$NEW_LINE" awk '
+      BEGIN { old = ENVIRON["old"]; new = ENVIRON["new"] }
       { if ($0 == old) print new; else print }
     ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"
   elif grep -Fxq -- "$NEW_LINE" "$PAGE_PATH"; then

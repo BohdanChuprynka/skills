@@ -423,9 +423,24 @@ let decisions = {};
 let QUEUE = [];
 let total = 0;
 
+// The server issues a per-run token in the page URL (?token=…). Echo it on every
+// /api/* call so cross-site pages (which can't read this URL) can't forge requests.
+const API_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+// Strip ?token from the address bar/history once captured (it lives on in API_TOKEN
+// for fetches) so it can't leak via Referer, terminal scrollback, or browser history.
+if (API_TOKEN && window.history && window.history.replaceState) {
+  const _u = new URL(window.location.href);
+  _u.searchParams.delete('token');
+  window.history.replaceState({}, document.title, _u.pathname + _u.search + _u.hash);
+}
+function apiFetch(path, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {}, { 'X-CSRF-Token': API_TOKEN });
+  return fetch(path, Object.assign({}, opts, { headers }));
+}
+
 async function bootstrap() {
   try {
-    const r = await fetch('/api/queue');
+    const r = await apiFetch('/api/queue');
     if (r.ok) {
       await loadQueue(await r.json());
       return;
@@ -550,7 +565,9 @@ function buildCard(e) {
 }
 
 function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function updateProgress() {
@@ -563,7 +580,7 @@ function decide(action) {
   const entry = QUEUE[currentIdx];
   decisions[entry.id] = action;
 
-  fetch('/api/decide', {
+  apiFetch('/api/decide', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: entry.id, decision: action }),
@@ -632,7 +649,7 @@ function renderSummary(earlyExit) {
 }
 
 async function cleanExit() {
-  try { await fetch('/api/shutdown', { method: 'POST' }); } catch {}
+  try { await apiFetch('/api/shutdown', { method: 'POST' }); } catch {}
   document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--text-3);font-family:ui-monospace,monospace;font-size:14px;background:#0a0b0d">Goodbye. You can close this tab.</div>';
 }
 

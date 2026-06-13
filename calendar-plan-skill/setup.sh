@@ -72,7 +72,8 @@ ok "loaded $ENV_FILE"
 : "${MODEL:=claude-sonnet-4-6}"
 : "${TIMEZONE:=America/New_York}"
 : "${CRON_HOUR:=22}"
-: "${DEFAULT_MODE:=auto}"
+# Draft (report-only) is the safe default; auto (unattended writes) is opt-in.
+: "${DEFAULT_MODE:=draft}"
 : "${EXTRA_ADD_DIRS:=}"
 : "${CODEX_MODEL:=gpt-5.5}"
 : "${CODEX_REASONING:=xhigh}"
@@ -160,12 +161,28 @@ python3 -c "import json; json.load(open('$SKILL_DIR/config/mcp-config.json'))" \
   || { fail "generated mcp-config.json is invalid JSON"; exit 1; }
 
 # ============================================================
-# 5. planning-preferences.md seed (canonical = Codex side)
+# 5. preferences (canonical = ~/.config/calendar-plan, what SKILL.md reads)
 # ============================================================
-heading "5. planning-preferences.md"
-PREFS_REAL="$CODEX_INSTALL/planning-preferences.md"
-PREFS_LINK="$SKILL_DIR/config/planning-preferences.md"
-mkdir -p "$CODEX_INSTALL"
+heading "5. preferences (~/.config/calendar-plan)"
+# The interactive Claude skill reads ~/.config/calendar-plan/{preferences,observed-patterns}.md
+# (see SKILL.md). Seed those as the single source of truth; the in-repo config dir
+# and the Codex install both symlink to the same preferences file so nothing drifts.
+XDG_CP_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/calendar-plan"
+mkdir -p "$XDG_CP_DIR" "$CODEX_INSTALL"
+PREFS_REAL="$XDG_CP_DIR/preferences.md"
+PATTERNS_REAL="$XDG_CP_DIR/observed-patterns.md"
+# Upgrade path: a prior layout kept the REAL prefs at the Codex install (or in-repo
+# config/). If the canonical file doesn't exist yet but a real (non-symlink) one does,
+# MIGRATE it so an in-place re-run never overwrites the user's edits with a template.
+if [[ ! -f "$PREFS_REAL" ]]; then
+  for legacy in "$CODEX_INSTALL/planning-preferences.md" "$SKILL_DIR/config/planning-preferences.md"; do
+    if [[ -f "$legacy" && ! -L "$legacy" ]]; then
+      mv "$legacy" "$PREFS_REAL"
+      ok "migrated existing preferences from $legacy -> $PREFS_REAL"
+      break
+    fi
+  done
+fi
 if [[ ! -f "$PREFS_REAL" ]]; then
   cp "$REPO_DIR/examples/planning-preferences.example.md" "$PREFS_REAL"
   chmod 600 "$PREFS_REAL"
@@ -174,11 +191,25 @@ if [[ ! -f "$PREFS_REAL" ]]; then
 else
   ok "$PREFS_REAL already exists, keeping"
 fi
-if [[ -L "$PREFS_LINK" || -f "$PREFS_LINK" ]]; then
-  rm "$PREFS_LINK" 2>/dev/null || true
+if [[ ! -f "$PATTERNS_REAL" ]]; then
+  cp "$REPO_DIR/examples/observed-patterns.example.md" "$PATTERNS_REAL"
+  chmod 600 "$PATTERNS_REAL"
+  ok "seeded $PATTERNS_REAL from example"
+else
+  ok "$PATTERNS_REAL already exists, keeping"
 fi
-ln -s "$PREFS_REAL" "$PREFS_LINK"
-ok "linked $PREFS_LINK -> $PREFS_REAL"
+# Back-compat: in-repo config/ and the Codex install resolve to the same canonical file.
+# Only replace symlinks; if a real file somehow remains here, back it up (never rm).
+for link in "$SKILL_DIR/config/planning-preferences.md" "$CODEX_INSTALL/planning-preferences.md"; do
+  if [[ -L "$link" ]]; then
+    rm -f "$link"
+  elif [[ -e "$link" ]]; then
+    mv "$link" "$link.bak" 2>/dev/null || true
+    warn "backed up unexpected real file $link -> $link.bak"
+  fi
+  ln -s "$PREFS_REAL" "$link"
+done
+ok "linked config/ + Codex preferences -> $PREFS_REAL"
 
 # ============================================================
 # 6. cron-prompt.md seed (from .example)
