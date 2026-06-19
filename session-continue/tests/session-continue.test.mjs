@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -155,4 +158,157 @@ test('buildHandoff warns on cwd mismatch by default', async () => {
   assert.match(output, /Working-directory mismatch/);
   assert.match(output, /\/tmp\/other-project/);
   assert.match(output, /\/tmp\/current-project/);
+});
+
+// --- multi-account / cross-tool resolution ---------------------------------
+
+const ID_A = 'aaaaaaaa-0000-0000-0000-000000000001';
+const ID_B = 'bbbbbbbb-0000-0000-0000-000000000002';
+const CODEX_ID = 'dddddddd-0000-0000-0000-000000000004';
+const ID_DUP = 'eeeeeeee-0000-0000-0000-000000000005';
+
+// Build a throwaway $HOME with two live Claude accounts, a migration backup that
+// duplicates an id, a config dir with no projects/, and a Codex session.
+function buildFixture(t) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-home-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const touch = (rel) => {
+    const full = path.join(home, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, '{"type":"summary","summary":"x"}\n');
+  };
+  touch(`.claude/projects/projA/${ID_A}.jsonl`);
+  touch(`.claude/projects/projA/${ID_DUP}.jsonl`);
+  touch('.claude/projects/projA/ambig-1111-0000-0000-0000-000000000001.jsonl');
+  touch(`.claude-personal/projects/projB/${ID_B}.jsonl`);
+  touch(`.claude-personal/projects/projB/${ID_DUP}.jsonl`);
+  touch('.claude-personal/projects/projB/ambig-2222-0000-0000-0000-000000000002.jsonl');
+  touch(`.claude-migration-backup-test/projects/projA/${ID_A}.jsonl`);
+  fs.mkdirSync(path.join(home, '.claude-shared'), { recursive: true });
+  touch(`.codex/sessions/2026/01/02/rollout-2026-01-02T03-04-05-${CODEX_ID}.jsonl`);
+  return home;
+}
+
+const dir = (home, name) => path.join(home, name);
+
+test('parseInvocation no longer requires a source', () => {
+  const parsed = helper.parseInvocation([ID_A, '--', 'keep going']);
+
+  assert.equal(parsed.from, undefined);
+  assert.equal(parsed.sessionId, ID_A);
+  assert.equal(parsed.task, 'keep going');
+});
+
+test('claudeConfigDirs auto-discovers live dirs, excluding backups and no-projects dirs', (t) => {
+  const home = buildFixture(t);
+
+  assert.deepEqual(helper.claudeConfigDirs({}, home), [dir(home, '.claude'), dir(home, '.claude-personal')]);
+});
+
+test('claudeConfigDirs lists the active CLAUDE_CONFIG_DIR first', (t) => {
+  const home = buildFixture(t);
+
+  const dirs = helper.claudeConfigDirs({ CLAUDE_CONFIG_DIR: dir(home, '.claude-personal') }, home);
+
+  assert.deepEqual(dirs, [dir(home, '.claude-personal'), dir(home, '.claude')]);
+});
+
+test('claudeConfigDirs honours the SESSION_CONTINUE_CLAUDE_DIRS override order and drops missing dirs', (t) => {
+  const home = buildFixture(t);
+  const env = {
+    SESSION_CONTINUE_CLAUDE_DIRS: [dir(home, '.claude-personal'), dir(home, '.claude'), dir(home, '.nope')].join(':'),
+  };
+
+  assert.deepEqual(helper.claudeConfigDirs(env, home), [dir(home, '.claude-personal'), dir(home, '.claude')]);
+});
+
+test('locateSession finds a Claude id owned by a non-active account', (t) => {
+  const home = buildFixture(t);
+  const env = { CLAUDE_CONFIG_DIR: dir(home, '.claude-personal') };
+
+  assert.deepEqual(helper.locateSession(ID_A, undefined, env, home), {
+    source: 'claude',
+    configDir: dir(home, '.claude'),
+    id: ID_A,
+  });
+});
+
+test('locateSession resolves the active account too', (t) => {
+  const home = buildFixture(t);
+  const env = { CLAUDE_CONFIG_DIR: dir(home, '.claude-personal') };
+
+  const located = helper.locateSession(ID_B, undefined, env, home);
+
+  assert.equal(located.source, 'claude');
+  assert.equal(located.configDir, dir(home, '.claude-personal'));
+});
+
+test('locateSession auto-detects Codex sessions', (t) => {
+  const home = buildFixture(t);
+
+  const located = helper.locateSession(CODEX_ID, undefined, {}, home);
+
+  assert.equal(located.source, 'codex');
+  assert.equal(located.id, CODEX_ID);
+});
+
+test('locateSession honours scan order for duplicate ids (first wins)', (t) => {
+  const home = buildFixture(t);
+
+  const personalFirst = { SESSION_CONTINUE_CLAUDE_DIRS: [dir(home, '.claude-personal'), dir(home, '.claude')].join(':') };
+  assert.equal(helper.locateSession(ID_DUP, undefined, personalFirst, home).configDir, dir(home, '.claude-personal'));
+
+  const claudeFirst = { SESSION_CONTINUE_CLAUDE_DIRS: [dir(home, '.claude'), dir(home, '.claude-personal')].join(':') };
+  assert.equal(helper.locateSession(ID_DUP, undefined, claudeFirst, home).configDir, dir(home, '.claude'));
+});
+
+test('locateSession resolves a unique prefix', (t) => {
+  const home = buildFixture(t);
+
+  assert.equal(helper.locateSession(ID_A.slice(0, 8), undefined, {}, home).id, ID_A);
+});
+
+test('locateSession rejects an ambiguous prefix with candidates', (t) => {
+  const home = buildFixture(t);
+
+  assert.throws(
+    () => helper.locateSession('ambig', undefined, {}, home),
+    (err) => {
+      assert.match(err.message, /Ambiguous/);
+      assert.match(err.message, /ambig-1111/);
+      assert.match(err.message, /ambig-2222/);
+      return true;
+    },
+  );
+});
+
+test('locateSession returns null when nothing matches', (t) => {
+  const home = buildFixture(t);
+
+  assert.equal(helper.locateSession('zzzzzzzz-nope', undefined, {}, home), null);
+});
+
+test('locateSession rejects ids containing path separators', (t) => {
+  const home = buildFixture(t);
+
+  assert.throws(() => helper.locateSession('../escape', undefined, {}, home), /Invalid session id/);
+  assert.throws(() => helper.locateSession('a/b', undefined, {}, home), /Invalid session id/);
+});
+
+test('locateSession with explicit from=claude ignores Codex ids', (t) => {
+  const home = buildFixture(t);
+
+  assert.equal(helper.locateSession(CODEX_ID, 'claude', {}, home), null);
+});
+
+test('runs as a CLI when invoked through a symlink (installed path)', (t) => {
+  const realScript = path.resolve('session-continue/skills/session-continue/scripts/session-continue.mjs');
+  const linkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-link-'));
+  t.after(() => fs.rmSync(linkDir, { recursive: true, force: true }));
+  const link = path.join(linkDir, 'session-continue.mjs');
+  fs.symlinkSync(realScript, link);
+
+  const out = execFileSync(process.execPath, [link, '--help'], { encoding: 'utf8' });
+
+  assert.match(out, /Usage:/);
 });
