@@ -44,6 +44,252 @@ const SOURCE_LABELS = Object.freeze({
   'qwen-code': 'Qwen Code',
 });
 
+// ---------------------------------------------------------------------------
+// Cross-account / cross-tool session location
+// ---------------------------------------------------------------------------
+//
+// `continues` reads Claude sessions from exactly one directory:
+// `$CLAUDE_CONFIG_DIR/projects`, or `~/.claude/projects` when that env var is
+// unset. People who run more than one Claude account keep each account in its
+// own config dir (e.g. via `CLAUDE_CONFIG_DIR`), so a session created under
+// account B is invisible while account A is active. That is the friction this
+// skill removes: when `--from` is omitted (or is `claude`), we locate the
+// transcript on disk first, then point `continues` at the directory that owns
+// it. Both Claude (`<id>.jsonl`) and Codex (`rollout-<ts>-<id>.jsonl`) write one
+// id-named file per session, so a bounded filesystem scan resolves an id
+// exactly, no matter which account or tool created it.
+
+const HOME_DIR = os.homedir();
+
+// Directory names we never auto-scan even when they contain a `projects/` dir:
+// migration/backup copies duplicate real session ids and would otherwise
+// resolve an id to a stale transcript. Users can still include such a dir
+// explicitly via SESSION_CONTINUE_CLAUDE_DIRS.
+const CLAUDE_DIR_DENYLIST = /(?:^|[-_.])(?:backup|migration|bak|tmp|trash)\b|~$/i;
+
+const CODEX_ROLLOUT_RE = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/u;
+
+function expandHome(target, home = HOME_DIR) {
+  if (target === '~') return home;
+  if (target.startsWith('~/') || target.startsWith('~\\')) return path.join(home, target.slice(2));
+  return target;
+}
+
+// Keep only resolved, de-duplicated directories that look like a real Claude
+// config dir (they contain a `projects/` subdirectory). Order is preserved, so
+// the first dir listed wins when the same id exists in more than one.
+function keepRealClaudeDirs(dirs) {
+  const out = [];
+  const seen = new Set();
+  for (const dir of dirs) {
+    const resolved = path.resolve(dir);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    try {
+      if (fs.statSync(path.join(resolved, 'projects')).isDirectory()) out.push(resolved);
+    } catch {
+      // not a usable config dir; skip
+    }
+  }
+  return out;
+}
+
+// The ordered list of Claude config dirs to search.
+//
+// 1. SESSION_CONTINUE_CLAUDE_DIRS (path-list, `:` or `;` separated) is an
+//    explicit, ordered override and is used verbatim — the user owns the order.
+// 2. Otherwise auto-discover: the active account (`CLAUDE_CONFIG_DIR`) first,
+//    then `~/.claude`, then any other `~/.claude*` sibling dir that holds
+//    transcripts, excluding backup/migration copies.
+export function claudeConfigDirs(env = process.env, home = HOME_DIR) {
+  const override = (env.SESSION_CONTINUE_CLAUDE_DIRS || '').trim();
+  if (override) {
+    const listed = override
+      .split(/[:;]/u)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => expandHome(part, home));
+    return keepRealClaudeDirs(listed);
+  }
+
+  const ordered = [];
+  if (env.CLAUDE_CONFIG_DIR && env.CLAUDE_CONFIG_DIR.trim()) {
+    ordered.push(path.resolve(expandHome(env.CLAUDE_CONFIG_DIR.trim(), home)));
+  }
+  ordered.push(path.join(home, '.claude'));
+
+  let siblings = [];
+  try {
+    siblings = fs
+      .readdirSync(home, { withFileTypes: true })
+      .filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && entry.name.startsWith('.claude'))
+      .map((entry) => entry.name)
+      .filter((name) => !CLAUDE_DIR_DENYLIST.test(name))
+      .sort()
+      .map((name) => path.join(home, name));
+  } catch {
+    // home unreadable; fall back to the explicit candidates above
+  }
+  ordered.push(...siblings);
+
+  return keepRealClaudeDirs(ordered);
+}
+
+export function codexHomeDir(env = process.env, home = HOME_DIR) {
+  const configured = env.CODEX_HOME && env.CODEX_HOME.trim();
+  return configured ? path.resolve(expandHome(configured, home)) : path.join(home, '.codex');
+}
+
+// Walk a directory tree (bounded depth, no symlink following) and invoke `onFile`
+// for every `*.jsonl`. `onFile` returning `true` stops the walk early.
+function walkJsonl(root, maxDepth, onFile) {
+  const stack = [{ dir: root, depth: 0 }];
+  while (stack.length > 0) {
+    const { dir, depth } = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      // withFileTypes reports symlinks as neither file nor directory, so loops
+      // and out-of-tree escapes are skipped for free.
+      if (entry.isDirectory()) {
+        if (depth < maxDepth) stack.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
+      } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (onFile(path.join(dir, entry.name), entry.name) === true) return;
+      }
+    }
+  }
+}
+
+// Claude transcripts live at `<configDir>/projects/<project>/<id>.jsonl`.
+// `exactOnly` uses an existsSync-per-project fast path; otherwise collect prefix ids.
+function findClaudeIds(configDir, sessionId, exactOnly) {
+  const projects = path.join(configDir, 'projects');
+  let projectDirs;
+  try {
+    projectDirs = fs.readdirSync(projects, { withFileTypes: true });
+  } catch {
+    return exactOnly ? null : [];
+  }
+  const prefixIds = [];
+  for (const entry of projectDirs) {
+    if (!entry.isDirectory()) continue;
+    const projectPath = path.join(projects, entry.name);
+    if (exactOnly) {
+      try {
+        if (fs.statSync(path.join(projectPath, `${sessionId}.jsonl`)).isFile()) return sessionId;
+      } catch {
+        // not here; keep scanning other project dirs
+      }
+      continue;
+    }
+    let files;
+    try {
+      files = fs.readdirSync(projectPath);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.endsWith('.jsonl')) continue;
+      const id = file.slice(0, -'.jsonl'.length);
+      if (id.startsWith(sessionId)) prefixIds.push(id);
+    }
+  }
+  return exactOnly ? null : prefixIds;
+}
+
+// Codex transcripts live at `<codexHome>/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`.
+function findCodexIds(codexHome, sessionId, exactOnly) {
+  const root = path.join(codexHome, 'sessions');
+  const ids = [];
+  walkJsonl(root, 6, (_full, name) => {
+    const match = name.match(CODEX_ROLLOUT_RE);
+    if (!match) return false;
+    const id = match[1];
+    if (exactOnly) {
+      if (id === sessionId) {
+        ids.push(id);
+        return true;
+      }
+      return false;
+    }
+    if (id.startsWith(sessionId)) ids.push(id);
+    return false;
+  });
+  if (exactOnly) return ids.length > 0 ? ids[0] : null;
+  return ids;
+}
+
+// Resolve a session id to its owning { source, configDir, id } by scanning disk.
+// `from` narrows the search: undefined => Claude dirs then Codex; 'claude' =>
+// Claude dirs only. Returns null when nothing matches; throws on an ambiguous
+// prefix. Exact matches win over prefixes and honour scan order (first wins).
+export function locateSession(sessionId, from, env = process.env, home = HOME_DIR) {
+  if (/[\\/]/u.test(sessionId) || sessionId === '.' || sessionId === '..') {
+    throw new Error(`Invalid session id "${sessionId}".`);
+  }
+  const wantClaude = from === undefined || from === 'claude';
+  const wantCodex = from === undefined || from === 'codex';
+  const claudeDirs = wantClaude ? claudeConfigDirs(env, home) : [];
+  const codexHome = wantCodex ? codexHomeDir(env, home) : null;
+
+  // Pass 1: exact id, in scan order (Claude dirs first, then Codex).
+  for (const dir of claudeDirs) {
+    if (findClaudeIds(dir, sessionId, true)) return { source: 'claude', configDir: dir, id: sessionId };
+  }
+  if (codexHome) {
+    const id = findCodexIds(codexHome, sessionId, true);
+    if (id) return { source: 'codex', configDir: codexHome, id };
+  }
+
+  // Pass 2: unique prefix across everything searched.
+  const matches = new Map();
+  for (const dir of claudeDirs) {
+    for (const id of findClaudeIds(dir, sessionId, false)) {
+      const key = `claude:${id}`;
+      if (!matches.has(key)) matches.set(key, { source: 'claude', configDir: dir, id });
+    }
+  }
+  if (codexHome) {
+    for (const id of findCodexIds(codexHome, sessionId, false)) {
+      const key = `codex:${id}`;
+      if (!matches.has(key)) matches.set(key, { source: 'codex', configDir: codexHome, id });
+    }
+  }
+  if (matches.size === 0) return null;
+  if (matches.size > 1) {
+    throw new Error(
+      [
+        `Ambiguous session id prefix "${sessionId}".`,
+        'Use a longer id. Candidates:',
+        ...[...matches.values()]
+          .slice(0, 10)
+          .map((m) => `- ${m.id} (${SOURCE_LABELS[m.source] ?? m.source}, ${m.configDir})`),
+      ].join('\n'),
+    );
+  }
+  return [...matches.values()][0];
+}
+
+function noLocationError(sessionId, env = process.env, home = HOME_DIR) {
+  const searched = [
+    ...claudeConfigDirs(env, home).map((dir) => path.join(dir, 'projects')),
+    path.join(codexHomeDir(env, home), 'sessions'),
+  ];
+  return [
+    `Could not find session "${sessionId}" in any known Claude config dir or Codex sessions.`,
+    'Searched, in order:',
+    ...searched.map((dir) => `  - ${dir}`),
+    '',
+    'If the session lives elsewhere, set an ordered search path, e.g.:',
+    '  export SESSION_CONTINUE_CLAUDE_DIRS="$HOME/.claude:$HOME/.claude-work"',
+    'or pass the source explicitly: session-continue from <source> <session-id>',
+  ].join('\n');
+}
+
 export function parseInvocation(argv) {
   argv = expandSingleArgument(argv);
   const separator = argv.indexOf('--');
@@ -157,10 +403,12 @@ export function parseInvocation(argv) {
   }
 
   if (parsed.help) return parsed;
-  if (!parsed.from) throw new Error(`Missing source tool.\n\n${usage()}`);
-  parsed.from = parsed.from.toLowerCase();
-  if (!isValidSource(parsed.from)) {
-    throw new Error(`Unsupported source "${parsed.from}". Valid sources: ${VALID_SOURCES.join(', ')}`);
+  // Source is optional: when omitted it is auto-detected from disk in main().
+  if (parsed.from) {
+    parsed.from = parsed.from.toLowerCase();
+    if (!isValidSource(parsed.from)) {
+      throw new Error(`Unsupported source "${parsed.from}". Valid sources: ${VALID_SOURCES.join(', ')}`);
+    }
   }
   if (!parsed.sessionId) throw new Error(`Missing session id.\n\n${usage()}`);
   if (!VALID_PRESETS.includes(parsed.preset)) {
@@ -274,6 +522,7 @@ export async function buildHandoff(api, session, options) {
     '',
     `- Source tool: ${SOURCE_LABELS[session.source] ?? session.source} (${session.source})`,
     `- Session ID: \`${session.id}\``,
+    ...(options.resolvedConfigDir ? [`- Resolved from: \`${options.resolvedConfigDir}\``] : []),
     `- Session cwd: \`${sessionCwd}\``,
     `- Current cwd: \`${currentCwd}\``,
     `- Verbosity preset: \`${options.preset}\``,
@@ -428,15 +677,26 @@ function formatCandidate(session) {
 export function usage() {
   return [
     'Usage:',
+    '  session-continue <session-id> -- <task>                 (source auto-detected)',
     '  session-continue from <source> <session-id> -- <task>',
     '  session-continue --from <source> --id <session-id> -- <task>',
     '',
     'Examples:',
+    '  session-continue abc123 -- finish the refactor          (Claude/Codex auto-detected)',
     '  session-continue from claude abc123 -- finish the refactor',
     '  session-continue from codex session id: abc123',
     '',
+    'When the source is omitted (or is "claude"), the session id is located on',
+    'disk across every configured Claude account dir and the Codex sessions dir,',
+    'then continues is pointed at the owning directory.',
+    '',
     `Sources: ${VALID_SOURCES.join(', ')}`,
     'Presets: minimal, standard, verbose, full',
+    '',
+    'Config:',
+    '  SESSION_CONTINUE_CLAUDE_DIRS  Ordered, ":"-separated list of Claude config',
+    '                                dirs to search (default: auto-discover ~/.claude*).',
+    '  CLAUDE_CONFIG_DIR / CODEX_HOME  Respected as the active account / Codex home.',
   ].join('\n');
 }
 
@@ -446,6 +706,31 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(usage());
     return;
   }
+
+  // Auto-detect the source and the owning config dir from disk. This is what
+  // lets `--from` be optional and lets a Claude id resolve regardless of which
+  // account is currently active. We run it when no source was given, or when
+  // the source is `claude` (to pick the right account dir). Other sources, and
+  // explicit `codex`, keep `continues`' default single-home behaviour.
+  if (invocation.from === undefined || invocation.from === 'claude') {
+    const located = locateSession(invocation.sessionId, invocation.from);
+    if (located) {
+      invocation.from = located.source;
+      invocation.sessionId = located.id;
+      invocation.resolvedConfigDir = located.configDir;
+      if (located.source === 'claude') {
+        process.env.CLAUDE_CONFIG_DIR = located.configDir;
+      } else if (located.source === 'codex') {
+        process.env.CODEX_HOME = located.configDir;
+      }
+    } else if (invocation.from === undefined) {
+      // Nothing on disk and no source to fall back on.
+      throw new Error(noLocationError(invocation.sessionId));
+    }
+    // from === 'claude' but not found on disk: fall through and let `continues`
+    // try with the current environment (no regression vs. the old behaviour).
+  }
+
   const api = await loadContinuesApi();
   const session = await resolveSessionWithFallback(api, invocation.from, invocation.sessionId);
   const handoff = await buildHandoff(api, session, invocation);
