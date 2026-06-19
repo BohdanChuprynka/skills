@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -298,4 +299,16 @@ test('locateSession with explicit from=claude ignores Codex ids', (t) => {
   const home = buildFixture(t);
 
   assert.equal(helper.locateSession(CODEX_ID, 'claude', {}, home), null);
+});
+
+test('runs as a CLI when invoked through a symlink (installed path)', (t) => {
+  const realScript = path.resolve('session-continue/skills/session-continue/scripts/session-continue.mjs');
+  const linkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-link-'));
+  t.after(() => fs.rmSync(linkDir, { recursive: true, force: true }));
+  const link = path.join(linkDir, 'session-continue.mjs');
+  fs.symlinkSync(realScript, link);
+
+  const out = execFileSync(process.execPath, [link, '--help'], { encoding: 'utf8' });
+
+  assert.match(out, /Usage:/);
 });

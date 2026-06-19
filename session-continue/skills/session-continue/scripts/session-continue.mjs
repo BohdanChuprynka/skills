@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const CONTINUES_VERSION = '4.1.1';
 const VALID_SOURCES = Object.freeze([
@@ -741,7 +741,21 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(handoff);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run as a CLI when invoked directly. Compare real paths so this still fires
+// when the script is reached through a symlink (e.g. the installed
+// ~/.claude/skills/session-continue -> repo): Node resolves import.meta.url to
+// the real path while argv[1] stays the symlink, so a plain URL compare misses.
+function isDirectEntry() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return fs.realpathSync(entry) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+if (isDirectEntry()) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
