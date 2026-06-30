@@ -1,4 +1,4 @@
 interface:
   display_name: "Session Continue"
-  short_description: "Continue Claude Code or Codex sessions by id (source auto-detected)."
+  short_description: "Resume Claude/Codex sessions by ID."
   default_prompt: "Use $session-continue <session-id> -- continue the task."

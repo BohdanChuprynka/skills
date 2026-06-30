@@ -70,6 +70,7 @@ echo
 
 green "==> Done."
 echo
-echo "Claude Code: /session-continue from codex <session-id> -- continue the task"
+echo "Claude Code: /session-continue <session-id> -- continue the task"
 echo "Codex:       restart Codex, then use:"
-echo "             Use \$session-continue from claude <session-id> -- continue the task"
+echo "             Use \$session-continue <session-id> -- continue the task"
+echo "Escape hatch: add 'from <source>' only when you intentionally pin a source."
