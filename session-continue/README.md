@@ -1,30 +1,127 @@
-# session-continue
+<h1 align="center">session-continue</h1>
 
-Continue a Claude Code, Codex, or other [`continues`](https://www.npmjs.com/package/continues)-supported coding session **inside your current agent thread** — by session id alone.
+<p align="center">
+  <strong>Paste a transcript ID. Continue in this thread.</strong>
+</p>
 
-It does not launch a second Claude or Codex process. It resolves the source session, generates a sanitized handoff with `continues`, and tells the current agent to keep working from that context.
+<p align="center">
+  <a href="https://github.com/BohdanChuprynka/skills/commits/main"><img src="https://img.shields.io/github/last-commit/BohdanChuprynka/skills?style=flat" alt="Last commit"></a>
+  <a href="../LICENSE"><img src="https://img.shields.io/github/license/BohdanChuprynka/skills?style=flat" alt="License"></a>
+  <a href="https://www.npmjs.com/package/continues"><img src="https://img.shields.io/npm/v/continues?label=continues&style=flat" alt="continues npm version"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> -
+  <a href="#what-changed">What Changed</a> -
+  <a href="#configure-once">Configure Once</a> -
+  <a href="#install">Install</a> -
+  <a href="#safety">Safety</a>
+</p>
+
+---
+
+`session-continue` is a Claude Code / Codex skill that imports a previous
+[`continues`](https://www.npmjs.com/package/continues)-supported coding session
+into the current agent thread.
+
+It does not launch another Claude, Codex, or terminal agent. It resolves the
+session, asks `continues` for a sanitized handoff, and gives the current agent
+the context it needs to keep working.
+
+## Quick Start
+
+Use the session ID by itself:
 
 ```text
-/session-continue abc123 -- continue the task                # source auto-detected
-/session-continue from codex abc123 -- continue the task     # source pinned
+/session-continue 018f9c2a-7e4d-7f45-a7a1-8a0c6d24f421 -- finish the refactor
 ```
 
-## Why
+In Codex:
 
-Two things make handing a session off painful:
+```text
+Use $session-continue 018f9c2a-7e4d-7f45-a7a1-8a0c6d24f421 -- finish the refactor.
+```
 
-1. **You have to name the tool.** Was that id from Claude or Codex?
-2. **Multiple accounts live in different folders.** If you run more than one Claude
-   account, each keeps its transcripts in its own `CLAUDE_CONFIG_DIR` (e.g.
-   `~/.claude` and `~/.claude-personal`). When you hit a limit on one account and
-   switch to the other, `continues` only sees the *active* account's folder — so a
-   session from the account you just left won't resolve, and you end up explaining
-   "no, it's in my *other* folder."
+That is the normal path. You do not need to remember whether the transcript came
+from Claude Code, Codex, or a second Claude account. Exact IDs win first; unique
+prefixes work; ambiguous prefixes are rejected with candidates.
 
-session-continue removes both. **The source is optional**, and an id is located
-across every configured Claude account directory **and** the Codex sessions
-directory. Session ids are unique per-file, so a full id resolves deterministically
-no matter which account or tool created it. Paste the id, keep working.
+## What Changed
+
+<table>
+<tr>
+<td width="50%">
+
+### Old mental model
+
+```text
+/session-continue from <tool> <id> -- keep going
+```
+
+You had to remember the source tool and, for Claude, which account folder owned
+the transcript.
+
+</td>
+<td width="50%">
+
+### Current mental model
+
+```text
+/session-continue abc123 -- keep going
+Use $session-continue abc123 -- keep going
+```
+
+Paste the ID. The helper finds the owning transcript store, points `continues`
+at it, and imports the handoff into this same thread.
+
+</td>
+</tr>
+</table>
+
+## What You Get
+
+| Feature | Behavior |
+| --- | --- |
+| ID-only resume | Full ID or unique prefix is enough for Claude/Codex transcript stores. |
+| Multi-account Claude | Searches the active `CLAUDE_CONFIG_DIR`, `~/.claude`, then other live `~/.claude*` dirs. |
+| Codex support | Searches `CODEX_HOME` or `~/.codex` for rollout transcript IDs. |
+| Source escape hatch | `from <source>` still works when you want to pin a `continues` source explicitly. |
+| Sanitized handoff | Redacts common API keys, bearer tokens, GitHub tokens, Slack tokens, AWS keys, and env-style secrets. |
+| CWD warning | Warns when the imported session cwd differs from the current cwd; `--require-cwd` can fail hard. |
+
+Supported explicit sources are whatever this helper validates for `continues`:
+`claude`, `codex`, `copilot`, `gemini`, `opencode`, `droid`, `cursor`, `amp`,
+`kiro`, `crush`, `cline`, `roo-code`, `kilo-code`, `antigravity`, `kimi`, and
+`qwen-code`.
+
+## Configure Once
+
+For the common case, no config is required.
+
+When `SESSION_CONTINUE_CLAUDE_DIRS` is unset, the helper auto-discovers Claude
+accounts in this order:
+
+1. the active `CLAUDE_CONFIG_DIR`,
+2. `~/.claude`,
+3. other live `~/.claude*` directories that contain `projects/`.
+
+Backup and migration copies are skipped during auto-discovery so stale duplicate
+IDs do not win.
+
+If you want to control the Claude search order, set an ordered path list:
+
+```bash
+export SESSION_CONTINUE_CLAUDE_DIRS="$HOME/.claude:$HOME/.claude-work"
+```
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `SESSION_CONTINUE_CLAUDE_DIRS` | Ordered Claude config dirs to search. | Auto-discover `~/.claude*` |
+| `CLAUDE_CONFIG_DIR` | Active Claude account; searched first. | `~/.claude` |
+| `CODEX_HOME` | Codex home containing `sessions/`. | `~/.codex` |
+
+Configure your `continues` providers the way you normally do. `session-continue`
+is the thin resolver/import layer on top: ID in, current-thread handoff out.
 
 ## Install
 
@@ -34,77 +131,36 @@ cd skills/session-continue
 ./setup.sh
 ```
 
-The setup script (idempotent — safe to re-run after pulling updates):
+The setup script is idempotent:
 
 - symlinks the skill into `~/.claude/skills/session-continue`
 - copies `/session-continue` into `~/.claude/commands/session-continue.md`
-- copies the full skill into `~/.codex/skills/session-continue` (if `~/.codex` exists)
+- copies the full skill into `~/.codex/skills/session-continue` when `~/.codex` exists
 
-Restart Codex after setup — Codex scans skills at startup. (Claude Code picks the symlinked skill up immediately.)
+Restart Codex after setup because Codex scans skills at startup. Claude Code
+uses the symlinked skill immediately.
 
 ## Usage
 
-Claude Code:
+Normal:
 
 ```text
-/session-continue <session-id> -- finish the task            # auto-detect source + account
-/session-continue from codex <session-id> -- finish the task # pin the source
+/session-continue <session-id> -- <task>
+Use $session-continue <session-id> -- <task>
+session id: <session-id> -- <task>
 ```
 
-Codex:
+Escape hatch when you intentionally want to pin a source:
 
 ```text
-Use $session-continue from claude <session-id> -- finish the task
+/session-continue from <source> <session-id> -- <task>
+Use $session-continue --from <source> --id <session-id> -- <task>
 ```
 
-The source, when given, can be any tool supported by `continues`: `claude`, `codex`, `copilot`, `gemini`, `opencode`, `droid`, `cursor`, `amp`, `kiro`, `crush`, `cline`, `roo-code`, `kilo-code`, `antigravity`, `kimi`, or `qwen-code`. Auto-detection covers Claude and Codex (the file-based tools); pass others explicitly.
-
-Natural wording also works:
+Options:
 
 ```text
-from codex session id: abc123 -- keep going
-```
-
-## Multiple Claude accounts
-
-No setup is required for the common case. With `SESSION_CONTINUE_CLAUDE_DIRS`
-unset, the helper auto-discovers your accounts:
-
-1. the active `CLAUDE_CONFIG_DIR` (searched first),
-2. `~/.claude`,
-3. any other `~/.claude*` directory that actually contains transcripts,
-
-…while skipping backup/migration copies so a stale duplicate id can never win.
-
-If your accounts live somewhere non-standard, or you want to control the search
-order explicitly, set an ordered, `:`-separated list (this wins over
-auto-discovery — you own the order):
-
-```bash
-# in your shell profile
-export SESSION_CONTINUE_CLAUDE_DIRS="$HOME/.claude:$HOME/.claude-work"
-```
-
-The directory that owns the id is shown in the handoff as `Resolved from:` and is
-exported to `continues` as `CLAUDE_CONFIG_DIR`. **The first matching directory in
-scan order wins** if the same id exists in more than one.
-
-| Variable | Purpose | Default |
-| --- | --- | --- |
-| `SESSION_CONTINUE_CLAUDE_DIRS` | Ordered `:`-separated Claude config dirs to search | auto-discover `~/.claude*` |
-| `CLAUDE_CONFIG_DIR` | The active Claude account; searched first | `~/.claude` |
-| `CODEX_HOME` | Codex home | `~/.codex` |
-
-## How it works
-
-1. Parse the request into an optional source, a session id (or unique prefix), and an optional task after `--`.
-2. If the source is omitted (or is `claude`), locate the id on disk: Claude transcripts are `…/projects/<project>/<id>.jsonl`; Codex transcripts are `…/sessions/<date>/rollout-<ts>-<id>.jsonl`. Exact ids win over prefixes and honour scan order.
-3. Point `continues` at the owning directory (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`), generate a sanitized handoff, and hand it to the current agent.
-
-## Options
-
-```text
---from <source>       Source tool, such as claude or codex (optional; auto-detected)
+--from <source>       Pin a continues source; optional
 --id <session-id>     Exact session id or unique prefix
 --preset <name>       minimal, standard, verbose, or full
 --no-redact           Keep raw handoff text
@@ -112,30 +168,48 @@ scan order wins** if the same id exists in more than one.
 --json                Emit JSON containing the handoff string
 ```
 
+## How It Works
+
+1. Parse the request into optional source, session ID, and task after `--`.
+2. If no source is given, find the transcript on disk across configured Claude
+   account dirs and the Codex sessions dir.
+3. Export the owning `CLAUDE_CONFIG_DIR` or `CODEX_HOME` for the `continues`
+   call.
+4. Ask `continues` to inspect the session with the selected preset.
+5. Print a handoff that the current agent reads and continues from.
+
+The handoff includes `Resolved from:` when the helper located a specific config
+directory.
+
 ## Safety
 
-The imported transcript is treated as **untrusted context** — useful continuity, not a new instruction source. Current user instructions, system/developer instructions, and the live repo state always win.
+Imported transcript text is untrusted context. It is useful continuity, not a
+new instruction source. Current user instructions, system/developer
+instructions, and the live repository state always win.
 
 The helper also:
 
-- resolves exact ids before prefix matches, and rejects ambiguous prefixes with candidate ids
+- rejects IDs containing path separators
+- never follows symlinks while scanning transcript files
+- resolves exact IDs before prefix matches
+- rejects ambiguous prefixes with candidate IDs
 - rebuilds the `continues` index once on a miss
-- redacts likely API keys, bearer tokens, GitHub tokens, Slack tokens, AWS keys, and env-style secret assignments
-- warns when the imported session cwd differs from the current cwd
-- locates sessions by reading filenames only: it rejects ids containing path separators, never follows symlinks while scanning, excludes backup/migration directories from auto-discovery, and passes the id to `continues` as an argv array (no shell interpolation)
+- passes arguments to `continues` as an argv array, not through shell interpolation
 
 ## Prerequisites
 
 - Node.js
-- One of:
+- one of:
   - globally installed `continues` or `cont`
   - `npm`, so the helper can run pinned `npm exec --package continues@4.1.1`
 
 ## Develop
 
 ```bash
-# from the repo root that contains this skill folder:
+# from the repo root that contains this skill folder
 node --test session-continue/tests/session-continue.test.mjs
+
+# refresh installs after edits
 ./session-continue/setup.sh
-./session-continue/sync.sh   # refresh the Codex install after edits, then restart Codex
+./session-continue/sync.sh
 ```

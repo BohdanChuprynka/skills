@@ -47,9 +47,9 @@ test('parseInvocation accepts natural command text', () => {
 });
 
 test('parseInvocation accepts one quoted argument string', () => {
-  const parsed = helper.parseInvocation(['from codex "abc 123" -- continue the task']);
+  const parsed = helper.parseInvocation(['from gemini "abc 123" -- continue the task']);
 
-  assert.equal(parsed.from, 'codex');
+  assert.equal(parsed.from, 'gemini');
   assert.equal(parsed.sessionId, 'abc 123');
   assert.equal(parsed.task, 'continue the task');
 });
