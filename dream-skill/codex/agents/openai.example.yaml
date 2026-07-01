@@ -1,0 +1,7 @@
+interface:
+  display_name: "Dream-Skill"
+  short_description: "Sync durable facts from Claude and Codex chats into Obsidian"
+  default_prompt: "Use $dream-skill --dry-run --source all to preview syncing recent Claude and Codex conversations into my Obsidian vault."
+
+policy:
+  allow_implicit_invocation: true

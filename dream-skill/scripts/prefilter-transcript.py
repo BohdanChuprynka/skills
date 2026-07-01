@@ -41,6 +41,22 @@ COMMAND_TAG_BLOCK = re.compile(
     r"\s*<command-(message|name|args)>.*?</command-\1>\s*",
     re.DOTALL | re.IGNORECASE,
 )
+CODEX_DREAM_INVOCATION = re.compile(
+    r"^\s*(?:use\s+\$dream-skill|/dream-skill)\b[^\n]*--(?:un)?ignore\b\s*$",
+    re.IGNORECASE,
+)
+
+
+def codex_role_and_content(evt: dict[str, Any]) -> tuple[str | None, Any]:
+    payload = evt.get("payload")
+    if not isinstance(payload, dict):
+        return None, None
+    ptype = payload.get("type")
+    if ptype == "user_message":
+        return "user", payload.get("message")
+    if ptype == "agent_message":
+        return "assistant", payload.get("message")
+    return None, None
 
 
 def event_role(evt: dict[str, Any]) -> str | None:
@@ -66,7 +82,7 @@ def extract_text(content: Any) -> str:
     for block in content:
         if not isinstance(block, dict):
             continue
-        if block.get("type") != "text":
+        if block.get("type") not in {"text", "input_text", "output_text"}:
             continue
         text = block.get("text", "")
         if isinstance(text, str) and text.strip():
@@ -86,6 +102,8 @@ def clean_user_text(text: str) -> str:
     for pattern in REMOVABLE_USER_BLOCKS:
         cleaned = pattern.sub("", cleaned)
     if is_pure_command_wrapper(cleaned):
+        return ""
+    if CODEX_DREAM_INVOCATION.match(cleaned):
         return ""
     return cleaned.strip()
 
@@ -121,12 +139,15 @@ def iter_filtered_lines(path: Path) -> tuple[list[str], dict[str, int]]:
                 stats["skipped_events"] += 1
                 continue
 
-            role = event_role(evt)
+            role, content = codex_role_and_content(evt)
+            if role is None:
+                role = event_role(evt)
+                content = event_content(evt)
             if role is None:
                 stats["skipped_events"] += 1
                 continue
 
-            text = extract_text(event_content(evt))
+            text = extract_text(content)
             if not text:
                 stats["skipped_events"] += 1
                 continue
