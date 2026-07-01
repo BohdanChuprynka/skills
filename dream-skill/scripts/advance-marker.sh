@@ -20,7 +20,7 @@ die() { echo "advance-marker: $*" >&2; exit 1; }
 DRY_RUN=0
 DATE=""
 MARKER_DIR="${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}"
-SOURCE="${DREAM_TRANSCRIPT_SOURCE:-claude}"
+SOURCE="${DREAM_TRANSCRIPT_SOURCE:-all}"
 
 while [ $# -gt 0 ]; do
   case "$1" in

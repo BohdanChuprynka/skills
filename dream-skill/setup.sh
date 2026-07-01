@@ -34,6 +34,8 @@ copy_codex_skill() {
   cp -R "$REPO_DIR/scripts" "$CODEX_INSTALL/scripts"
   cp -R "$REPO_DIR/web" "$CODEX_INSTALL/web"
 
+  find "$CODEX_INSTALL" -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -prune -exec rm -rf {} +
+  find "$CODEX_INSTALL" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
   find "$CODEX_INSTALL/scripts" -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
 }
 
@@ -99,8 +101,8 @@ echo "    /dream-skill"
 echo
 echo "  Codex:"
 echo "    Restart Codex, then run:"
-echo "    Use \$dream-skill --dry-run --source all"
-echo "    Use \$dream-skill --source all"
+echo "    Use \$dream-skill --dry-run"
+echo "    Use \$dream-skill"
 echo
 echo "  Source options:"
 echo "    --source claude   scan Claude Code transcripts only"

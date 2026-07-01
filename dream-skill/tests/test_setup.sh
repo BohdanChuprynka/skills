@@ -12,7 +12,8 @@ fail() { echo "FAIL: $*"; exit 1; }
 
 TMPHOME=$(mktemp -d "/tmp/dream-setup-home-XXXXXX")
 FAKEBIN=$(mktemp -d "/tmp/dream-setup-bin-XXXXXX")
-trap 'rm -rf "$TMPHOME" "$FAKEBIN"' EXIT
+CACHE_FIXTURE="$ROOT/scripts/__pycache__/setup-test.pyc"
+trap 'rm -rf "$TMPHOME" "$FAKEBIN"; rm -f "$CACHE_FIXTURE"; rmdir "$ROOT/scripts/__pycache__" 2>/dev/null || true' EXIT
 
 cat > "$FAKEBIN/codex" <<'EOF'
 #!/usr/bin/env bash
@@ -25,6 +26,8 @@ EOF
 chmod +x "$FAKEBIN/codex" "$FAKEBIN/claude"
 
 mkdir -p "$TMPHOME/.claude/dream-skill"
+mkdir -p "$(dirname "$CACHE_FIXTURE")"
+printf 'generated cache should never be installed\n' > "$CACHE_FIXTURE"
 cat > "$TMPHOME/.claude/dream-skill/config.toml" <<'EOF'
 reports_dir = "/tmp/existing-reports"
 
@@ -49,6 +52,8 @@ test -f "$TMPHOME/.codex/skills/dream-skill/web/dream-review.html" \
   || fail "Codex review web asset not copied"
 test -f "$TMPHOME/.codex/skills/dream-skill/agents/openai.yaml" \
   || fail "Codex agents/openai.yaml not copied"
+test ! -e "$TMPHOME/.codex/skills/dream-skill/scripts/__pycache__" \
+  || fail "Codex install copied scripts/__pycache__"
 
 grep -q 'must survive setup' "$TMPHOME/.claude/dream-skill/config.toml" \
   || fail "existing config.toml was overwritten"
@@ -59,7 +64,7 @@ grep -q 'must survive setup' "$TMPHOME/.claude/dream-skill/config.toml" \
 
 TMPHOME_NO_CODEX=$(mktemp -d "/tmp/dream-setup-home-no-codex-XXXXXX")
 FAKEBIN_NO_CODEX=$(mktemp -d "/tmp/dream-setup-bin-no-codex-XXXXXX")
-trap 'rm -rf "$TMPHOME" "$FAKEBIN" "$TMPHOME_NO_CODEX" "$FAKEBIN_NO_CODEX"' EXIT
+trap 'rm -rf "$TMPHOME" "$FAKEBIN" "$TMPHOME_NO_CODEX" "$FAKEBIN_NO_CODEX"; rm -f "$CACHE_FIXTURE"; rmdir "$ROOT/scripts/__pycache__" 2>/dev/null || true' EXIT
 
 cat > "$FAKEBIN_NO_CODEX/python3" <<'EOF'
 #!/usr/bin/env bash

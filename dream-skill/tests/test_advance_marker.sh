@@ -13,32 +13,41 @@ fail() { echo "FAIL: $*"; exit 1; }
 MDIR=$(mktemp -d "/tmp/dream-marker-test-XXXXXX")
 trap 'rm -rf "$MDIR"' EXIT
 
-# Test 1: a real run writes the marker to the given date
+# Test 1: a real default run advances both source markers
 "$MARKER" --date "2026-06-04" --marker-dir "$MDIR" >/dev/null
 [ -f "$MDIR/last-run" ] || fail "real run did not create the marker"
+[ -f "$MDIR/last-run-codex" ] || fail "real run did not create the Codex marker"
 [ "$(cat "$MDIR/last-run")" = "2026-06-04" ] || fail "marker content wrong: $(cat "$MDIR/last-run")"
-echo "PASS: real run advances marker to the date"
+[ "$(cat "$MDIR/last-run-codex")" = "2026-06-04" ] || fail "Codex marker content wrong: $(cat "$MDIR/last-run-codex")"
+echo "PASS: default real run advances both source markers to the date"
 
 # Test 2: --dry-run does NOT create a marker (fresh dir) — I3
 DRYDIR=$(mktemp -d "/tmp/dream-marker-dry-XXXXXX")
 "$MARKER" --date "2026-06-04" --marker-dir "$DRYDIR" --dry-run >/dev/null
 [ -f "$DRYDIR/last-run" ] && { rm -rf "$DRYDIR"; fail "I3 VIOLATION: --dry-run created the marker file"; }
+[ -f "$DRYDIR/last-run-codex" ] && { rm -rf "$DRYDIR"; fail "I3 VIOLATION: --dry-run created the Codex marker file"; }
 rm -rf "$DRYDIR"
 echo "PASS: --dry-run does not create the marker (I3)"
 
 # Test 3: --dry-run does NOT advance an EXISTING marker — the data-loss case (I3)
 printf '2026-05-20\n' > "$MDIR/last-run"
+printf '2026-05-21\n' > "$MDIR/last-run-codex"
 BEFORE=$(shasum -a 256 "$MDIR/last-run" | awk '{print $1}')
+BEFORE_CODEX=$(shasum -a 256 "$MDIR/last-run-codex" | awk '{print $1}')
 "$MARKER" --date "2026-06-04" --marker-dir "$MDIR" --dry-run >/dev/null
 AFTER=$(shasum -a 256 "$MDIR/last-run" | awk '{print $1}')
+AFTER_CODEX=$(shasum -a 256 "$MDIR/last-run-codex" | awk '{print $1}')
 [ "$BEFORE" = "$AFTER" ] || fail "I3 VIOLATION: --dry-run advanced an existing marker"
+[ "$BEFORE_CODEX" = "$AFTER_CODEX" ] || fail "I3 VIOLATION: --dry-run advanced an existing Codex marker"
 [ "$(cat "$MDIR/last-run")" = "2026-05-20" ] || fail "I3: existing marker changed under dry-run"
+[ "$(cat "$MDIR/last-run-codex")" = "2026-05-21" ] || fail "I3: existing Codex marker changed under dry-run"
 echo "PASS: --dry-run leaves an existing marker byte-identical (I3)"
 
-# Test 4: a real run advances an existing marker
+# Test 4: a real default run advances existing source markers
 "$MARKER" --date "2026-06-04" --marker-dir "$MDIR" >/dev/null
 [ "$(cat "$MDIR/last-run")" = "2026-06-04" ] || fail "real run did not advance an existing marker"
-echo "PASS: real run advances an existing marker"
+[ "$(cat "$MDIR/last-run-codex")" = "2026-06-04" ] || fail "real run did not advance an existing Codex marker"
+echo "PASS: default real run advances existing source markers"
 
 # Test 5: missing --date on a real run fails loudly (no silent empty marker)
 if "$MARKER" --marker-dir "$MDIR" 2>/dev/null; then

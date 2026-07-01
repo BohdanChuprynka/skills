@@ -50,6 +50,7 @@ make_chat "$PROJ_ROOT/proj-a/aaa.jsonl" 3   # 3 days ago → inside window
 make_chat "$PROJ_ROOT/proj-a/bbb.jsonl" 10  # 10 days ago → outside window
 
 OUT=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+      DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
       DREAM_MARKER_DIR="$MARKER_DIR" \
       "$FINDER" 2>/dev/null)
 
@@ -60,6 +61,7 @@ echo "PASS: default 7-day window"
 # ── test 2: --since flag narrows/widens the window ───────────────────────────
 SINCE=$(date -v "-5d" +%Y-%m-%d 2>/dev/null || date --date="5 days ago" +%Y-%m-%d)
 OUT2=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+       DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
        DREAM_MARKER_DIR="$MARKER_DIR" \
        "$FINDER" --since "$SINCE" 2>/dev/null)
 
@@ -70,6 +72,7 @@ echo "PASS: --since narrows window"
 # ── test 3: --all emits BATCH headers and includes all chats ─────────────────
 make_chat "$PROJ_ROOT/proj-b/old.jsonl" 30  # 30 days ago
 OUT3=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+       DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
        DREAM_MARKER_DIR="$MARKER_DIR" \
        "$FINDER" --all 2>/dev/null)
 
@@ -87,6 +90,7 @@ printf '#!/usr/bin/env bash\necho "ignore"\n' > "$FAKE_HOME/scripts/private-stat
 chmod +x "$FAKE_HOME/scripts/private-state.sh"
 
 OUT4=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+       DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
        DREAM_MARKER_DIR="$MARKER_DIR" \
        DREAM_SKILL_HOME="$FAKE_HOME" \
        "$FINDER" 2>/dev/null)
@@ -102,6 +106,7 @@ MARKER_DATE=$(date -v "-6d" +%Y-%m-%d 2>/dev/null || date --date="6 days ago" +%
 echo "$MARKER_DATE" > "$MARKER_FILE_PATH"
 
 OUT5=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+       DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
        DREAM_MARKER_DIR="$MARKER_DIR" \
        "$FINDER" 2>/dev/null)
 
@@ -113,6 +118,7 @@ echo "PASS: marker-based window"
 # ── test 6: large window (>7 days --since) emits multiple BATCH headers ──────
 SINCE_OLD=$(date -v "-20d" +%Y-%m-%d 2>/dev/null || date --date="20 days ago" +%Y-%m-%d)
 OUT6=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+       DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
        DREAM_MARKER_DIR="$MARKER_DIR" \
        "$FINDER" --since "$SINCE_OLD" 2>/dev/null)
 
@@ -123,6 +129,7 @@ echo "PASS: large window emits multiple BATCH headers"
 # ── test 7: empty projects root returns single BATCH header, zero paths ───────
 EMPTY_ROOT=$(mktemp -d "/tmp/dream-empty-XXXXXX")
 OUT7=$(DREAM_PROJECTS_ROOT="$EMPTY_ROOT" \
+       DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
        DREAM_MARKER_DIR="$MARKER_DIR" \
        "$FINDER" 2>/dev/null)
 rm -rf "$EMPTY_ROOT"
@@ -139,6 +146,7 @@ make_chat "$PROJ_ROOT/proj-e/recent.jsonl" 2  # 2 days ago → inside 7d window
 make_chat "$PROJ_ROOT/proj-e/ancient.jsonl" 60  # 60 days ago → outside 7d window
 
 OUT7B=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+        DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
         DREAM_MARKER_DIR="$CORRUPT_MARKER_DIR" \
         "$FINDER" 2>/dev/null)
 rm -rf "$CORRUPT_MARKER_DIR"
@@ -159,6 +167,7 @@ make_chat "$PROJ_ROOT/proj-d/new.jsonl" 1    # 1 day ago → inside marker windo
 make_chat "$PROJ_ROOT/proj-d/just-old.jsonl" 5  # 5 days ago → outside marker window (3d cutoff)
 
 OUT8=$(DREAM_PROJECTS_ROOT="$PROJ_ROOT" \
+       DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" \
        DREAM_MARKER_DIR="$MARKER_ROUNDTRIP_DIR" \
        "$FINDER" 2>/dev/null)
 rm -rf "$MARKER_ROUNDTRIP_DIR"
@@ -182,18 +191,18 @@ echo '{"role":"user","content":"hi"}' > "$EARLY"
 touch -t "${BD_COMPACT}0001" "$EARLY"   # boundary day at 00:01
 
 printf '%s\n' "$BD_DATE" > "$BND_MARKER/last-run"
-OUT9M=$(DREAM_PROJECTS_ROOT="$BND_PROJ" DREAM_MARKER_DIR="$BND_MARKER" "$FINDER" 2>/dev/null)
+OUT9M=$(DREAM_PROJECTS_ROOT="$BND_PROJ" DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" DREAM_MARKER_DIR="$BND_MARKER" "$FINDER" 2>/dev/null)
 echo "$OUT9M" | grep -q "early.jsonl" \
   || fail "C2 marker branch: 00:01 boundary-day chat dropped (window_start not anchored to midnight)"
 
-OUT9S=$(DREAM_PROJECTS_ROOT="$BND_PROJ" DREAM_MARKER_DIR="$BND_MARKER" "$FINDER" --since "$BD_DATE" 2>/dev/null)
+OUT9S=$(DREAM_PROJECTS_ROOT="$BND_PROJ" DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" DREAM_MARKER_DIR="$BND_MARKER" "$FINDER" --since "$BD_DATE" 2>/dev/null)
 echo "$OUT9S" | grep -q "early.jsonl" \
   || fail "C2 --since branch: 00:01 boundary-day chat dropped (window_start not anchored to midnight)"
 
 rm -rf "$BND_PROJ" "$BND_MARKER"
 echo "PASS: early-morning boundary-day chat retained (C2 midnight-anchor regression guard)"
 
-# ── test 10: source selector supports Codex without changing Claude default ─────
+# ── test 10: source selector defaults to all and supports explicit narrowing ───
 SOURCE_PROJ=$(mktemp -d "/tmp/dream-source-proj-XXXXXX")
 SOURCE_CODEX=$(mktemp -d "/tmp/dream-source-codex-XXXXXX")
 SOURCE_MARKER=$(mktemp -d "/tmp/dream-source-marker-XXXXXX")
@@ -206,7 +215,8 @@ OUT10_DEFAULT=$(DREAM_PROJECTS_ROOT="$SOURCE_PROJ" \
                 DREAM_MARKER_DIR="$SOURCE_MARKER" \
                 "$FINDER" 2>/dev/null)
 echo "$OUT10_DEFAULT" | grep -q "claude.jsonl" || fail "source default: Claude chat missing"
-echo "$OUT10_DEFAULT" | grep -q "codex.jsonl" && fail "source default: Codex chat included without --source codex/all"
+echo "$OUT10_DEFAULT" | grep -q "codex.jsonl" || fail "source default: Codex chat missing"
+echo "$OUT10_DEFAULT" | grep -q "codex-subagent.jsonl" && fail "source default: Codex subagent chat included"
 
 OUT10_CODEX=$(DREAM_PROJECTS_ROOT="$SOURCE_PROJ" \
               DREAM_CODEX_SESSIONS_ROOT="$SOURCE_CODEX" \
@@ -239,7 +249,7 @@ OUT10_ALIAS=$(DREAM_CLAUDE_PROJECTS_ROOT="$SOURCE_PROJ" \
 echo "$OUT10_ALIAS" | grep -q "claude.jsonl" || fail "DREAM_CLAUDE_PROJECTS_ROOT alias did not scan Claude root"
 
 rm -rf "$SOURCE_PROJ" "$SOURCE_CODEX" "$SOURCE_MARKER"
-echo "PASS: source selector supports Claude, Codex, all, env default, and Codex subagent exclusion"
+echo "PASS: source selector defaults to all and supports Claude, Codex, env override, and Codex subagent exclusion"
 
 # ── test 11: Codex source uses a source-specific marker ──────────────────────
 SRC_MARKER_PROJ=$(mktemp -d "/tmp/dream-src-marker-proj-XXXXXX")
@@ -271,7 +281,20 @@ OUT11_ALL=$(DREAM_PROJECTS_ROOT="$SRC_MARKER_PROJ" \
             DREAM_MARKER_DIR="$SRC_MARKER_DIR" \
             "$FINDER" --source all 2>/dev/null)
 echo "$OUT11_ALL" | grep -q "codex-three-days.jsonl" \
-  || fail "--source all should use the oldest source marker and include unprocessed Codex chat"
+  || fail "--source all should include unprocessed Codex chat from the Codex marker window"
+echo "$OUT11_ALL" | grep -q "claude-three-days.jsonl" \
+  && fail "--source all should not rescan Claude chat older than the Claude marker"
+
+printf '%s\n' "$FIVE_DAYS" > "$SRC_MARKER_DIR/last-run"
+printf '%s\n' "$ONE_DAY" > "$SRC_MARKER_DIR/last-run-codex"
+OUT11_ALL_REVERSE=$(DREAM_PROJECTS_ROOT="$SRC_MARKER_PROJ" \
+                    DREAM_CODEX_SESSIONS_ROOT="$SRC_MARKER_CODEX" \
+                    DREAM_MARKER_DIR="$SRC_MARKER_DIR" \
+                    "$FINDER" --source all 2>/dev/null)
+echo "$OUT11_ALL_REVERSE" | grep -q "claude-three-days.jsonl" \
+  || fail "--source all should include unprocessed Claude chat when Claude marker is older"
+echo "$OUT11_ALL_REVERSE" | grep -q "codex-three-days.jsonl" \
+  && fail "--source all should not rescan Codex chat older than the Codex marker"
 
 rm -f "$SRC_MARKER_DIR/last-run-codex"
 OUT11_ALL_MISSING_CODEX=$(DREAM_PROJECTS_ROOT="$SRC_MARKER_PROJ" \
@@ -280,19 +303,21 @@ OUT11_ALL_MISSING_CODEX=$(DREAM_PROJECTS_ROOT="$SRC_MARKER_PROJ" \
                           "$FINDER" --source all 2>/dev/null)
 echo "$OUT11_ALL_MISSING_CODEX" | grep -q "codex-three-days.jsonl" \
   || fail "--source all should not let an initialized Claude marker skip a missing Codex marker"
+echo "$OUT11_ALL_MISSING_CODEX" | grep -q "claude-three-days.jsonl" \
+  || fail "--source all should still include unprocessed Claude chat when Claude marker is older"
 
 rm -rf "$SRC_MARKER_PROJ" "$SRC_MARKER_CODEX" "$SRC_MARKER_DIR"
 echo "PASS: source-specific markers prevent cross-source skips"
 
 # ── test 12: --since with missing date argument → non-zero exit ──────────────
 RC10=0
-DREAM_PROJECTS_ROOT="$PROJ_ROOT" DREAM_MARKER_DIR="$MARKER_DIR" \
+DREAM_PROJECTS_ROOT="$PROJ_ROOT" DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" DREAM_MARKER_DIR="$MARKER_DIR" \
   "$FINDER" --since >/dev/null 2>&1 || RC10=$?
 [ "$RC10" -ne 0 ] || fail "--since with no date: expected non-zero exit, got exit 0"
 echo "PASS: --since with missing date argument → non-zero exit"
 
 RC12=0
-DREAM_PROJECTS_ROOT="$PROJ_ROOT" DREAM_MARKER_DIR="$MARKER_DIR" \
+DREAM_PROJECTS_ROOT="$PROJ_ROOT" DREAM_CODEX_SESSIONS_ROOT="$CODEX_ROOT" DREAM_MARKER_DIR="$MARKER_DIR" \
   "$FINDER" --source nope >/dev/null 2>&1 || RC12=$?
 [ "$RC12" -ne 0 ] || fail "--source with invalid source should exit non-zero"
 echo "PASS: invalid --source value → non-zero exit"
