@@ -45,7 +45,7 @@ LIVE_TESTS=(
 # validators are executable shell suites above.
 
 pass=0; fail=0; failed=()
-LOG="$(mktemp /tmp/dream-runall-XXXXXX.log)"
+LOG="$(mktemp "${TMPDIR:-/tmp}/dream-runall.XXXXXX")"
 trap 'rm -f "$LOG"' EXIT
 
 for t in "${LIVE_TESTS[@]}"; do
