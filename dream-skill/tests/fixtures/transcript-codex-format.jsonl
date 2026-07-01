@@ -1,0 +1,7 @@
+{"timestamp":"2026-07-01T00:00:00Z","type":"session_meta","payload":{"id":"s1","thread_source":"user","originator":"codex-tui"}}
+{"timestamp":"2026-07-01T00:00:01Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"DEVELOPER_SHOULD_DROP"}]}}
+{"timestamp":"2026-07-01T00:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"DUPLICATE_CONTEXT_SHOULD_DROP"}]}}
+{"timestamp":"2026-07-01T00:00:03Z","type":"event_msg","payload":{"type":"user_message","message":"I decided Dream-Skill should support Codex transcripts."}}
+{"timestamp":"2026-07-01T00:00:04Z","type":"response_item","payload":{"type":"function_call_output","output":"TOOL_OUTPUT_SHOULD_DROP"}}
+{"timestamp":"2026-07-01T00:00:05Z","type":"event_msg","payload":{"type":"agent_message","message":"Captured."}}
+{"timestamp":"2026-07-01T00:00:06Z","type":"event_msg","payload":{"type":"user_message","message":"Use $dream-skill --ignore"}}

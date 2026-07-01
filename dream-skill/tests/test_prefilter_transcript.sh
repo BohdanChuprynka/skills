@@ -80,6 +80,24 @@ assert_absent "$NOISY_OUT" "BIG_MCP_DATA_BLOB" "tool_result" "tool_use_id" "<sys
 assert_only_role_lines "$NOISY_OUT"
 echo "PASS: simplified role/content transcript is filtered correctly"
 
+# Codex format: keep only visible user/assistant event messages. Drop developer
+# instructions, response_item context duplicates, tool outputs, and pure skill
+# invocations such as "Use $dream-skill --ignore".
+CODEX_OUT="$TMPROOT/codex.out"
+"$PREFILTER" "$SCRIPT_DIR/fixtures/transcript-codex-format.jsonl" > "$CODEX_OUT"
+cat > "$TMPROOT/codex.expected" <<'EOF'
+USER: I decided Dream-Skill should support Codex transcripts.
+ASST: Captured.
+EOF
+diff -u "$TMPROOT/codex.expected" "$CODEX_OUT" || fail "Codex-format filtered output mismatch"
+assert_absent "$CODEX_OUT" \
+  "DEVELOPER_SHOULD_DROP" \
+  "DUPLICATE_CONTEXT_SHOULD_DROP" \
+  "TOOL_OUTPUT_SHOULD_DROP" \
+  'Use $dream-skill --ignore'
+assert_only_role_lines "$CODEX_OUT"
+echo "PASS: Codex transcript keeps visible messages and drops internal rows"
+
 # Mixed content arrays: keep text blocks in order, drop tool_result in the same array.
 MIXED="$TMPROOT/mixed.jsonl"
 cat > "$MIXED" <<'EOF'

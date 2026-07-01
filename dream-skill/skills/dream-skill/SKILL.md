@@ -1,6 +1,6 @@
 ---
 name: dream-skill
-description: On-demand batch sync of Claude Code conversations to an Obsidian vault. Use when the user says "/dream-skill", "review dream queue", "process dream queue", "sweep dream queue", or asks to update wiki from a recent conversation. Runs a FIND→MAP→REDUCE→ROUTE→RECONCILE→REVIEW→APPLY→RECEIPT→MARKER pipeline over unprocessed transcripts. Type `/dream-skill --ignore` to mark the current chat private so it is never recorded into the vault (undo with `--unignore`).
+description: On-demand batch sync of Claude Code and Codex conversations to an Obsidian vault. Use when the user says "/dream-skill", "Use $dream-skill", "review dream queue", "process dream queue", "sweep dream queue", or asks to update wiki from recent conversations. Runs a FIND→MAP→REDUCE→ROUTE→RECONCILE→REVIEW→APPLY→RECEIPT→MARKER pipeline over unprocessed transcripts. Type `/dream-skill --ignore` or `Use $dream-skill --ignore` to mark the current chat private so it is never recorded into the vault (undo with `--unignore`).
 version: 0.3.1
 ---
 
@@ -13,27 +13,31 @@ version: 0.3.1
 
 | Invocation | Mode |
 |---|---|
-| `/dream-skill` | On-demand run: opens a terminal review session. Runs FIND → MAP → REDUCE → ROUTE → RECONCILE → REVIEW → APPLY → RECEIPT → MARKER. |
-| `/dream-skill --since <YYYY-MM-DD>` | Explicit window start override (passes `--since` to `"$DREAM_SCRIPTS_DIR/find-chats.sh"`). |
-| `/dream-skill --all` | Full-history backfill (weekly-batched; only after pipeline is trusted). Passes `--all` to `"$DREAM_SCRIPTS_DIR/find-chats.sh"`. |
-| `/dream-skill --dry-run` | Run the full pipeline but write nothing to the vault. Receipt is printed to stdout only. |
-| `/dream-skill --ignore` | Mark THIS chat private — skip on next close. |
-| `/dream-skill --unignore` | Undo `--ignore` for this chat. |
-| `/dream-skill --help` | Print this table, env vars, state paths, and exit 0. |
+| `/dream-skill` (Claude) / `Use $dream-skill --source all` (Codex) | On-demand run: opens a review session. Runs FIND → MAP → REDUCE → ROUTE → RECONCILE → REVIEW → APPLY → RECEIPT → MARKER. |
+| `/dream-skill --since <YYYY-MM-DD>` / `Use $dream-skill --since <YYYY-MM-DD> --source all` | Explicit window start override. |
+| `/dream-skill --all` / `Use $dream-skill --all --source all` | Full-history backfill (weekly-batched; only after pipeline is trusted). |
+| `/dream-skill --dry-run` / `Use $dream-skill --dry-run --source all` | Run the full pipeline but write nothing to the vault. Receipt is printed to stdout only. |
+| `/dream-skill --ignore` / `Use $dream-skill --ignore` | Mark THIS chat private — skip it during the next FIND step. |
+| `/dream-skill --unignore` / `Use $dream-skill --unignore` | Undo `--ignore`. |
+| `/dream-skill --help` / `Use $dream-skill --help` | Print modes, env vars, state paths, and exit 0. |
+| `--source claude|codex|all` | Transcript source selector. Claude runtime defaults to `claude`; Codex runtime should pass `all` unless the user explicitly narrows it. |
 
 ---
 
-## Model policy
+## Runtime and model policy
 
-Every LLM step in this pipeline runs on **Sonnet** (`model: sonnet` → Sonnet 4.6, `claude-sonnet-4-6`):
+The deterministic helpers and data contracts are identical in Claude Code and Codex. The only runtime-specific part is subagent dispatch:
 
-- **MAP** (Step 2) — one extraction subagent per chat. Dispatch with `model: sonnet`.
-- **ROUTE** (Step 4) — batched judgments, default 25 candidates per Sonnet subagent (`DREAM_ROUTE_BATCH_SIZE`). Each batch shares one nav-context and must echo every `candidate_id`. (A/B validated 2026-06-13: 25 vs 15 cut ROUTE ~30% per candidate — the nav-context + ROUTING.md is re-read once per batch — with routing quality unchanged.)
-- **RECONCILE** (Step 5c) — page-grouped judgments, default 25 candidates per target-page Sonnet subagent (`DREAM_RECONCILE_BATCH_SIZE`). Each batch reads one vault page snapshot and must echo every `candidate_id`.
+- **Claude Code:** MAP, ROUTE, and RECONCILE should use Sonnet (`model: sonnet` / `claude-sonnet-4-6`) when dispatch supports model pinning.
+- **Codex:** use Codex subagents with the same file-handoff contract. Do not request Claude model names from Codex. Inherit the active Codex model unless the user explicitly asks for a different model.
 
-These are high-volume, tightly-specified steps (read one chat → emit candidate JSON; route a small candidate batch; reconcile one target page batch) that Sonnet handles well. Only the orchestrator that stitches the run together (the FIND / REDUCE / REVIEW / APPLY / RECEIPT / MARKER plumbing) runs on the session model. If you ever need maximum fidelity on the destructive-edit judgment, RECONCILE is the single step worth temporarily pinning back to a stronger model — but the default is Sonnet everywhere.
+The high-volume LLM steps are tightly specified:
 
-This is a dispatch-level setting (model + validated batch isolation): it does not change any data contract, so the deterministic test suites are unaffected.
+- **MAP** (Step 2) — one extraction subagent per MAP unit.
+- **ROUTE** (Step 4) — batched judgments, default 25 candidates per subagent (`DREAM_ROUTE_BATCH_SIZE`). Each batch shares one nav-context and must echo every `candidate_id`. (A/B validated 2026-06-13: 25 vs 15 cut ROUTE ~30% per candidate — the nav-context + ROUTING.md is re-read once per batch — with routing quality unchanged.)
+- **RECONCILE** (Step 5c) — page-grouped judgments, default 25 candidates per target-page subagent (`DREAM_RECONCILE_BATCH_SIZE`). Each batch reads one vault page snapshot and must echo every `candidate_id`.
+
+Only the orchestrator that stitches FIND / REDUCE / REVIEW / APPLY / RECEIPT / MARKER plumbing runs in the parent session. Model choice does not change any data contract, so deterministic tests remain runtime-agnostic.
 
 ## HARD RULES — read first, apply always
 
@@ -46,7 +50,7 @@ The ONLY valid write destinations are:
 2. The queue file at `$DREAM_QUEUE_FILE` (via `queue.sh`)
 3. The undo log at `$DREAM_UNDO_LOG` (managed by `vault-writer.sh`)
 4. The error log at `$DREAM_ERROR_LOG` (plain append on failures)
-5. The marker file at `${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}/last-run` (Step 9)
+5. The marker files at `${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}/last-run` and `last-run-codex` (Step 9)
 6. The receipt file in `reports_dir` (via `scripts/write-receipt.sh`)
 7. The routing-gaps log at `${DREAM_HOME:-$HOME/.claude/dream-skill}/routing-gaps.log` (plain append when routing returns `ambiguous`/`gap` — Step 5a / R7)
 
@@ -84,7 +88,8 @@ When `--dry-run` is active, pass `--dry-run` through to `apply-decision.sh` and 
 | `DREAM_DAILY_LOG` | `$DREAM_HOME/log/<YYYY-MM-DD>.md` | Human-readable activity log (deferred — not yet implemented) |
 | `DREAM_UNDO_LOG` | `$DREAM_HOME/undo/<YYYY-MM-DD>.jsonl` | Per-write rollback entries |
 | `DREAM_ERROR_LOG` | `$DREAM_HOME/error.log` | Append on broken-install failures |
-| `DREAM_MARKER_DIR` | `$DREAM_HOME` | Directory containing `last-run` marker file |
+| `DREAM_MARKER_DIR` | `$DREAM_HOME` | Directory containing source-specific marker files (`last-run`, `last-run-codex`) |
+| `DREAM_TRANSCRIPT_SOURCE` | runtime-specific | Default transcript source for `find-chats.sh`: `claude`, `codex`, or `all` |
 
 ## Vault config
 
@@ -116,7 +121,11 @@ The on-demand pipeline runs in the following steps. Each step is described below
 
 1. Check the `--dry-run` flag. If set, no vault writes occur; receipt is printed to stdout only. Thread `--dry-run` to `apply-decision.sh` (Plan 3 makes this mechanical).
 2. Check `--ignore` / `--unignore`. If present, update the private-state flag for the current transcript and exit. Do not proceed to FIND.
-3. Resolve `DREAM_SCRIPTS_DIR` robustly — works as a marketplace plugin OR a bare `~/.claude/skills` symlink. Run:
+3. Resolve transcript source. If the user passed `--source`, honor it. Otherwise:
+   - Claude Code invocation defaults to `--source claude` for backward compatibility.
+   - Codex invocation defaults to `--source all` so a Codex run sweeps both Claude and Codex transcripts.
+   Save the selected source in `DREAM_TRANSCRIPT_SOURCE` and pass `--source "$DREAM_TRANSCRIPT_SOURCE"` to both `find-chats.sh` and `advance-marker.sh`.
+4. Resolve `DREAM_SCRIPTS_DIR` robustly — works as a marketplace plugin, a bare `~/.claude/skills` symlink, OR a self-contained Codex skill copy. Run:
 
 ```bash
 # Resolve the scripts dir robustly — works as a marketplace plugin OR a bare ~/.claude/skills symlink.
@@ -148,13 +157,18 @@ umask 077
 WORKDIR="$(mktemp -d "$DREAM_HOME/tmp/run-XXXXXX")"
 trap 'rm -rf "$WORKDIR"' EXIT
 ```
-4. Parse `~/.claude/dream-skill/config.toml` (override via `${DREAM_CONFIG}` for tests) to resolve vault roots and `reports_dir`. Parse vault names from `^\[vaults\.<name>\]`, then `root =` per block; `reports_dir =` at top level. `config.toml` is the ONLY source of vault roots — no fallback to `CLAUDE.md` grep.
+5. Parse `~/.claude/dream-skill/config.toml` (override via `${DREAM_CONFIG}` for tests) to resolve vault roots and `reports_dir`. Parse vault names from `^\[vaults\.<name>\]`, then `root =` per block; `reports_dir =` at top level. `config.toml` is the ONLY source of vault roots — no fallback to `CLAUDE.md` grep.
 
 ### Step 1 — FIND
 
 Run:
 ```bash
 "$DREAM_SCRIPTS_DIR/find-chats.sh" [--since <date>] [--all]
+```
+
+Always include the selected source:
+```bash
+"$DREAM_SCRIPTS_DIR/find-chats.sh" [--since <date>] [--all] --source "$DREAM_TRANSCRIPT_SOURCE"
 ```
 
 Parse stdout into a list of `(batch_start, batch_end, [transcript_paths...])` tuples by consuming `BATCH:<start>:<end>` header lines.
@@ -165,7 +179,7 @@ Parse stdout into a list of `(batch_start, batch_end, [transcript_paths...])` tu
 > 2. Since <date> (enter a YYYY-MM-DD date)
 > 3. All history (--all; weekly-batched; only after pipeline is trusted)
 
-Then re-invoke `"$DREAM_SCRIPTS_DIR/find-chats.sh"` with the chosen flag.
+Then re-invoke `"$DREAM_SCRIPTS_DIR/find-chats.sh"` with the chosen flag and `--source "$DREAM_TRANSCRIPT_SOURCE"`.
 
 **Empty result:** If a batch contains zero transcript paths, skip to RECEIPT for that batch (write a receipt noting "0 chats in window") and advance the marker — **unless `--dry-run` is active, in which case the marker is never advanced** (I3).
 
@@ -190,7 +204,7 @@ printf '%s' "$MAP_MANIFEST_JSON" | \
   "$DREAM_SCRIPTS_DIR/build-map-batches.py" --workdir "$WORKDIR" > "$WORKDIR/map-units.json"
 ```
 
-Each descriptor is `{"batch_id","kind":"chunk","unit_path","source_chat","source_date","part","of"}` (a slice of one chat) or `{"batch_id","kind":"bundle","unit_path","members":[{"source_chat","source_date"}]}` (several chats, with in-band `===== DREAM-MAP-UNIT source_chat=... source_date=... =====` separators). Dispatch ONE subagent per unit using the Task/Agent tool, **with `model: sonnet`** (see Model policy).
+Each descriptor is `{"batch_id","kind":"chunk","unit_path","source_chat","source_date","part","of"}` (a slice of one chat) or `{"batch_id","kind":"bundle","unit_path","members":[{"source_chat","source_date"}]}` (several chats, with in-band `===== DREAM-MAP-UNIT source_chat=... source_date=... =====` separators). Dispatch ONE subagent per unit using the runtime's subagent/agent tool. In Claude Code, pin Sonnet as described in Runtime and model policy; in Codex, inherit the active Codex model.
 
 **Dispatch prompt (verbatim — fill `<unit_path>`, `<out_path>`, and for chunk units `<source_chat>` / `<source_date>`):**
 
@@ -256,7 +270,7 @@ Output: a deduplicated array, each fact carrying a `source_chat_count` integer. 
 
 ### Step 4 — ROUTE
 
-Build stable-ID batches from the reduced candidate array, then pass each batch to the routing logic defined in `## Routing` (defined below). Execute the routing prompt as one Sonnet subagent per batch (`model: sonnet`, see Model policy), default 25 candidates per batch (`DREAM_ROUTE_BATCH_SIZE`). Each route agent must also use file-handoff: `Write` its decision array to `$WORKDIR/route-out-<batch_id>.json` and return only a one-line ack, so routed JSON never enters orchestrator context.
+Build stable-ID batches from the reduced candidate array, then pass each batch to the routing logic defined in `## Routing` (defined below). Execute the routing prompt as one subagent per batch, default 25 candidates per batch (`DREAM_ROUTE_BATCH_SIZE`). Use Sonnet for Claude Code dispatch; inherit the active Codex model for Codex dispatch. Each route agent must also use file-handoff: write its decision array to `$WORKDIR/route-out-<batch_id>.json` and return only a one-line ack, so routed JSON never enters orchestrator context.
 
 ```bash
 printf '%s' "$REDUCED_CANDIDATES_JSON" | \
@@ -289,7 +303,7 @@ printf '%s' "$ROUTED_RECORDS_JSON" | \
 
 `build-reconcile-batches.py` groups by `(vault,page)`, resolves the page through `config.toml`, reads the full page text once per group (empty string if the page does not exist), and preserves each candidate's routed section inside the candidate entry.
 
-**Step 5c — RECONCILE prompt:** Pass each reconcile batch to the `## Reconciliation` logic. Execute it as one Sonnet subagent per target-page batch (`model: sonnet`, see Model policy):
+**Step 5c — RECONCILE prompt:** Pass each reconcile batch to the `## Reconciliation` logic. Execute it as one subagent per target-page batch. Use Sonnet for Claude Code dispatch; inherit the active Codex model for Codex dispatch:
 ```json
 {
   "batch_id": "reconcile-0001",
@@ -357,7 +371,7 @@ python3 "$DREAM_SCRIPTS_DIR/serve-review.py" \
 # Server blocks here. It opens http://localhost:5174/?token=<random> automatically;
 # the per-run token gates the review API (CSRF/DNS-rebinding defense), so the user
 # must use the auto-opened URL (a bare http://localhost:5174/ will be rejected).
-# When user clicks "Finish — hand back to Claude", POST /api/shutdown fires and serve-review.py exits.
+# When user clicks "Finish", POST /api/shutdown fires and serve-review.py exits.
 ```
 
 Tell the user: *"Opening the review UI in your browser automatically (the URL carries a one-time token that gates it — use that tab, not a bare localhost:5174). Use → to approve, ← to discard, ↑ to defer to next run. Click 'Finish' when done."*
@@ -429,12 +443,12 @@ Only after a batch's APPLY + RECEIPT completes without fatal error — **and nev
 # advance-marker.sh owns this guard (no-op on --dry-run); tested in test_advance_marker.sh.
 MARKER_FLAGS=""
 [ "${DRY_RUN:-0}" = "1" ] && MARKER_FLAGS="--dry-run"
-"$DREAM_SCRIPTS_DIR/advance-marker.sh" --date "<batch_end_date>" $MARKER_FLAGS
+"$DREAM_SCRIPTS_DIR/advance-marker.sh" --date "<batch_end_date>" --source "$DREAM_TRANSCRIPT_SOURCE" $MARKER_FLAGS
 ```
 
-If `--dry-run` is active, do NOT advance the marker under any circumstance. If the run failed during APPLY (vault-writer exited non-zero), also do NOT advance the marker. The next invocation will re-process the same window; vault-writer's idempotency ensures safe re-runs.
+If `--dry-run` is active, do NOT advance the marker under any circumstance. If the run failed during APPLY (vault-writer exited non-zero), also do NOT advance the marker. The next invocation will re-process the same window; vault-writer's idempotency ensures safe re-runs. Source-specific marker behavior is handled by `advance-marker.sh`: `claude` writes `last-run`, `codex` writes `last-run-codex`, and `all` writes both monotonically, skipping any marker that is already newer than the current batch end.
 
-For `--all` (multi-batch) runs, the marker advances after each individual batch, so a mid-run failure leaves the marker at the last successfully completed batch boundary.
+For `--all` (multi-batch) runs, selected source markers advance after each individual batch without moving a source backward, so a mid-run failure leaves each marker at the latest successfully completed boundary for that source.
 
 ### Error handling
 

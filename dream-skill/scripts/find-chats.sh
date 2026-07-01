@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# find-chats.sh — enumerate ~/.claude/projects/**/*.jsonl files whose mtime
-# falls inside the requested time window, skip --ignore'd chats, emit weekly
-# batch boundaries for large windows.
+# find-chats.sh — enumerate local Claude/Codex JSONL transcript files whose
+# mtime falls inside the requested time window, skip --ignore'd chats, emit
+# weekly batch boundaries for large windows.
 #
 # Usage:
-#   find-chats.sh [--since <YYYY-MM-DD>] [--all]
+#   find-chats.sh [--since <YYYY-MM-DD>] [--all] [--source claude|codex|all]
 #
 # Environment overrides (for tests):
-#   DREAM_PROJECTS_ROOT  — replaces ~/.claude/projects
-#   DREAM_MARKER_DIR     — dir holding the `last-run` marker file
-#   DREAM_SKILL_HOME     — plugin root (for scripts/private-state.sh)
+#   DREAM_PROJECTS_ROOT        — legacy alias for DREAM_CLAUDE_PROJECTS_ROOT
+#   DREAM_CLAUDE_PROJECTS_ROOT — replaces ~/.claude/projects
+#   DREAM_CODEX_SESSIONS_ROOT  — replaces ~/.codex/sessions
+#   DREAM_TRANSCRIPT_SOURCE    — default source: claude | codex | all
+#   DREAM_MARKER_DIR           — dir holding the `last-run` marker file
+#   DREAM_SKILL_HOME           — plugin root (for scripts/private-state.sh)
 #
 # Output (stdout):
 #   Lines of the form:
@@ -26,11 +29,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECTS_ROOT="${DREAM_PROJECTS_ROOT:-$HOME/.claude/projects}"
+CLAUDE_PROJECTS_ROOT="${DREAM_CLAUDE_PROJECTS_ROOT:-${DREAM_PROJECTS_ROOT:-$HOME/.claude/projects}}"
+CODEX_SESSIONS_ROOT="${DREAM_CODEX_SESSIONS_ROOT:-$HOME/.codex/sessions}"
 MARKER_DIR="${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}"
-MARKER_FILE="$MARKER_DIR/last-run"
 SKILL_HOME="${DREAM_SKILL_HOME:-$(dirname "$SCRIPT_DIR")}"
 PRIVATE_STATE="$SKILL_HOME/scripts/private-state.sh"
+SOURCE="${DREAM_TRANSCRIPT_SOURCE:-claude}"
 
 MODE="default"   # default | since | all
 SINCE_DATE=""
@@ -39,44 +43,107 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --since) MODE="since"; SINCE_DATE="${2:-}"; shift 2 ;;
     --all)   MODE="all";   shift ;;
+    --source) SOURCE="${2:-}"; shift 2 ;;
     *) echo "find-chats.sh: unknown arg: $1" >&2; exit 1 ;;
   esac
 done
 
 die() { echo "find-chats.sh: $*" >&2; exit 1; }
 
+case "$SOURCE" in
+  claude|codex|all) ;;
+  "") die "--source requires one of: claude, codex, all" ;;
+  *) die "invalid --source '$SOURCE' (expected claude, codex, or all)" ;;
+esac
+
+find_claude_files() {
+  find "$CLAUDE_PROJECTS_ROOT" -name "*.jsonl" -not -path '*/subagents/*' -print0 2>/dev/null
+}
+
+is_codex_subagent_file() {
+  local f="$1"
+  # Codex sessions are path-based by date, not by thread kind. The session_meta
+  # row near the top carries thread_source. A grep check keeps enumeration cheap
+  # and degrades safely if older files lack the field.
+  head -n 20 "$f" 2>/dev/null | grep -Eq '"thread_source"[[:space:]]*:[[:space:]]*"subagent"'
+}
+
+find_codex_files() {
+  local f
+  while IFS= read -r -d '' f; do
+    is_codex_subagent_file "$f" && continue
+    printf '%s\0' "$f"
+  done < <(find "$CODEX_SESSIONS_ROOT" -name "*.jsonl" -print0 2>/dev/null)
+}
+
+find_source_files() {
+  case "$SOURCE" in
+    claude) find_claude_files ;;
+    codex) find_codex_files ;;
+    all)
+      find_claude_files
+      find_codex_files
+      ;;
+  esac
+}
+
+marker_file_for_source() {
+  case "$1" in
+    claude) echo "$MARKER_DIR/last-run" ;;
+    codex) echo "$MARKER_DIR/last-run-codex" ;;
+    *) die "internal error: invalid marker source '$1'" ;;
+  esac
+}
+
+parse_marker_to_ts() {
+  local marker_file="$1"
+  [ -f "$marker_file" ] || return 1
+  local marker_content parsed
+  marker_content=$(cat "$marker_file" 2>/dev/null | tr -d '[:space:]')
+  if printf '%s' "$marker_content" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+    parsed=$(date -j -f "%Y-%m-%d %H:%M:%S" "$marker_content 00:00:00" +%s 2>/dev/null \
+      || date -d "$marker_content 00:00:00" +%s 2>/dev/null) || parsed=""
+  elif printf '%s' "$marker_content" | grep -qE '^[0-9]+$'; then
+    parsed="$marker_content"
+  else
+    echo "find-chats.sh: WARNING: corrupted marker content '$marker_content' in $marker_file; defaulting to 7-day window" >&2
+    return 1
+  fi
+  [ -n "${parsed:-}" ] && printf '%s' "$parsed" | grep -qE '^[0-9]+$' || return 1
+  printf '%s\n' "$parsed"
+}
+
+default_marker_window_start() {
+  local fallback=$(( now_ts - 7 * 86400 ))
+  local parsed
+  case "$SOURCE" in
+    claude|codex)
+      parsed=$(parse_marker_to_ts "$(marker_file_for_source "$SOURCE")" 2>/dev/null) || parsed=""
+      ;;
+    all)
+      local claude_ts codex_ts
+      claude_ts=$(parse_marker_to_ts "$(marker_file_for_source claude)" 2>/dev/null) || claude_ts=""
+      codex_ts=$(parse_marker_to_ts "$(marker_file_for_source codex)" 2>/dev/null) || codex_ts=""
+      # Treat missing/corrupt markers independently. Otherwise a fresh marker
+      # from one source could skip unprocessed chats from a source that has not
+      # had its marker initialized yet.
+      [ -n "$claude_ts" ] || claude_ts="$fallback"
+      [ -n "$codex_ts" ] || codex_ts="$fallback"
+      [ "$claude_ts" -le "$codex_ts" ] && parsed="$claude_ts" || parsed="$codex_ts"
+      ;;
+  esac
+  if [ -z "${parsed:-}" ]; then
+    parsed="$fallback"
+  fi
+  printf '%s\n' "$parsed"
+}
+
 # ── resolve window start as a Unix timestamp ─────────────────────────────────
 now_ts=$(date +%s)
 
 case "$MODE" in
   default)
-    if [ -f "$MARKER_FILE" ]; then
-      # marker exists: start = marker content (YYYY-MM-DD or epoch integer)
-      marker_content=$(cat "$MARKER_FILE" 2>/dev/null | tr -d '[:space:]')
-      if printf '%s' "$marker_content" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
-        # clean YYYY-MM-DD
-        # Anchor to MIDNIGHT — BSD `date -j -f "%Y-%m-%d"` fills H:M:S from the wall
-        # clock, which would drift window_start to ~now's time-of-day and silently
-        # drop early-in-day chats on the boundary date (see REVIEW-2026-06-04 C2).
-        window_start=$(date -j -f "%Y-%m-%d %H:%M:%S" "$marker_content 00:00:00" +%s 2>/dev/null \
-          || date -d "$marker_content 00:00:00" +%s 2>/dev/null) \
-          || window_start=""
-      elif printf '%s' "$marker_content" | grep -qE '^[0-9]+$'; then
-        # clean epoch integer
-        window_start="$marker_content"
-      else
-        # corrupted marker — NEVER fall back to epoch-0/all-history; use 7-day safe default
-        echo "find-chats.sh: WARNING: corrupted marker content '$marker_content'; defaulting to 7-day window" >&2
-        window_start=""
-      fi
-      # If parse failed or empty, fall back to 7 days (never epoch-0)
-      if [ -z "${window_start:-}" ] || ! printf '%s' "${window_start:-}" | grep -qE '^[0-9]+$'; then
-        window_start=$(( now_ts - 7 * 86400 ))
-      fi
-    else
-      # No marker: default to last 7 days
-      window_start=$(( now_ts - 7 * 86400 ))
-    fi
+    window_start=$(default_marker_window_start)
     ;;
   since)
     [ -n "$SINCE_DATE" ] || die "--since requires a date argument (YYYY-MM-DD)"
@@ -95,7 +162,7 @@ case "$MODE" in
       if [ -z "$oldest_ts" ] || [ "$fmtime" -lt "$oldest_ts" ]; then
         oldest_ts="$fmtime"
       fi
-    done < <(find "$PROJECTS_ROOT" -name "*.jsonl" -not -path '*/subagents/*' -print0 2>/dev/null)
+    done < <(find_source_files)
     if [ -n "$oldest_ts" ] && [ "$oldest_ts" -gt 0 ]; then
       window_start="$oldest_ts"
     else
@@ -135,7 +202,7 @@ emit_batch() {
   # "user" turn is a synthetic dispatch prompt), so they carry no persona signal —
   # they are work-output telemetry, explicitly out of scope. Workflows nest under
   # subagents/, so one glob covers both. This is ~73% of all transcripts.
-  done < <(find "$PROJECTS_ROOT" -name "*.jsonl" -not -path '*/subagents/*' -print0 2>/dev/null | sort -z)
+  done < <(find_source_files | sort -z)
 }
 
 if [ "$WINDOW_DAYS" -le "$BATCH_SIZE" ]; then

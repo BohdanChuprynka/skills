@@ -36,6 +36,7 @@ LIVE_TESTS=(
   test_private_state.sh      # FIND  private (--ignore) resolution
   test_private_guard.sh      # private opt-out guard
   test_advance_marker.sh     # MARKER advance (dry-run no-op, I3)
+  test_setup.sh              # INSTALL (Claude symlink + Codex self-contained copy)
   test_integration_smoke.sh  # E2E: FIND → apply(dry-run) → receipt
 )
 

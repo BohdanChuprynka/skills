@@ -1,6 +1,6 @@
 # Skills
 
-> Personal monorepo of [Claude Code](https://docs.claude.com/claude-code) skills I use daily. Each subfolder is a self-contained skill that automates one piece of my workflow around Obsidian, voice capture, daily planning, and audio transcription.
+> Personal monorepo of Claude Code and Codex skills I use daily. Each subfolder is a self-contained skill that automates one piece of my workflow around Obsidian, voice capture, daily planning, and audio transcription.
 
 For background on what skills are and how they work:
 - [What are skills?](https://support.claude.com/en/articles/12512176-what-are-skills)
@@ -12,13 +12,13 @@ For background on what skills are and how they work:
 
 Personal collection. Not an Anthropic project. The skills here automate the parts of my workflow that were getting expensive to do by hand. Shared in case the patterns save someone else a few hours of glue code.
 
-Each skill is independent: install one without the others. All MIT licensed. All run entirely on your machine. No skill in this repo phones home, sells data, or requires a paid service beyond Claude Code itself.
+Each skill is independent: install one without the others. All MIT licensed. Runtime files stay local and no skill in this repo phones home or sells data. Skills that use Claude Code, Codex, Whisper, or connected services may still send task context to the active provider as part of the work.
 
 ## The skills
 
 | Skill | What it does | Install path |
 |---|---|---|
-| [**dream-skill**](./dream-skill) | Auto-records every Claude Code session to your Obsidian vault on close. SessionEnd hook fires a headless `claude -p` that extracts persona-relevant facts (projects, decisions, deadlines), writes the confident ones add-only to your vault, queues the uncertain ones for manual review. No `/sync` to remember. Claude Code only. | Plugin (auto-installs hooks) |
+| [**dream-skill**](./dream-skill) | On-demand batch sync for Claude Code and Codex transcripts. Sweeps recent chats, extracts durable persona/project facts, routes and reconciles them against Obsidian vault pages, queues uncertain/destructive changes for review, writes receipts, and tracks source-specific markers. | `./setup.sh` or Claude plugin |
 | [**clean-wiki**](./clean-wiki) | Monthly Obsidian vault cleanup. Sub-agents scan your vaults for stale facts, contradictions, broken wikilinks, orphans, frontmatter drift. You swipe approve/reject in a local web UI. Claude applies approved changes with an undo log. | Symlink |
 | [**calendar-plan-skill**](./calendar-plan-skill) | Dual-target (Claude Code + Codex CLI) daily calendar planner. Drafts tomorrow's calendar from your Obsidian vault, Google Calendar, Gmail, and a local context note. Two modes: `/calendar-plan` (draft, confirm, apply) and `/calendar-plan auto` (apply safe blocks directly). Ships with a launchd job for evening auto-runs. | Symlink |
 | [**sync-phone**](./sync-phone) | iPhone voice-dictation pipeline. Drains an iCloud-shared dictation sink, summarizes the raw transcripts, routes bullets into the right Obsidian vault, archives the source, clears the inbox. Pairs with an iPhone Shortcut for the capture side. | Symlink |
@@ -30,16 +30,23 @@ Each skill is independent: install one without the others. All MIT licensed. All
 
 Two install paths depending on the skill.
 
-### Plugin install (for dream-skill)
+### Dream-Skill install
 
-Auto-installs hooks into your `~/.claude/settings.json` on install. No manual config edits.
+For Claude plugin install:
 
 ```bash
 /plugin marketplace add BohdanChuprynka/skills
-/plugin install dream-skill@dream-skill-marketplace
+/plugin install dream-skill@skills
 ```
 
-Then create the per-skill config file. See [dream-skill/README.md](./dream-skill/README.md) for the specifics.
+For local Claude + Codex install:
+
+```bash
+cd dream-skill
+bash setup.sh
+```
+
+Then create or edit the per-skill config file. See [dream-skill/README.md](./dream-skill/README.md) for the specifics.
 
 ### Symlink install (for everything else)
 
@@ -61,14 +68,14 @@ Each skill's README documents its own prerequisites (jq, Python, MCP servers, OA
 
 ### Setup-script install
 
-For dual-runtime skills that need to copy files into Codex, run their installer:
+For dual-runtime skills that need to copy files into Codex or prepare local runtime dependencies, run their installer:
 
 ```bash
 cd <skill-name>
 ./setup.sh
 ```
 
-Currently: `voice-check`, `session-continue`.
+Currently: `dream-skill`, `voice-check`, `session-continue`.
 
 ## Skill structure
 
@@ -93,7 +100,7 @@ The double `skills/<skill-name>/` path is the convention Claude Code uses to dis
 
 | Skill | Claude Code | Codex CLI | macOS | Linux | Windows |
 |---|---|---|---|---|---|
-| dream-skill | ✓ | not yet | ✓ | ✓ | WSL2 |
+| dream-skill | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | clean-wiki | ✓ | not yet | ✓ | ✓ | WSL2 |
 | calendar-plan-skill | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | sync-phone | ✓ | ✓ | ✓ | ✓ | WSL2 |
@@ -109,7 +116,7 @@ These skills work on personal data: calendars, dictation, Obsidian vault content
 - Per-skill `.gitignore` excludes runtime data, real config paths, logs.
 - All committed examples use generic placeholders.
 - Real config lives in `config/*.toml` (gitignored). Every skill ships a sanitized `*.example.toml` template.
-- Vault content, calendar events, dictation text, etc. never leave your machine.
+- Runtime data is local and gitignored. The active model/provider may still receive task context for skills that ask an agent to read private content or call an external API.
 
 If you fork this and push changes, run `git status --ignored` before the first push to verify nothing personal slipped through.
 

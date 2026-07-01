@@ -2,13 +2,13 @@
 
 <h1>dream-skill</h1>
 
-<p><strong>One observable command sweeps every Claude Code chat since you last ran it, and syncs the durable facts into your Obsidian vault — with a per-run receipt so you can <em>see</em> exactly what it did.</strong></p>
+<p><strong>One observable command sweeps every Claude Code and Codex chat since you last ran it, and syncs the durable facts into your Obsidian vault — with a per-run receipt so you can <em>see</em> exactly what it did.</strong></p>
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/BohdanChuprynka/skills?style=flat" alt="License"></a>
   <a href="https://github.com/BohdanChuprynka/skills/stargazers"><img src="https://img.shields.io/github/stars/BohdanChuprynka/skills?style=flat&color=yellow" alt="Stars"></a>
   <img src="https://img.shields.io/badge/version-0.3.1-blue?style=flat" alt="Version 0.3.1">
-  <img src="https://img.shields.io/badge/claude--code-plugin-orange?style=flat" alt="Claude Code plugin">
+  <img src="https://img.shields.io/badge/claude--code%20%2B%20codex-orange?style=flat" alt="Claude Code and Codex">
 </p>
 
 <p>
@@ -27,16 +27,16 @@
 
 ## The problem
 
-You close Claude Code. The conversation had decisions, preferences, new project context — gone unless you remembered to `/sync-wiki` first. Skip it for a week and future sessions re-ask things you already told them.
+You close Claude Code or Codex. The conversation had decisions, preferences, new project context — gone unless you remembered to sync it first. Skip it for a week and future sessions re-ask things you already told them.
 
 The earlier auto-on-close design (v0.2) tried to fix this by firing a headless capture on every `SessionEnd`. It worked, but it was **invisible and hard to trust**: a per-session hook spawning an LLM in the background, no single artifact showing what happened, and context that ballooned when a session was large.
 
-**v0.3 inverts that.** Capture is decoupled from extraction. Nothing runs on close. Instead you run **`/dream-skill`** when you want, and it sweeps every chat since the last run as one observable batch — fan out a subagent per chat, merge, route, reconcile against the vault, let you review the uncertain ones, write, and drop a **receipt** you can read in Obsidian.
+**v0.3 inverts that.** Capture is decoupled from extraction. Nothing runs on close. Instead you run **`/dream-skill`** in Claude or **`Use $dream-skill`** in Codex when you want, and it sweeps every chat since the last run as one observable batch — fan out a subagent per chat, merge, route, reconcile against the vault, let you review the uncertain ones, write, and drop a **receipt** you can read in Obsidian.
 
 ## What dream-skill does
 
 - **On-demand, not automatic.** You run it. No background hook firing on every session close.
-- **Batch, not per-session.** One run covers every unprocessed chat in the window (default: last 7 days, tracked by a `last-run` marker).
+- **Batch, not per-session.** One run covers every unprocessed chat in the window (default: last 7 days, tracked by source-specific markers).
 - **Map-reduce over chats.** One isolated subagent per transcript — so a giant session can't blow up the context of the whole run.
 - **Reconciles, doesn't just append.** Each candidate fact is compared against the actual target page: is it new, a duplicate, a newer version that supersedes an old line, or a contradiction?
 - **Observable.** Every run writes a dated **receipt** (`Written · Superseded · Queued · Skipped`) to a `dream-reports/` folder inside Obsidian. That artifact is the point.
@@ -55,7 +55,7 @@ The orchestrator (`SKILL.md`, Steps 0–9) runs a nine-stage pipeline. The shape
 | Stage | Owner | What happens |
 |---|---|---|
 | **0 · Pre-flight** | SKILL.md | Resolve the scripts dir; parse `config.toml` (vault roots + `reports_dir`). Handle `--ignore`/`--dry-run`. |
-| **1 · FIND** | `find-chats.sh` | `last-run` marker + window → batches of transcript paths. Default **last 7 days**; `--since` / `--all` (weekly-batched). Private (`--ignore`d) chats excluded. Empty window → receipt "0 chats" and advance. |
+| **1 · FIND** | `find-chats.sh` | Source marker + window → batches of transcript paths. Default **last 7 days**; `--since` / `--all` (weekly-batched); `--source claude|codex|all`. Private (`--ignore`d) chats excluded. Empty window → receipt "0 chats" and advance. |
 | **2 · MAP** | one subagent per chat | Each isolated subagent reads one transcript, applies the A/B/C/D/E taxonomy (A = write-candidate, B/C = drop, D/E = queue), and emits a JSON array of **candidate facts**. |
 | **3 · REDUCE** | SKILL.md (structural) | Merge all candidate arrays; dedup exact `(content, section)`; count distinct source chats → may **promote a confidence label**. Never clears `needs_review`, never auto-approves. |
 | **4 · ROUTE** | `build-route-batches.py` + `build-nav-context.sh` + `ROUTING.md` | Batched candidates share one nav-context. Each output must echo every `candidate_id` exactly once and resolve `{status, vault, page, section}`. Ambiguous/gap → routing-gaps log + review queue. |
@@ -63,18 +63,28 @@ The orchestrator (`SKILL.md`, Steps 0–9) runs a nine-stage pipeline. The shape
 | **6 · REVIEW** | `queue.sh` | Everything `needs_review` (all destructive edits, all low/medium-confidence news) is walked fact-by-fact in the terminal. |
 | **7 · APPLY** | `apply-decision.sh` → `vault-writer.sh` | Owns `action → mode`: `new`→append, `supersede`→replace (old line preserved in undo), `contradict`→mark old line stale + queue the new one, `duplicate`→skip. |
 | **8 · RECEIPT** | `write-receipt.sh` | Assemble the run summary → `reports_dir/<date>.md` + index line. Buckets: **Written · Superseded · Queued · Skipped**. |
-| **9 · MARKER** | SKILL.md | Advance `last-run` to the batch end date — **only** if APPLY succeeded. A failed write leaves the marker put, so the next run safely retries. |
+| **9 · MARKER** | SKILL.md | Advance source-specific marker(s) monotonically to the batch end date — **only** if APPLY succeeded. A failed write leaves the marker put, so the next run safely retries. |
 
 ## Install
+
+Claude plugin install:
 
 ```bash
 /plugin marketplace add BohdanChuprynka/skills
 /plugin install dream-skill@skills
 ```
 
+Local dual-runtime install (Claude symlink + Codex self-contained copy):
+
+```bash
+git clone https://github.com/BohdanChuprynka/skills
+cd skills/dream-skill
+bash setup.sh
+```
+
 **No `SessionEnd` hook** — nothing runs when you close a session; capture happens only when you run `/dream-skill`. (The plugin still registers a legacy `SessionStart → check-pending.sh` script from v0.2. It is silent — it scans the old `trigger.log` and writes nothing to stdout — so on a clean v0.3 install it is effectively a no-op. A real "N chats since last run" nudge is a planned follow-up.)
 
-**First run:** create `~/.claude/dream-skill/config.toml` pointing at your vault(s):
+**First run:** create or edit `~/.claude/dream-skill/config.toml` pointing at your vault(s). `bash setup.sh` seeds this from `config.example.toml` if it is missing:
 
 ```toml
 # Where per-run receipts go (a sibling folder of your vaults, visible in Obsidian).
@@ -89,18 +99,20 @@ root = "/path/to/Obsidian/projects"
 description = "Repos, architecture, tech stack, current goals, known issues"
 ```
 
-Each vault root should have a `CLAUDE.md` (the schema Claude reads) and a `wiki/index.md` (the page catalog). `vault-writer.sh` keeps the index updated idempotently. If `config.toml` is missing or empty, dream-skill prompts you to configure it before doing anything.
+Each vault root should have a `CLAUDE.md` or `AGENTS.md` (the schema the agent reads) and a `wiki/index.md` (the page catalog). `vault-writer.sh` keeps the index updated idempotently. If `config.toml` is missing or empty, dream-skill prompts you to configure it before doing anything.
 
 ## Modes
 
 | Invocation | What it does |
 |---|---|
-| `/dream-skill` | Run the on-demand pipeline over every chat since `last-run`, then open the terminal review. |
+| `/dream-skill` | Claude: run the on-demand pipeline over every Claude chat since `last-run`, then open the review. |
+| `Use $dream-skill --source all` | Codex: run the pipeline over Claude and Codex transcripts using source-specific markers. |
 | `/dream-skill --dry-run` | Run the **entire** pipeline but write nothing — receipt prints to stdout. See [below](#dry-run-vs-full-run). |
 | `/dream-skill --since <YYYY-MM-DD>` | Override the window start. |
 | `/dream-skill --all` | Full-history backfill, weekly-batched. Use only once the pipeline is trusted. |
 | `/dream-skill --ignore` | Mark the **current** chat private — it's excluded from the next run (undo: `--unignore`). |
 | `/dream-skill --unignore` | Re-include a previously ignored chat (latest wins). |
+| `--source claude|codex|all` | Select transcript source. Claude default is `claude`; Codex should usually use `all`. |
 | `/dream-skill --help` | Print the modes, env vars, and state paths. Exits without writing. |
 
 > Removed in v0.3: `--auto` (the headless on-close entry point) and `--reconcile` (the earlier v0.2 audit stub). Reconciliation is no longer a separate mode — it's Step 5 of every run.
@@ -125,7 +137,7 @@ Both run the **identical** pipeline — FIND → MAP → REDUCE → ROUTE → RE
 | Queue writes | skipped | real entries created |
 | Undo log | not written | written |
 | Receipt | rendered to **stdout** (proposed edits) | written to `reports_dir` |
-| `last-run` marker | **not advanced** | advanced to batch end |
+| source marker(s) | **not advanced** | advanced to batch end |
 
 So a dry-run is a zero-mutation preview: you see precisely what *would* happen, and a second dry-run produces the same plan. Use it for the first shakedown of a new vault, or any time you want to look before you leap.
 
@@ -134,15 +146,15 @@ So a dry-run is a zero-mutation preview: you see precisely what *would* happen, 
 - **Reversible writes.** Append, replace, and stale-marking all log to the per-day undo file. `bash scripts/apply-undo.sh --date <YYYY-MM-DD>` reverses a day.
 - **No silent destructive edits.** Every `supersede` and `contradict` goes through the review queue; the model never overwrites vault content without surfacing it.
 - **No silent routing guesses.** Ambiguous/gap routing is logged and queued, never written to a guessed page.
-- **Marker integrity.** The `last-run` marker advances only after a clean APPLY. A failed write → marker stays → next run retries the same window; idempotent writes mean retries don't duplicate.
-- **Dry-run guarantee.** The vault is byte-identical and the queue is untouched after a `--dry-run` APPLY (enforced by tests). The `last-run` marker is also left unadvanced on a dry-run, per the Step 9 orchestration rule.
+- **Marker integrity.** Source markers advance only after a clean APPLY and never move backward. A failed write → marker stays → next run retries the same window; idempotent writes mean retries don't duplicate.
+- **Dry-run guarantee.** The vault is byte-identical and the queue is untouched after a `--dry-run` APPLY (enforced by tests). Source markers are also left unadvanced on a dry-run, per the Step 9 orchestration rule.
 - **Private opt-out.** `--ignore` keeps a chat out entirely — no subagent reads it, nothing from it is recorded.
 
 ## Privacy
 
-- All processing is local. Transcripts are read from the `~/.claude/projects/<slug>/*.jsonl` files Claude Code already wrote.
-- The only model calls are the subagents dispatched inside your normal Claude Code session — identical to any other Claude Code work. No telemetry, no third-party services, vault paths never leave your machine.
-- **Keeping a chat private:** type `/dream-skill --ignore` in that chat. At the next run, `find-chats.sh` (via `private-state.sh`) excludes it — no extraction, no writes. `--unignore` reverses it (latest decision wins, covers the whole chat).
+- Transcript files, queue files, undo logs, receipts, and vault writes stay local. Claude transcripts are read from `~/.claude/projects`; Codex transcripts are read from `~/.codex/sessions`.
+- LLM processing happens through the active runtime you invoke: Claude Code subagents when you run from Claude, Codex subagents when you run from Codex. Transcript-derived text is sent to that provider as part of MAP/ROUTE/RECONCILE, the same as any other agent task using those transcripts.
+- **Keeping a chat private:** type `/dream-skill --ignore` in Claude or `Use $dream-skill --ignore` in Codex. At the next run, `find-chats.sh` (via `private-state.sh`) excludes it — no extraction, no writes. `--unignore` reverses it (latest decision wins, covers the whole chat).
 
 ## State layout
 
@@ -151,7 +163,8 @@ All runtime state lives under `~/.claude/dream-skill/` and survives plugin updat
 ```
 ~/.claude/dream-skill/
 ├── config.toml            # vault roots + reports_dir (you create this)
-├── last-run               # marker: the batch end date of the last successful run
+├── last-run               # Claude marker: batch end date of the last successful Claude/all run
+├── last-run-codex         # Codex marker: batch end date of the last successful Codex/all run
 ├── queue/pending.md       # deferred-decision facts (destructive / uncertain / brainstormed)
 ├── log/<date>.md          # per-day human-readable activity log
 ├── undo/<date>.jsonl       # per-write rollback entries
@@ -161,7 +174,7 @@ All runtime state lives under `~/.claude/dream-skill/` and survives plugin updat
 
 Receipts live in the `reports_dir` from `config.toml` (a folder beside your vaults, so they show up in Obsidian) — **not** under `~/.claude`.
 
-Env overrides (rarely needed): `DREAM_HOME`, `DREAM_CONFIG`, `DREAM_QUEUE_FILE`, `DREAM_DAILY_LOG`, `DREAM_UNDO_LOG`, `DREAM_ERROR_LOG`, `DREAM_MARKER_DIR`, `DREAM_SCRIPTS_DIR`. All have sensible defaults.
+Env overrides (rarely needed): `DREAM_HOME`, `DREAM_CONFIG`, `DREAM_QUEUE_FILE`, `DREAM_DAILY_LOG`, `DREAM_UNDO_LOG`, `DREAM_ERROR_LOG`, `DREAM_MARKER_DIR`, `DREAM_SCRIPTS_DIR`, `DREAM_TRANSCRIPT_SOURCE`, `DREAM_CLAUDE_PROJECTS_ROOT`, `DREAM_CODEX_SESSIONS_ROOT`. All have sensible defaults.
 
 ## How it relates to the other vault skills
 
@@ -179,7 +192,7 @@ No. That was v0.2. Capture happens only when *you* run `/dream-skill`. (A legacy
 Read today's receipt in `reports_dir/<date>.md` — it lists every fact Written, Superseded, Queued, or Skipped, with sources. That artifact is the whole design goal.
 
 **Q: How much does a run cost?**
-One subagent per chat in MAP, then batched ROUTE and page-grouped RECONCILE subagents — all inside your normal Claude Code session (covered on Pro/Max/Team). Large candidate sets avoid the old one-agent-per-candidate explosion. Narrow the window with `--since` to spend less.
+One subagent per MAP unit, then batched ROUTE and page-grouped RECONCILE subagents inside whichever runtime you invoke. Large candidate sets avoid the old one-agent-per-candidate explosion. Narrow the window with `--since` or `--source` to spend less.
 
 **Q: I ran it twice — did my vault get polluted?**
 No. `vault-writer.sh` is line-idempotent (exact-match append guard), the queue dedupes by `(title, target)`, and the marker only advances on success. Worst case is wasted work on a re-scan that produces zero new writes.
@@ -201,12 +214,13 @@ Run these first:
 ls ~/.claude/dream-skill/             # config.toml + queue/ + log/ + undo/ should exist
 cat ~/.claude/dream-skill/error.log   # failed-step diagnostics
 claude --version                      # any v1.x / v2.x
+codex --version                       # for Codex installs
 which jq                              # must return a path (brew install jq / apt install jq)
 ```
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "No last-run marker found" prompt every run | Marker missing (first run) | Pick a window (1 = last 7 days is recommended); the marker is written on success. |
+| "No last-run marker found" prompt every run | Source marker missing (first run for that source) | Pick a window (1 = last 7 days is recommended); marker(s) are written on success. |
 | Run finds 0 chats | Window is empty, or all chats `--ignore`d | Widen with `--since <date>` or `--all`. |
 | Facts pile up in the queue, few written | Routing can't find canonical pages | Run `/clean-wiki` to merge duplicate pages; add disambiguation rules to `ROUTING.md`. |
 | `error.log` shows `missing <script>` | Scripts dir not resolved | Reinstall the plugin; verify `scripts/` is intact. |
@@ -221,7 +235,7 @@ which jq                              # must return a path (brew install jq / ap
 ## Docs
 
 - [`docs/architecture.mmd`](docs/architecture.mmd) — architecture diagram source (renders the image above)
-- [SKILL.md](skills/dream-skill/SKILL.md) — runtime instructions Claude reads (Steps 0–9, Routing, Reconciliation)
+- [SKILL.md](skills/dream-skill/SKILL.md) — runtime instructions Claude/Codex read (Steps 0–9, Routing, Reconciliation)
 - [REDESIGN-2026-06-03-on-demand-batch.md](REDESIGN-2026-06-03-on-demand-batch.md) — the approved redesign spec
 - [PLAN-OVERVIEW-2026-06-03.md](PLAN-OVERVIEW-2026-06-03.md) — normative data contracts (candidate-fact, routing-decision, reconciliation-decision)
 - [HARVEST.md](HARVEST.md) — patterns ported from v0.1
