@@ -1,0 +1,12 @@
+# Dream-Skill vault config.
+# Copy to ~/.claude/dream-skill/config.toml and replace these paths.
+
+reports_dir = "/path/to/Obsidian/dream-reports"
+
+[vaults.me]
+root = "/path/to/Obsidian/me"
+description = "Identity, skills, experience, goals, career, preferences"
+
+[vaults.projects]
+root = "/path/to/Obsidian/projects"
+description = "Repositories, architecture, tech stack, current goals, known issues"

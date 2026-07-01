@@ -73,5 +73,32 @@ printf '{"role":"user","content":"<command-message>dream-skill</command-message>
 [ "$(state_of "$T")" = "ignore" ] || fail "flat-shape --ignore should be 'ignore', got '$(state_of "$T")'"
 echo "PASS: flat-shape --ignore → ignore"
 
+# === Case 10: Codex text invocation --ignore → ignore ===
+T="$WORK/c10.jsonl"
+cat > "$T" <<'EOF'
+{"timestamp":"2026-07-01T00:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"Use $dream-skill --ignore"}}
+EOF
+[ "$(state_of "$T")" = "ignore" ] || fail "Codex Use \$dream-skill --ignore should be 'ignore', got '$(state_of "$T")'"
+echo "PASS: Codex Use \$dream-skill --ignore → ignore"
+
+# === Case 11: Codex latest-wins --ignore then --unignore → record ===
+T="$WORK/c11.jsonl"
+cat > "$T" <<'EOF'
+{"timestamp":"2026-07-01T00:00:00Z","type":"event_msg","payload":{"type":"user_message","message":"Use $dream-skill --ignore"}}
+{"timestamp":"2026-07-01T00:00:01Z","type":"event_msg","payload":{"type":"agent_message","message":"Marked private."}}
+{"timestamp":"2026-07-01T00:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"/dream-skill --unignore"}}
+EOF
+[ "$(state_of "$T")" = "record" ] || fail "Codex ignore→unignore should be 'record', got '$(state_of "$T")'"
+echo "PASS: Codex --ignore then --unignore → record (latest wins)"
+
+# === Case 12: Codex assistant/tool output quoting command must NOT match ===
+T="$WORK/c12.jsonl"
+cat > "$T" <<'EOF'
+{"timestamp":"2026-07-01T00:00:00Z","type":"event_msg","payload":{"type":"agent_message","message":"To skip, say Use $dream-skill --ignore."}}
+{"timestamp":"2026-07-01T00:00:01Z","type":"response_item","payload":{"type":"function_call_output","output":"Use $dream-skill --ignore"}}
+EOF
+[ "$(state_of "$T")" = "record" ] || fail "Codex assistant/tool quoting command should be 'record', got '$(state_of "$T")'"
+echo "PASS: Codex assistant/tool quoting invocation → record"
+
 echo
 echo "All private-state.sh tests passed."

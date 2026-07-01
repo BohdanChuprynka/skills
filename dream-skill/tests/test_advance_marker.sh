@@ -50,5 +50,29 @@ echo "PASS: missing --date fails on a real run"
 "$MARKER" --marker-dir "$MDIR" --dry-run >/dev/null || fail "--dry-run should exit 0 even without --date"
 echo "PASS: --dry-run is a safe no-op even without --date"
 
+# Test 7: Codex source writes last-run-codex without touching Claude marker
+printf '2026-06-01\n' > "$MDIR/last-run"
+"$MARKER" --date "2026-06-10" --marker-dir "$MDIR" --source codex >/dev/null
+[ "$(cat "$MDIR/last-run")" = "2026-06-01" ] || fail "--source codex should not touch Claude last-run marker"
+[ "$(cat "$MDIR/last-run-codex")" = "2026-06-10" ] || fail "--source codex did not write last-run-codex"
+echo "PASS: Codex source advances only last-run-codex"
+
+# Test 8: all source advances both source markers
+"$MARKER" --date "2026-06-11" --marker-dir "$MDIR" --source all >/dev/null
+[ "$(cat "$MDIR/last-run")" = "2026-06-11" ] || fail "--source all did not advance Claude marker"
+[ "$(cat "$MDIR/last-run-codex")" = "2026-06-11" ] || fail "--source all did not advance Codex marker"
+echo "PASS: all source advances both source markers"
+
+# Test 9: all source never moves an already-newer marker backward
+printf '2026-07-01\n' > "$MDIR/last-run"
+printf '2026-06-01\n' > "$MDIR/last-run-codex"
+"$MARKER" --date "2026-06-08" --marker-dir "$MDIR" --source all >/dev/null
+[ "$(cat "$MDIR/last-run")" = "2026-07-01" ] || fail "--source all moved Claude marker backward"
+[ "$(cat "$MDIR/last-run-codex")" = "2026-06-08" ] || fail "--source all did not advance older Codex marker"
+"$MARKER" --date "2026-07-08" --marker-dir "$MDIR" --source all >/dev/null
+[ "$(cat "$MDIR/last-run")" = "2026-07-08" ] || fail "--source all did not advance Claude marker after catch-up"
+[ "$(cat "$MDIR/last-run-codex")" = "2026-07-08" ] || fail "--source all did not advance Codex marker after catch-up"
+echo "PASS: all source marker advancement is monotonic per source"
+
 echo
 echo "All advance-marker.sh tests passed."
