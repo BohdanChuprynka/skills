@@ -105,14 +105,13 @@ Each vault root should have a `CLAUDE.md` or `AGENTS.md` (the schema the agent r
 
 | Invocation | What it does |
 |---|---|
-| `/dream-skill` | Claude: run the on-demand pipeline over every Claude chat since `last-run`, then open the review. |
-| `Use $dream-skill --source all` | Codex: run the pipeline over Claude and Codex transcripts using source-specific markers. |
+| `/dream-skill` / `Use $dream-skill` | Run the on-demand pipeline over Claude and Codex transcripts using source-specific markers, then open the review. |
 | `/dream-skill --dry-run` | Run the **entire** pipeline but write nothing — receipt prints to stdout. See [below](#dry-run-vs-full-run). |
 | `/dream-skill --since <YYYY-MM-DD>` | Override the window start. |
 | `/dream-skill --all` | Full-history backfill, weekly-batched. Use only once the pipeline is trusted. |
 | `/dream-skill --ignore` | Mark the **current** chat private — it's excluded from the next run (undo: `--unignore`). |
 | `/dream-skill --unignore` | Re-include a previously ignored chat (latest wins). |
-| `--source claude|codex|all` | Select transcript source. Claude default is `claude`; Codex should usually use `all`. |
+| `--source claude|codex|all` | Narrow transcript source. Local default is `all`; use `claude` or `codex` only for targeted runs. |
 | `/dream-skill --help` | Print the modes, env vars, and state paths. Exits without writing. |
 
 > Removed in v0.3: `--auto` (the headless on-close entry point) and `--reconcile` (the earlier v0.2 audit stub). Reconciliation is no longer a separate mode — it's Step 5 of every run.

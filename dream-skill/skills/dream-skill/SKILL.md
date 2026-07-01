@@ -13,14 +13,14 @@ version: 0.3.1
 
 | Invocation | Mode |
 |---|---|
-| `/dream-skill` (Claude) / `Use $dream-skill --source all` (Codex) | On-demand run: opens a review session. Runs FIND → MAP → REDUCE → ROUTE → RECONCILE → REVIEW → APPLY → RECEIPT → MARKER. |
-| `/dream-skill --since <YYYY-MM-DD>` / `Use $dream-skill --since <YYYY-MM-DD> --source all` | Explicit window start override. |
-| `/dream-skill --all` / `Use $dream-skill --all --source all` | Full-history backfill (weekly-batched; only after pipeline is trusted). |
-| `/dream-skill --dry-run` / `Use $dream-skill --dry-run --source all` | Run the full pipeline but write nothing to the vault. Receipt is printed to stdout only. |
+| `/dream-skill` / `Use $dream-skill` | On-demand run over Claude and Codex transcripts: opens a review session. Runs FIND → MAP → REDUCE → ROUTE → RECONCILE → REVIEW → APPLY → RECEIPT → MARKER. |
+| `/dream-skill --since <YYYY-MM-DD>` / `Use $dream-skill --since <YYYY-MM-DD>` | Explicit window start override. |
+| `/dream-skill --all` / `Use $dream-skill --all` | Full-history backfill (weekly-batched; only after pipeline is trusted). |
+| `/dream-skill --dry-run` / `Use $dream-skill --dry-run` | Run the full pipeline but write nothing to the vault. Receipt is printed to stdout only. |
 | `/dream-skill --ignore` / `Use $dream-skill --ignore` | Mark THIS chat private — skip it during the next FIND step. |
 | `/dream-skill --unignore` / `Use $dream-skill --unignore` | Undo `--ignore`. |
 | `/dream-skill --help` / `Use $dream-skill --help` | Print modes, env vars, state paths, and exit 0. |
-| `--source claude|codex|all` | Transcript source selector. Claude runtime defaults to `claude`; Codex runtime should pass `all` unless the user explicitly narrows it. |
+| `--source claude|codex|all` | Transcript source selector. Local default is `all`; pass `claude` or `codex` only for targeted runs. |
 
 ---
 
@@ -121,9 +121,7 @@ The on-demand pipeline runs in the following steps. Each step is described below
 
 1. Check the `--dry-run` flag. If set, no vault writes occur; receipt is printed to stdout only. Thread `--dry-run` to `apply-decision.sh` (Plan 3 makes this mechanical).
 2. Check `--ignore` / `--unignore`. If present, update the private-state flag for the current transcript and exit. Do not proceed to FIND.
-3. Resolve transcript source. If the user passed `--source`, honor it. Otherwise:
-   - Claude Code invocation defaults to `--source claude` for backward compatibility.
-   - Codex invocation defaults to `--source all` so a Codex run sweeps both Claude and Codex transcripts.
+3. Resolve transcript source. If the user passed `--source`, honor it. Otherwise default to `--source all` so a local run sweeps both Claude and Codex transcripts.
    Save the selected source in `DREAM_TRANSCRIPT_SOURCE` and pass `--source "$DREAM_TRANSCRIPT_SOURCE"` to both `find-chats.sh` and `advance-marker.sh`.
 4. Resolve `DREAM_SCRIPTS_DIR` robustly — works as a marketplace plugin, a bare `~/.claude/skills` symlink, OR a self-contained Codex skill copy. Run:
 

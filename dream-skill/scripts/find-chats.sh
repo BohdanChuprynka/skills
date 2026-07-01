@@ -10,7 +10,7 @@
 #   DREAM_PROJECTS_ROOT        — legacy alias for DREAM_CLAUDE_PROJECTS_ROOT
 #   DREAM_CLAUDE_PROJECTS_ROOT — replaces ~/.claude/projects
 #   DREAM_CODEX_SESSIONS_ROOT  — replaces ~/.codex/sessions
-#   DREAM_TRANSCRIPT_SOURCE    — default source: claude | codex | all
+#   DREAM_TRANSCRIPT_SOURCE    — source override: claude | codex | all (default: all)
 #   DREAM_MARKER_DIR           — dir holding the `last-run` marker file
 #   DREAM_SKILL_HOME           — plugin root (for scripts/private-state.sh)
 #
@@ -34,7 +34,9 @@ CODEX_SESSIONS_ROOT="${DREAM_CODEX_SESSIONS_ROOT:-$HOME/.codex/sessions}"
 MARKER_DIR="${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}"
 SKILL_HOME="${DREAM_SKILL_HOME:-$(dirname "$SCRIPT_DIR")}"
 PRIVATE_STATE="$SKILL_HOME/scripts/private-state.sh"
-SOURCE="${DREAM_TRANSCRIPT_SOURCE:-claude}"
+SOURCE="${DREAM_TRANSCRIPT_SOURCE:-all}"
+CLAUDE_DEFAULT_WINDOW_START=""
+CODEX_DEFAULT_WINDOW_START=""
 
 MODE="default"   # default | since | all
 SINCE_DATE=""
@@ -113,29 +115,48 @@ parse_marker_to_ts() {
   printf '%s\n' "$parsed"
 }
 
-default_marker_window_start() {
+marker_window_start_for_source() {
+  local source_name="$1"
   local fallback=$(( now_ts - 7 * 86400 ))
+  local parsed
+  parsed=$(parse_marker_to_ts "$(marker_file_for_source "$source_name")" 2>/dev/null) || parsed=""
+  [ -n "$parsed" ] || parsed="$fallback"
+  printf '%s\n' "$parsed"
+}
+
+default_marker_window_start() {
   local parsed
   case "$SOURCE" in
     claude|codex)
-      parsed=$(parse_marker_to_ts "$(marker_file_for_source "$SOURCE")" 2>/dev/null) || parsed=""
+      parsed=$(marker_window_start_for_source "$SOURCE")
       ;;
     all)
       local claude_ts codex_ts
-      claude_ts=$(parse_marker_to_ts "$(marker_file_for_source claude)" 2>/dev/null) || claude_ts=""
-      codex_ts=$(parse_marker_to_ts "$(marker_file_for_source codex)" 2>/dev/null) || codex_ts=""
-      # Treat missing/corrupt markers independently. Otherwise a fresh marker
-      # from one source could skip unprocessed chats from a source that has not
-      # had its marker initialized yet.
-      [ -n "$claude_ts" ] || claude_ts="$fallback"
-      [ -n "$codex_ts" ] || codex_ts="$fallback"
+      claude_ts=$(marker_window_start_for_source claude)
+      codex_ts=$(marker_window_start_for_source codex)
       [ "$claude_ts" -le "$codex_ts" ] && parsed="$claude_ts" || parsed="$codex_ts"
       ;;
   esac
-  if [ -z "${parsed:-}" ]; then
-    parsed="$fallback"
-  fi
   printf '%s\n' "$parsed"
+}
+
+file_source() {
+  local f="$1"
+  case "$f" in
+    "$CLAUDE_PROJECTS_ROOT"/*) echo "claude" ;;
+    "$CODEX_SESSIONS_ROOT"/*) echo "codex" ;;
+    *) return 1 ;;
+  esac
+}
+
+default_window_start_for_file() {
+  local f="$1" source_name
+  source_name=$(file_source "$f") || return 1
+  case "$source_name" in
+    claude) printf '%s\n' "$CLAUDE_DEFAULT_WINDOW_START" ;;
+    codex) printf '%s\n' "$CODEX_DEFAULT_WINDOW_START" ;;
+    *) return 1 ;;
+  esac
 }
 
 # ── resolve window start as a Unix timestamp ─────────────────────────────────
@@ -144,6 +165,10 @@ now_ts=$(date +%s)
 case "$MODE" in
   default)
     window_start=$(default_marker_window_start)
+    if [ "$SOURCE" = "all" ]; then
+      CLAUDE_DEFAULT_WINDOW_START=$(marker_window_start_for_source claude)
+      CODEX_DEFAULT_WINDOW_START=$(marker_window_start_for_source codex)
+    fi
     ;;
   since)
     [ -n "$SINCE_DATE" ] || die "--since requires a date argument (YYYY-MM-DD)"
@@ -189,6 +214,10 @@ emit_batch() {
   while IFS= read -r -d '' f; do
     fmtime=$(stat -c "%Y" "$f" 2>/dev/null || stat -f "%m" "$f" 2>/dev/null || echo 0)
     if [ "$fmtime" -ge "$batch_start" ] && [ "$fmtime" -lt "$batch_end" ]; then
+      if [ "$MODE" = "default" ] && [ "$SOURCE" = "all" ]; then
+        source_window_start=$(default_window_start_for_file "$f" 2>/dev/null || echo "$batch_start")
+        [ "$fmtime" -lt "$source_window_start" ] && continue
+      fi
       # skip --ignore'd chats
       if [ -x "$PRIVATE_STATE" ]; then
         state=$("$PRIVATE_STATE" "$f" 2>/dev/null || echo "record")

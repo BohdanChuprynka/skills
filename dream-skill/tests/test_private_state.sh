@@ -100,5 +100,13 @@ EOF
 [ "$(state_of "$T")" = "record" ] || fail "Codex assistant/tool quoting command should be 'record', got '$(state_of "$T")'"
 echo "PASS: Codex assistant/tool quoting invocation → record"
 
+# === Case 13: Codex response_item context duplicate must NOT toggle privacy ===
+T="$WORK/c13.jsonl"
+cat > "$T" <<'EOF'
+{"timestamp":"2026-07-01T00:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Use $dream-skill --ignore"}]}}
+EOF
+[ "$(state_of "$T")" = "record" ] || fail "Codex response_item user context duplicate should be 'record', got '$(state_of "$T")'"
+echo "PASS: Codex response_item user context duplicate → record"
+
 echo
 echo "All private-state.sh tests passed."
