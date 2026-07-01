@@ -1,0 +1,39 @@
+{
+  "name": "clean-wiki",
+  "version": "0.1.0",
+  "description": "Monthly Obsidian vault cleanup skill with local review UI and approval-gated edits.",
+  "skills": "./skills",
+  "author": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "homepage": "https://github.com/BohdanChuprynka/skills/tree/main/clean-wiki",
+  "repository": "https://github.com/BohdanChuprynka/skills",
+  "license": "MIT",
+  "interface": {
+    "displayName": "Clean Wiki",
+    "shortDescription": "Audit Obsidian vaults with a local approval UI.",
+    "longDescription": "Clean-Wiki scans configured Obsidian vaults through the active agent, queues cleanup findings, opens a local review UI, and applies only explicitly approved changes with an undo log.",
+    "developerName": "Bohdan Chuprynka",
+    "category": "Productivity",
+    "capabilities": [
+      "Local files",
+      "Review",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/BohdanChuprynka/skills/tree/main/clean-wiki",
+    "defaultPrompt": [
+      "Use $clean-wiki to audit my Obsidian vaults."
+    ]
+  },
+  "keywords": [
+    "codex",
+    "claude-code",
+    "skill",
+    "obsidian",
+    "knowledge-base",
+    "personal-wiki",
+    "cleanup",
+    "review-ui"
+  ]
+}

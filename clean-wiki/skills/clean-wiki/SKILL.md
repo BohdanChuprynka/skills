@@ -1,41 +1,59 @@
 ---
 name: clean-wiki
-description: Monthly Obsidian vault cleanup. Claude scans selected vaults with sub-agents (catches stale facts, contradictions, broken links, drift), then opens a local web UI where the user swipes approve/reject on each finding. After review, Claude applies approved changes directly via Edit, recording an undo log. Use when the user says "/clean-wiki", "clean my wiki", "audit my vault", "tidy my Obsidian", "run clean-wiki", or mentions wiki entropy / stale info / redundant pages.
+description: Monthly Obsidian vault cleanup for Claude Code and Codex. The agent scans selected vaults for stale facts, contradictions, broken wikilinks, index drift, orphans, and frontmatter drift; opens a local swipe-review UI; then applies only user-approved changes with an undo log. Use only when the user explicitly says "/clean-wiki", "$clean-wiki", "clean my wiki", "audit my vault", "tidy my Obsidian", or "run clean-wiki".
 ---
 
 # clean-wiki
 
-Monthly Obsidian cleanup. **Claude does the scanning and applying. The user makes decisions in the browser.**
+Monthly Obsidian cleanup. **The agent scans and applies. The user makes decisions in the browser.**
+
+## Runtime surfaces
+
+- Claude Code: invoke as `/clean-wiki`; use Claude sub-agents when available.
+- Codex: invoke explicitly with `$clean-wiki` or select the skill; use Codex subagent tooling when available.
+- If no subagent tool is exposed, scan selected vaults sequentially and tell the user that the scan will be slower.
+- Undo is agent-orchestrated: Claude users ask `/clean-wiki --undo`; Codex users ask `Use $clean-wiki --undo`.
 
 ## The contract
 
 | Side | Owns |
 |--|--|
-| **Claude (this skill)** | Asks which vaults, dispatches sub-agent per vault, merges findings, opens swipe UI, applies approved changes after user finishes, writes undo log. |
+| **Agent (this skill)** | Asks which vaults, dispatches or runs scans, merges findings, opens swipe UI, applies approved changes after user finishes, writes undo log. |
 | **User (in browser)** | Swipes approve / reject / defer on each finding. Clicks Finish when done. |
 
 ## When to invoke
 
 Triggers:
-- User says `/clean-wiki`
-- User says "clean my wiki", "audit my vault", "tidy my Obsidian", or similar
-- User mentions wiki entropy, redundant pages, "too much info accumulated"
+- User explicitly says `/clean-wiki` or `$clean-wiki`
+- User explicitly says "clean my wiki", "audit my vault", "tidy my Obsidian", or "run clean-wiki"
+- User explicitly asks to run a Clean-Wiki audit
 
 Do **not** auto-trigger. Always user-initiated.
 
-## Orchestration flow (what Claude does)
+## Orchestration flow
 
-### Step 1 — Ask which vaults
+### Step 1 - Resolve the skill directory and ask which vaults
 
-Read `config/vault-paths.toml` for the list of configured vaults. Present them via AskUserQuestion (multi-select). Default selection: the previous run's selection if `data/preferences.json` exists, else all.
+Resolve `skill_dir` before reading or writing any config, queue, decision, or undo files. Check these paths in order and use the first directory containing `clean-wiki.sh`:
 
-### Step 2 — Dispatch one sub-agent per selected vault (parallel)
+1. `./skills/clean-wiki`
+2. `.`
+3. `${CODEX_HOME:-$HOME/.codex}/skills/clean-wiki`
+4. `$HOME/.claude/skills/clean-wiki`
 
-For each selected vault, launch a sub-agent with the prompt below. Run them concurrently — separate Agent tool calls in a single message. **Dispatch every scan sub-agent on Sonnet (`model: sonnet`, i.e. Sonnet 4.6 / `claude-sonnet-4-6`).** The audit is high-volume read-and-classify work that Sonnet handles well; the orchestrator (this conversation) still merges findings and applies approved changes on whatever model the session runs.
+Read `$skill_dir/config/vault-paths.toml` for the configured vaults. Ask the user which vaults to scan. Default selection: the previous run's selection if `$skill_dir/data/preferences.json` exists, else all configured vaults.
 
-Sub-agent prompt template (one per vault):
+In Claude Code, use the available user-question UI if present. In Codex, ask a concise normal question and continue after the user answers.
 
-```
+### Step 2 - Scan selected vaults
+
+Preferred path: dispatch one subagent per selected vault and run them in parallel. Use the active platform's subagent tool; do not pin a platform-specific model in the prompt.
+
+Fallback path: if subagents are not available, scan the selected vaults sequentially in this conversation using the same prompt and output schema.
+
+Scan prompt template, one per vault:
+
+```text
 You are auditing a single Obsidian vault for cleanup signals.
 
 VAULT NAME: {vault_name}
@@ -44,7 +62,7 @@ WIKI SUBDIR: {wiki_subdir}
 
 BUILD A TRUTH MODEL FIRST
 Before flagging anything, infer the user's current truth by reading:
-  - Any page named like Bio / About / Profile / Identity (one shot at "who is this person")
+  - Any page named like Bio / About / Profile / Identity
   - Any page named like Current Priorities / Current Focus / Now
   - Pages with `status: active` in frontmatter
   - Pages with `updated:` in the last 60 days
@@ -56,20 +74,20 @@ YOUR JOB
 2. For EACH file, identify cleanup signals:
    - stale_fact:        prose contradicting your truth model, or contradicting another page in this vault
    - broken_wikilink:   [[X]] where X does not exist in this vault (ignore image embeds `![[...]]`)
+   - index_drift:       index.md links to a page that does not exist, or misses an obvious active wiki page
    - orphan:            page with 0 inbound links AND not in index.md
    - frontmatter_drift: missing required field (status, updated, tags) on pages that need them
    - stale_superseded:  status: superseded but no link to replacement
    - stale_active:      status: active but updated > 180 days ago
 
 3. SKIP pages with status: archived, superseded, completed, paused.
-4. DO NOT flag historical statements clearly labeled as past, code examples,
-   aspirational statements, or subjective opinions.
+4. DO NOT flag historical statements clearly labeled as past, code examples, aspirational statements, or subjective opinions.
 5. BE CONSERVATIVE. False positives waste user time.
 
 OUTPUT FORMAT
 Output ONLY a JSON array. One entry per finding. Each entry MUST have:
 {
-  "signal": "stale_fact" | "broken_wikilink" | "orphan" | "frontmatter_drift" | "stale_superseded" | "stale_active",
+  "signal": "stale_fact" | "broken_wikilink" | "index_drift" | "orphan" | "frontmatter_drift" | "stale_superseded" | "stale_active",
   "vault": "{vault_name}",
   "target_file": "wiki/path/relative/to/vault/root.md",
   "target_line": <int or null>,
@@ -84,9 +102,11 @@ If no findings, output [].
 NO preamble. NO markdown code fence. JSON array only.
 ```
 
-### Step 3 — Merge and write `data/cleanup-queue.json`
+### Step 3 - Merge and write `$skill_dir/data/cleanup-queue.json`
 
-Combine all sub-agent outputs. Assign an incrementing `id` like `2026-05-24-001`. Stamp `category` as `"auto"` for `broken_wikilink`/`index_drift`/`frontmatter_drift`, `"judgment"` for everything else. Sort by `confidence` (high → low). Schema:
+Combine all scan outputs. Assign an incrementing `id` like `2026-05-24-001`. Stamp `category` as `"auto"` for `broken_wikilink`/`index_drift`/`frontmatter_drift`, `"judgment"` for everything else. Sort by `confidence` high to low. Preserve deferred or undecided carryover entries from previous runs when present.
+
+Schema:
 
 ```json
 {
@@ -117,63 +137,75 @@ Combine all sub-agent outputs. Assign an incrementing `id` like `2026-05-24-001`
 }
 ```
 
-Save vault selection to `data/preferences.json` for next run's default.
+Save vault selection to `$skill_dir/data/preferences.json` for next run's default.
 
-### Step 4 — Launch the review UI
+### Step 4 - Launch the review UI
+
+Locate the skill directory once in Step 1. Use the already resolved `skill_dir` when launching the UI:
+
+1. `./skills/clean-wiki/clean-wiki.sh`
+2. `./clean-wiki.sh`
+3. `${CODEX_HOME:-$HOME/.codex}/skills/clean-wiki/clean-wiki.sh`
+4. `$HOME/.claude/skills/clean-wiki/clean-wiki.sh`
 
 ```bash
-bash clean-wiki.sh
+bash "$skill_dir/clean-wiki.sh"
 ```
 
-The server starts on port 5173 and auto-opens the browser to the swipe view (no picker — queue is already populated). The opened URL carries a one-time `?token=…` that gates the review API (CSRF/DNS-rebinding defense), so the user must use the auto-opened tab — a bare `http://localhost:5173` will be rejected. Tell the user how many findings are queued.
+The server starts on the configured port, default `5173`, and auto-opens the browser to the swipe view. The opened URL carries a one-time `?token=...` that gates the review API, so the user must use the auto-opened tab. Tell the user how many findings are queued.
 
-### Step 5 — Wait for the user to finish
+### Step 5 - Wait for the user to finish
 
-The user swipes through cards. When done, they click **Finish** in the UI, which calls `/api/shutdown` — the Flask process exits, the background bash command returns. Block on this. Do not interrupt.
+The user swipes through cards. When done, they click **Finish** in the UI, which calls `/api/shutdown`; the Flask process exits and the background shell command returns. Block on this. Do not interrupt.
 
-### Step 6 — Apply approved decisions
+### Step 6 - Apply approved decisions
 
-Read `data/decisions.json` (id → "approve" | "reject" | "defer") and `data/cleanup-queue.json`. For each entry where decision == "approve":
+Read `$skill_dir/data/decisions.json` (id to `"approve"` | `"reject"` | `"defer"`) and `$skill_dir/data/cleanup-queue.json`. For each entry where decision is `"approve"`:
 
 1. Read the target file.
-2. Apply the change using **Edit** for text replacements, **Bash `mv`** for archive moves, **Bash `rm`** for deletes.
-3. Before each change, capture the file's prior content (for undo).
-4. Append to `data/undo-log.jsonl` one record:
+2. Apply the approved change using normal file edits for text changes and `mv` for archive moves.
+3. Before each change, capture the file's prior content for undo.
+4. Append to `$skill_dir/data/undo-log.jsonl` one record:
+
 ```json
 {"batch_id": "20260524T...Z", "ts": "ISO8601", "entry_id": "2026-05-24-001",
  "action": "edit-text", "target_file": "abs/path", "before_content": "...full file before..."}
 ```
 
-After applying, archive the queue + decisions to `data/applied/<batch_id>/`.
+After applying, archive the queue and decisions to `$skill_dir/data/applied/<batch_id>/`.
 
-### Step 7 — Report
+### Step 7 - Report
 
 Print to user:
 - N changes applied
-- M failures (with reasons)
-- Undo command: `/clean-wiki --undo` (or describe manual undo path)
+- M failures with reasons
+- Deferred count
+- Undo request: `/clean-wiki --undo` in Claude Code or `Use $clean-wiki --undo` in Codex
 
-### Step 8 — Stop
+### Step 8 - Stop
 
 Do not approve/reject anything yourself. Do not modify pages beyond what the user approved.
 
-## What "undo" means
+## Undo flow
 
-`/clean-wiki --undo` reads the last batch from `data/undo-log.jsonl`, restores each file from `before_content`, and stamps the entry as undone. No git required.
+When asked to undo, read the most recent unapplied batch from `$skill_dir/data/undo-log.jsonl`, restore each file from `before_content`, and stamp the batch as undone. No git is required.
 
 ## Safety properties
 
-- Claude scans read-only. Mutations only after user approves in the browser.
-- Per-card review. Each finding requires explicit swipe.
-- Undo log per batch — full file content captured before mutation.
-- Vault paths configured in `vault-paths.toml`; sub-agents only touch those.
+- Scans are read-only. Mutations only after user approval in the browser.
+- Per-card review. Each finding requires explicit swipe or batch approval.
+- Undo log per batch: full file content captured before mutation.
+- Vault paths come from `vault-paths.toml`; only touch configured vaults.
+- Never permanently delete files. Archive/move only when explicitly approved.
 
-## Sub-commands
+## Sub-commands and prompts
 
 ```bash
-bash clean-wiki.sh           # launch review server (queue must exist)
-/clean-wiki                  # full flow (Claude orchestrates)
-/clean-wiki --undo           # reverse last batch
+bash "$skill_dir/clean-wiki.sh"      # launch review server; queue must exist
+/clean-wiki                       # Claude Code full flow
+/clean-wiki --undo                # Claude Code undo flow
+Use $clean-wiki to audit my vaults # Codex full flow
+Use $clean-wiki --undo             # Codex undo flow
 ```
 
 ## Configuration
@@ -183,11 +215,12 @@ bash clean-wiki.sh           # launch review server (queue must exist)
 - Per-vault: `path`, `wiki_subdir`, `index_file`, `archive_dir`, `required_frontmatter`
 - UI: `port`, `auto_open_browser`
 
-## Scope (this skill does NOT)
+## Scope
 
-- Create new content (use sync-phone, sync-wiki, dream-skill)
-- Modify content without explicit user approval per finding
-- Push to GitHub
-- Run unattended on a schedule
+This skill does not:
+- Create new content; use sync-phone, sync-wiki, or dream-skill.
+- Modify content without explicit user approval per finding.
+- Push to GitHub.
+- Run unattended on a schedule.
 
 Full design rationale in [DESIGN.md](./DESIGN.md).

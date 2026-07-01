@@ -1,0 +1,7 @@
+interface:
+  display_name: "Clean Wiki"
+  short_description: "Audit Obsidian vaults, review cleanup findings locally, and apply only approved wiki changes."
+  default_prompt: "Use $clean-wiki to audit my Obsidian vaults, launch the local review UI, and apply only the cleanup changes I approve."
+
+policy:
+  allow_implicit_invocation: false

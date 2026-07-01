@@ -10,6 +10,8 @@ skills/clean-wiki/config/vault-paths.toml
 # Usage + apply logs
 skills/clean-wiki/.usage-log.jsonl
 skills/clean-wiki/.apply-log.jsonl
+skills/clean-wiki/logs/
+skills/clean-wiki/*.log
 
 # Reports / exports
 skills/clean-wiki/reports/
