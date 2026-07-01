@@ -19,7 +19,7 @@ Each skill is independent: install one without the others. All MIT licensed. Run
 | Skill | What it does | Install path |
 |---|---|---|
 | [**dream-skill**](./dream-skill) | On-demand batch sync for Claude Code and Codex transcripts. Sweeps recent chats, extracts durable persona/project facts, routes and reconciles them against Obsidian vault pages, queues uncertain/destructive changes for review, writes receipts, and tracks source-specific markers. | `./setup.sh` or Claude plugin |
-| [**clean-wiki**](./clean-wiki) | Monthly Obsidian vault cleanup. Sub-agents scan your vaults for stale facts, contradictions, broken wikilinks, orphans, frontmatter drift. You swipe approve/reject in a local web UI. Claude applies approved changes with an undo log. | Symlink |
+| [**clean-wiki**](./clean-wiki) | Monthly Obsidian vault cleanup. Claude Code or Codex scans your vaults for stale facts, contradictions, broken wikilinks, index drift, orphans, and frontmatter drift. You swipe approve/reject in a local web UI. The agent applies approved changes with an undo log. | `./setup.sh` |
 | [**calendar-plan-skill**](./calendar-plan-skill) | Dual-target (Claude Code + Codex CLI) daily calendar planner. Drafts tomorrow's calendar from your Obsidian vault, Google Calendar, Gmail, and a local context note. Two modes: `/calendar-plan` (draft, confirm, apply) and `/calendar-plan auto` (apply safe blocks directly). Ships with a launchd job for evening auto-runs. | Symlink |
 | [**sync-phone**](./sync-phone) | iPhone voice-dictation pipeline. Drains an iCloud-shared dictation sink, summarizes the raw transcripts, routes bullets into the right Obsidian vault, archives the source, clears the inbox. Pairs with an iPhone Shortcut for the capture side. | Symlink |
 | [**transcribe-audio**](./transcribe-audio) | Audio file to clean transcript to optional LLM summary to optional Obsidian note. OpenAI Whisper backend. Auto-chunks files past the 25 MB API limit, primes the recognizer with custom technical vocabulary, ships three summary styles. Strong on Ukrainian, Russian, English, and code-switching. | Symlink |
@@ -48,9 +48,9 @@ bash setup.sh
 
 Then create or edit the per-skill config file. See [dream-skill/README.md](./dream-skill/README.md) for the specifics.
 
-### Symlink install (for everything else)
+### Symlink install
 
-For clean-wiki, calendar-plan-skill, sync-phone, transcribe-audio:
+For calendar-plan-skill, sync-phone, transcribe-audio:
 
 ```bash
 git clone https://github.com/BohdanChuprynka/skills
@@ -75,7 +75,7 @@ cd <skill-name>
 ./setup.sh
 ```
 
-Currently: `dream-skill`, `voice-check`, `session-continue`.
+Currently: `dream-skill`, `clean-wiki`, `voice-check`, `session-continue`.
 
 ## Skill structure
 
@@ -101,7 +101,7 @@ The double `skills/<skill-name>/` path is the convention Claude Code uses to dis
 | Skill | Claude Code | Codex CLI | macOS | Linux | Windows |
 |---|---|---|---|---|---|
 | dream-skill | ✓ | ✓ | ✓ | ✓ | WSL2 |
-| clean-wiki | ✓ | not yet | ✓ | ✓ | WSL2 |
+| clean-wiki | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | calendar-plan-skill | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | sync-phone | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | transcribe-audio | ✓ | ✓ | ✓ | ✓ | WSL2 |

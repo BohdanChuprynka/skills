@@ -2,7 +2,7 @@
 
 <h1>clean-wiki</h1>
 
-<p><strong>your obsidian vault is rotting. swipe through the findings, claude does the rest.</strong></p>
+<p><strong>your obsidian vault is rotting. swipe through the findings, the agent does the rest.</strong></p>
 
 <p>
   <a href="../LICENSE"><img src="https://img.shields.io/github/license/BohdanChuprynka/skills?style=flat" alt="License"></a>
@@ -42,30 +42,31 @@ You need something that finds the rot and gives you the smallest possible decisi
 
 ## What clean-wiki does
 
-A monthly cleanup ritual driven by Claude Code. You say `/clean-wiki`, and:
+A monthly cleanup ritual driven by Claude Code or Codex. You invoke the skill, and:
 
-1. **Claude asks which vaults to scan** (in chat, multi-select).
-2. **Claude dispatches one sub-agent per vault, in parallel.** Each sub-agent reads every `.md` file in its vault, builds a model of your current truth from your bio / active pages / recently-updated pages, and returns JSON findings: stale facts, contradictions, broken wikilinks, orphans, frontmatter drift, stale active markers.
+1. **The agent asks which vaults to scan** (in chat).
+2. **The agent dispatches one subagent per vault when available.** Each scan reads every `.md` file in its vault, builds a model of your current truth from your bio / active pages / recently-updated pages, and returns JSON findings: stale facts, contradictions, broken wikilinks, index drift, orphans, frontmatter drift, stale active markers.
 3. **Findings land in a queue** (`data/cleanup-queue.json`) and a local web UI opens at `http://localhost:5173`.
 4. **You swipe through each finding** — approve, reject, defer. Pre-flight batch for mechanical fixes (broken links etc.), per-card swipe for judgment calls (stale facts, orphans).
-5. **You click Finish.** The browser tells the server to exit; Claude reads your decisions and applies each approved change via its Edit tool, recording an undo log (`data/undo-log.jsonl`).
+5. **You click Finish.** The browser tells the server to exit; the agent reads your decisions and applies each approved change, recording an undo log (`data/undo-log.jsonl`).
 
-Claude does the scanning and applying. You do the deciding. Nothing auto-applies without explicit per-finding approval.
+The agent does the scanning and applying. You do the deciding. Nothing auto-applies without explicit per-finding approval.
 
 ## How it works
 
 ```
                                        ┌────────────────────┐
-  /clean-wiki                          │  config/           │
+  /clean-wiki or $clean-wiki            │  config/           │
   user invokes ─────────────────────►  │  vault-paths.toml  │
                                        └─────────┬──────────┘
                                                  │
                   ┌──────────────────────────────┘
-                  │  Claude asks: which vaults?
+                  │  agent asks: which vaults?
                   ▼
         ┌──────────────────────┐
-        │  Sub-agents (1 per   │     in parallel — each reads
-        │  selected vault)     │     its whole vault, returns
+        │  Subagents when      │     in parallel when available;
+        │  available           │     each reads its vault and
+        │                      │     returns JSON findings
         │                      │     JSON findings
         └──────────┬───────────┘
                    │
@@ -87,13 +88,13 @@ Claude does the scanning and applying. You do the deciding. Nothing auto-applies
                    │ Finish → /api/shutdown → server exits
                    ▼
         ┌──────────────────────┐
-        │  Claude applies      │     Edit tool per approved
+        │  agent applies       │     file edit per approved
         │  decisions + writes  │     change; undo-log.jsonl
         │  undo-log.jsonl      │     captures before-state
         └──────────────────────┘
 ```
 
-The only Python in scope is `serve.py` — a thin review server. Scanning and applying live entirely inside Claude Code. The vaults never leave your machine.
+The only Python runtime component is `serve.py` — a thin review server. Scanning and applying live in the active Claude Code or Codex agent.
 
 ## Screenshots
 
@@ -115,7 +116,7 @@ Place screenshots in `docs/screenshots/` and uncomment the references below. Sug
 
 ## Detection signals
 
-Each sub-agent looks for these signals in its assigned vault:
+Each scan looks for these signals in its assigned vault:
 
 | Signal | Category | What it catches |
 |--|--|--|
@@ -132,33 +133,45 @@ Auto signals get one-click batch approval (with expandable spot-check before con
 ## Prerequisites
 
 - **Python 3.11+** (uses stdlib `tomllib`)
-- **Flask** (`pip install -r requirements.txt`)
-- **Claude Code** — the skill is invoked as `/clean-wiki` from inside Claude Code. Install via [docs.claude.com/claude-code](https://docs.claude.com/claude-code).
+- **Flask** (installed by `./setup.sh` into the skill venv)
+- **Claude Code or Codex** — Claude users invoke `/clean-wiki`; Codex users invoke `$clean-wiki` or select the skill.
 - **Obsidian vaults** organized into named subdirectories under a common root
 
 ## Install
 
+Recommended:
+
 ```bash
 git clone https://github.com/BohdanChuprynka/skills
-cd skills/clean-wiki/skills/clean-wiki
-cp config/vault-paths.example.toml config/vault-paths.toml
-# edit config/vault-paths.toml with your real vault paths
-pip install -r requirements.txt
+cd skills/clean-wiki
+./setup.sh
 ```
 
-Symlink so Claude Code can find the skill:
+`setup.sh` is idempotent. It:
 
-```bash
-ln -s "$(pwd)" ~/.claude/skills/clean-wiki
-```
+- creates `skills/clean-wiki/.venv` and installs Flask there;
+- creates `skills/clean-wiki/config/vault-paths.toml` if missing;
+- symlinks the skill into `~/.claude/skills/clean-wiki` when Claude Code is installed;
+- copies a sanitized skill into `~/.codex/skills/clean-wiki` for Codex local use;
+- creates a Codex-local config and venv at `~/.codex/skills/clean-wiki`.
 
-Then, inside Claude Code:
+Edit `skills/clean-wiki/config/vault-paths.toml` before first use if it still contains `/ABSOLUTE/PATH/` placeholders.
+
+### Claude Code
 
 ```
 /clean-wiki
 ```
 
-The review UI alone can be run without Claude (`bash clean-wiki.sh`), but it only displays — you need Claude to produce the queue and apply the decisions.
+### Codex
+
+You must restart Codex after setup because Codex scans skills at startup. Then ask:
+
+```
+Use $clean-wiki to audit my vaults.
+```
+
+The review UI alone can be run without an agent by launching the installed or repo-local `clean-wiki.sh`, but it only displays the current queue. You need Claude Code or Codex to produce the queue and apply approved decisions.
 
 ## Configuration
 
@@ -182,18 +195,21 @@ auto_open_browser = true
 
 ## Safety properties
 
-- **Read-only scan.** Sub-agents read the vaults; they never write.
+- **Read-only scan.** The scan phase reads the vaults; it never writes.
 - **No auto-decisions.** Every applied change requires either per-card swipe approval or batch-approve confirmation in pre-flight.
-- **Undo log.** `data/undo-log.jsonl` records the file's prior content per change. `/clean-wiki --undo` in Claude reverses the last batch.
+- **Undo log.** `data/undo-log.jsonl` records the file's prior content per change. `/clean-wiki --undo` in Claude Code or `Use $clean-wiki --undo` in Codex reverses the last batch.
 - **Resumable.** Closing the browser mid-review preserves progress. Reopen and continue from the next undecided entry.
 - **Carryover.** "Finish later" defers undecided entries to the next month's run.
 
 ## Privacy
 
-Vault content never leaves your machine. The `.gitignore` excludes:
+Runtime files, config, queues, decisions, undo logs, and the review UI stay local. The active Claude Code or Codex model provider may receive vault text in model context while scanning, because the agent has to read the vault to classify cleanup findings. Do not run this skill on vaults that should not be read by your active agent provider.
+
+The `.gitignore` excludes:
 
 - `skills/clean-wiki/data/` — queue, decisions, undo log (all contain vault content)
 - `skills/clean-wiki/config/vault-paths.toml` — real absolute paths
+- `skills/clean-wiki/.venv/` — local Python environment
 - All runtime logs
 
 Only sanitized example config + code + docs get pushed.
