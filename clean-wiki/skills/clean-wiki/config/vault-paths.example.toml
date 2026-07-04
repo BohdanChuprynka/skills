@@ -27,6 +27,10 @@ required_frontmatter = ["tags", "created", "updated"]
 
 # Add more [[vaults]] blocks as needed. Comment out vaults you don't want scanned.
 
+# Optional. If omitted, reports default to `clean-reports/` beside the configured
+# vault roots, e.g. `/ABSOLUTE/PATH/TO/Obsidian/clean-reports`.
+# reports_dir = "/ABSOLUTE/PATH/TO/Obsidian/clean-reports"
+
 # [[vaults]]
 # name = "gym-sprint"
 # path = "/ABSOLUTE/PATH/TO/Obsidian/gym-sprint"

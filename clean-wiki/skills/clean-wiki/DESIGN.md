@@ -1,6 +1,6 @@
 # clean-wiki — Design Document
 
-> **Historical v1 architecture.** This document describes the original design where Python scripts (`scan.py`, `semantic_scan.py`, `apply.py`) did the scanning and applying. That code was removed; the current implementation has Claude Code orchestrate sub-agents for scanning and apply changes directly via the Edit tool. The only Python that remains is `serve.py`, a thin review server. **See [SKILL.md](./SKILL.md) for the current architecture.** Kept here for the design rationale (signal taxonomy, queue schema, undo log) which still applies.
+> **Historical v1 architecture.** This document describes the original design where Python scripts (`scan.py`, `semantic_scan.py`, `apply.py`) did the scanning and applying. That code was removed; the current implementation has Claude Code or Codex orchestrate sub-agents for scanning and apply changes directly. The remaining Python helpers are `serve.py` (thin review server) and `write_report.py` (deterministic per-run report renderer). **See [SKILL.md](./SKILL.md) for the current architecture.** Kept here for the design rationale (signal taxonomy, queue schema, undo log, run reports) which still applies.
 
 **Status:** v1 spec (historical)
 **Scope:** Phase 1 (mechanical audit) + Phase 3 (Tinder-swipe review UI) shipping today
@@ -248,7 +248,7 @@ User can stop the review session at any point via a **"Finish later"** button (t
 
 User decides at the card level when to keep going or stop. No global filter.
 
-## Apply pipeline (`apply.py`)
+## Apply pipeline (current agent-orchestrated flow)
 
 For each approved decision:
 1. Read current state of target file (full content + frontmatter)
@@ -257,6 +257,21 @@ For each approved decision:
 4. Write after-state log line
 
 Atomic per-action. If one fails, stop and report — earlier successful actions stay applied; user can undo all with `--undo` (reverses the whole batch).
+
+After apply, the active agent archives the batch under `data/applied/<batch_id>/` and calls:
+
+```bash
+python3 scripts/write_report.py \
+  --applied-dir data/applied/<batch_id> \
+  --config config/vault-paths.toml
+```
+
+The helper writes a dream-style local receipt:
+
+- `<reports_dir>/<YYYY-MM-DD-HHMMSS>.md` — full summary, applied changes, manual leftovers, no-ops, rejections, defers, failures; includes batch time so same-day runs do not overwrite each other
+- `<reports_dir>/index.md` — idempotent one-line per-run index
+
+`reports_dir` is optional config. If absent, the helper writes to `clean-reports/` beside the configured vault roots.
 
 **Rollback log entry:**
 
