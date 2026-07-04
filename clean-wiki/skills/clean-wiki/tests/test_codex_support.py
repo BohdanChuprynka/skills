@@ -215,6 +215,9 @@ def test_skill_prompt_documents_claude_and_codex_orchestration():
     assert "`$skill_dir/data/cleanup-queue.json`" in text
     assert "`$skill_dir/data/decisions.json`" in text
     assert "`$skill_dir/data/undo-log.jsonl`" in text
+    assert "scripts/write_report.py" in text
+    assert "clean-reports/" in text
+    assert "Report path" in text
     assert "Locate the skill directory" in text
     assert "skills/clean-wiki/clean-wiki.sh" in text
     assert "${CODEX_HOME:-$HOME/.codex}/skills/clean-wiki/clean-wiki.sh" in text
@@ -228,6 +231,7 @@ def test_gitignore_excludes_generic_runtime_logs():
 
     assert "skills/clean-wiki/logs/" in text
     assert "skills/clean-wiki/*.log" in text
+    assert "skills/clean-wiki/clean-reports/" in text
 
 
 def test_readme_documents_codex_install_and_usage():
@@ -236,4 +240,13 @@ def test_readme_documents_codex_install_and_usage():
     assert "./setup.sh" in text
     assert "~/.codex/skills/clean-wiki" in text
     assert "$clean-wiki" in text
+    assert "clean-reports/YYYY-MM-DD-HHMMSS.md" in text
+    assert "reports_dir" in text
     assert "restart Codex" in text
+
+
+def test_example_config_documents_reports_dir():
+    text = (INNER_DIR / "config" / "vault-paths.example.toml").read_text()
+
+    assert "reports_dir" in text
+    assert "clean-reports" in text

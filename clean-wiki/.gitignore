@@ -15,6 +15,7 @@ skills/clean-wiki/*.log
 
 # Reports / exports
 skills/clean-wiki/reports/
+skills/clean-wiki/clean-reports/
 
 # Python
 __pycache__/

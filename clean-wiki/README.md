@@ -48,7 +48,7 @@ A monthly cleanup ritual driven by Claude Code or Codex. You invoke the skill, a
 2. **The agent dispatches one subagent per vault when available.** Each scan reads every `.md` file in its vault, builds a model of your current truth from your bio / active pages / recently-updated pages, and returns JSON findings: stale facts, contradictions, broken wikilinks, index drift, orphans, frontmatter drift, stale active markers.
 3. **Findings land in a queue** (`data/cleanup-queue.json`) and a local web UI opens at `http://localhost:5173`.
 4. **You swipe through each finding** — approve, reject, defer. Pre-flight batch for mechanical fixes (broken links etc.), per-card swipe for judgment calls (stale facts, orphans).
-5. **You click Finish.** The browser tells the server to exit; the agent reads your decisions and applies each approved change, recording an undo log (`data/undo-log.jsonl`).
+5. **You click Finish.** The browser tells the server to exit; the agent reads your decisions and applies each approved change, recording an undo log (`data/undo-log.jsonl`) and writing a dated run report.
 
 The agent does the scanning and applying. You do the deciding. Nothing auto-applies without explicit per-finding approval.
 
@@ -90,11 +90,19 @@ The agent does the scanning and applying. You do the deciding. Nothing auto-appl
         ┌──────────────────────┐
         │  agent applies       │     file edit per approved
         │  decisions + writes  │     change; undo-log.jsonl
-        │  undo-log.jsonl      │     captures before-state
+        │  undo-log.jsonl      │     captures before-state;
+        │  + clean report      │     clean-reports/YYYY-MM-DD-HHMMSS.md
         └──────────────────────┘
 ```
 
-The only Python runtime component is `serve.py` — a thin review server. Scanning and applying live in the active Claude Code or Codex agent.
+The Python runtime helpers are intentionally small: `serve.py` runs the local review server, and `scripts/write_report.py` renders the per-run Markdown report. Scanning and applying live in the active Claude Code or Codex agent.
+
+Each completed apply batch also gets a dream-style report via `scripts/write_report.py`:
+
+- `clean-reports/YYYY-MM-DD-HHMMSS.md` — full summary, applied changes, manual leftovers, no-ops, rejects, defers, failures
+- `clean-reports/index.md` — one-line per run index
+
+Set top-level `reports_dir` in `config/vault-paths.toml` to override the location. If omitted, reports default to `clean-reports/` beside the configured vault roots.
 
 ## Screenshots
 
@@ -178,6 +186,9 @@ The review UI alone can be run without an agent by launching the installed or re
 `config/vault-paths.toml` (gitignored — template in `vault-paths.example.toml`):
 
 ```toml
+# optional; defaults to clean-reports/ beside the configured vault roots
+reports_dir = "/Users/you/Documents/Obsidian/clean-reports"
+
 [[vaults]]
 name = "notes"
 path = "/Users/you/Documents/Obsidian/notes"
@@ -198,6 +209,7 @@ auto_open_browser = true
 - **Read-only scan.** The scan phase reads the vaults; it never writes.
 - **No auto-decisions.** Every applied change requires either per-card swipe approval or batch-approve confirmation in pre-flight.
 - **Undo log.** `data/undo-log.jsonl` records the file's prior content per change. `/clean-wiki --undo` in Claude Code or `Use $clean-wiki --undo` in Codex reverses the last batch.
+- **Per-run reports.** Every completed apply batch writes a local Markdown report under `clean-reports/` or configured `reports_dir`.
 - **Resumable.** Closing the browser mid-review preserves progress. Reopen and continue from the next undecided entry.
 - **Carryover.** "Finish later" defers undecided entries to the next month's run.
 

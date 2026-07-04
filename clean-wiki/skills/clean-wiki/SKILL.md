@@ -18,7 +18,7 @@ Monthly Obsidian cleanup. **The agent scans and applies. The user makes decision
 
 | Side | Owns |
 |--|--|
-| **Agent (this skill)** | Asks which vaults, dispatches or runs scans, merges findings, opens swipe UI, applies approved changes after user finishes, writes undo log. |
+| **Agent (this skill)** | Asks which vaults, dispatches or runs scans, merges findings, opens swipe UI, applies approved changes after user finishes, writes undo log, writes a per-run clean report. |
 | **User (in browser)** | Swipes approve / reject / defer on each finding. Clicks Finish when done. |
 
 ## When to invoke
@@ -172,7 +172,24 @@ Read `$skill_dir/data/decisions.json` (id to `"approve"` | `"reject"` | `"defer"
  "action": "edit-text", "target_file": "abs/path", "before_content": "...full file before..."}
 ```
 
-After applying, archive the queue and decisions to `$skill_dir/data/applied/<batch_id>/`.
+After applying, archive the queue, decisions, scan outputs, and an `apply-summary.json` to `$skill_dir/data/applied/<batch_id>/`.
+
+### Step 6b - Write clean report
+
+Write a dream-style Markdown report for each completed apply batch. Use the bundled helper so report paths and index updates stay deterministic:
+
+```bash
+python3 "$skill_dir/scripts/write_report.py" \
+  --applied-dir "$skill_dir/data/applied/<batch_id>" \
+  --config "$skill_dir/config/vault-paths.toml"
+```
+
+The helper writes:
+
+- `<reports_dir>/<YYYY-MM-DD-HHMMSS>.md` — full run report; includes the batch time so multiple runs on the same day never overwrite each other
+- `<reports_dir>/index.md` — idempotent one-line run index
+
+`reports_dir` is read from `config/vault-paths.toml` when present. If it is absent, the helper defaults to `clean-reports/` beside the configured vault roots, e.g. the same Obsidian root that contains `me/`, `projects/`, and `dream-reports/`.
 
 ### Step 7 - Report
 
@@ -180,6 +197,7 @@ Print to user:
 - N changes applied
 - M failures with reasons
 - Deferred count
+- Report path
 - Undo request: `/clean-wiki --undo` in Claude Code or `Use $clean-wiki --undo` in Codex
 
 ### Step 8 - Stop
@@ -213,6 +231,7 @@ Use $clean-wiki --undo             # Codex undo flow
 `config/vault-paths.toml` (gitignored real version, template at `vault-paths.example.toml`):
 
 - Per-vault: `path`, `wiki_subdir`, `index_file`, `archive_dir`, `required_frontmatter`
+- Reports: optional top-level `reports_dir`; defaults to `clean-reports/` beside the configured vault roots
 - UI: `port`, `auto_open_browser`
 
 ## Scope
