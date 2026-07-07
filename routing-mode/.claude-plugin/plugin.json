@@ -1,0 +1,24 @@
+{
+  "name": "routing-mode",
+  "description": "Cut Claude Code coding costs by routing planning to Claude and code execution to the Codex CLI (gpt-5.5). Claude plans and reviews, a zero-context agent audits the plan, Codex implements, Claude verifies the diff.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "homepage": "https://github.com/BohdanChuprynka/skills/tree/main/routing-mode",
+  "repository": "https://github.com/BohdanChuprynka/skills",
+  "license": "MIT",
+  "skills": "./skills",
+  "keywords": [
+    "claude-code",
+    "skill",
+    "codex",
+    "model-routing",
+    "cost-optimization",
+    "planning",
+    "execution",
+    "gpt-5.5",
+    "delegation"
+  ]
+}
