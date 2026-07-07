@@ -17,6 +17,17 @@
         "name": "Bohdan Chuprynka",
         "url": "https://github.com/BohdanChuprynka"
       }
+    },
+    {
+      "name": "routing-mode",
+      "description": "Route planning to Claude and code execution to the Codex CLI (gpt-5.5) to cut coding costs. The plan is reviewed by a zero-context agent, executed by Codex, and verified by Claude.",
+      "version": "0.1.0",
+      "source": "./routing-mode",
+      "category": "productivity",
+      "author": {
+        "name": "Bohdan Chuprynka",
+        "url": "https://github.com/BohdanChuprynka"
+      }
     }
   ]
 }
