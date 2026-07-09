@@ -21,6 +21,7 @@ Each skill is independent: install one without the others. All MIT licensed. Run
 | [**dream-skill**](./dream-skill) | On-demand batch sync for Claude Code and Codex transcripts. Sweeps recent chats, extracts durable persona/project facts, routes and reconciles them against Obsidian vault pages, queues uncertain/destructive changes for review, writes receipts, and tracks source-specific markers. | `./setup.sh` or Claude plugin |
 | [**clean-wiki**](./clean-wiki) | Monthly Obsidian vault cleanup. Claude Code or Codex scans your vaults for stale facts, contradictions, broken wikilinks, index drift, orphans, and frontmatter drift. You swipe approve/reject in a local web UI. The agent applies approved changes with an undo log. | `./setup.sh` |
 | [**routing-mode**](./routing-mode) | Claude Code workflow that routes planning and review to Claude, gates the plan through a zero-context audit, delegates implementation to the Codex CLI, then brings the diff back for verification. | Claude plugin or symlink |
+| [**claude-relay**](./claude-relay) | Claude Code-only model-routing discipline: a user-started Opus coordinator delegates bounded phases to Claude Code subagents and verifies every handoff. | Symlink |
 | [**gpt-5-6-relay**](./gpt-5-6-relay) | Codex-only model-routing discipline: a user-started GPT-5.6 Sol coordinator delegates bounded phases to Codex subagents and verifies every handoff. | Symlink |
 | [**calendar-plan-skill**](./calendar-plan-skill) | Dual-target (Claude Code + Codex CLI) daily calendar planner. Drafts tomorrow's calendar from your Obsidian vault, Google Calendar, Gmail, and a local context note. Two modes: `/calendar-plan` (draft, confirm, apply) and `/calendar-plan auto` (apply safe blocks directly). Ships with a launchd job for evening auto-runs. | Symlink |
 | [**sync-phone**](./sync-phone) | iPhone voice-dictation pipeline. Drains an iCloud-shared dictation sink, summarizes the raw transcripts, routes bullets into the right Obsidian vault, archives the source, clears the inbox. Pairs with an iPhone Shortcut for the capture side. | Symlink |
@@ -75,6 +76,13 @@ ln -s "$(pwd)/gpt-5-6-relay/skills/gpt-5-6-relay" \
   "${CODEX_HOME:-$HOME/.codex}/skills/gpt-5-6-relay"
 ```
 
+For the Claude Code-only `claude-relay`:
+
+```bash
+ln -s "$(pwd)/claude-relay/skills/claude-relay" \
+  "$HOME/.claude/skills/claude-relay"
+```
+
 Each skill's README documents its own prerequisites (jq, Python, MCP servers, OAuth tokens, etc.) and config files.
 
 ### Setup-script install
@@ -114,6 +122,7 @@ The double `skills/<skill-name>/` path is the convention Claude Code uses to dis
 | dream-skill | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | clean-wiki | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | routing-mode | ✓ | Uses Codex CLI | ✓ | ✓ | WSL2 |
+| claude-relay | ✓ | – | ✓ | ✓ | WSL2 |
 | gpt-5-6-relay | – | ✓ | ✓ | ✓ | WSL2 |
 | calendar-plan-skill | ✓ | ✓ | ✓ | ✓ | WSL2 |
 | sync-phone | ✓ | ✓ | ✓ | ✓ | WSL2 |
