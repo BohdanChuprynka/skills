@@ -1,0 +1,4 @@
+interface:
+  display_name: "GPT-5.6 Relay"
+  short_description: "Route Codex work across reasoning tiers"
+  default_prompt: "Use $gpt-5-6-relay to route this task through Codex subagents."
