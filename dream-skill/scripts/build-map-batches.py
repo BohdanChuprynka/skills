@@ -218,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
             bid = next_id()
             unit_path = workdir / f"{bid}.txt"
             unit_path.write_text(chunk_text, encoding="utf-8")
+            unit_path.chmod(0o600)
             descriptors.append({
                 "batch_id": bid,
                 "kind": "chunk",
@@ -239,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             parts.append(separator(it["raw"], it["source_date"]) + it["text"])
             members.append({"source_chat": it["raw"], "source_date": it["source_date"]})
         unit_path.write_text("\n".join(parts), encoding="utf-8")
+        unit_path.chmod(0o600)
         descriptors.append({
             "batch_id": bid,
             "kind": "bundle",

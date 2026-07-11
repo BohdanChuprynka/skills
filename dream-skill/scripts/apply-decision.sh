@@ -9,9 +9,8 @@
 # Action dispatch table:
 #   new        → vault-writer --mode append (unless needs_review:true → queue only)
 #   duplicate  → skip (no write, no queue)
-#   supersede  → vault-writer --mode replace + queue (destructive bucket)
-#   contradict → vault-writer --mode stale (old line struck through) + queue (destructive)
-#                new content is NOT written to vault for contradict — queued only
+#   any needs_review:true decision → durable queue + sidecar only; no vault mutation
+#   supersede/contradict after approval → exact-line replacement
 #
 # Bucket mapping (derived from candidate_confidence, never hardcoded by action):
 #   supersede/contradict → destructive
@@ -112,44 +111,60 @@ _write_sidecar() {
   [ "$DRY_RUN" = "1" ]   && return 0
   local sdir="${DREAM_HOME:-$HOME/.claude/dream-skill}/queue/sidecars"
   mkdir -p "$sdir"
+  chmod 700 "$sdir" 2>/dev/null || true
+  local target_display="${VAULT}/${page}#${section}"
+  local tmp="$sdir/.${CANDIDATE_ID}.tmp.$$"
   jq --arg cid "$CANDIDATE_ID" --arg vroot "$VAULT" \
-     '. + {candidate_id: $cid, vault_root: $vroot}' \
-     "$DECISION" > "$sdir/$CANDIDATE_ID.json"
+     --arg title "$content" --arg target_display "$target_display" \
+     '. + {candidate_id: $cid, vault_root: $vroot, title: $title, target_display: $target_display}' \
+     "$DECISION" > "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$sdir/$CANDIDATE_ID.json"
 }
+
+_queue_for_review() {
+  local bucket="$1"
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "apply-decision [dry-run]: would queue action=$action bucket=$bucket title='$content' target=${VAULT}/${page}#${section}"
+  else
+    _write_sidecar
+    "$QUEUE_SH" append \
+      --bucket "$bucket" \
+      --title "$content" \
+      --evidence "$rationale" \
+      --confidence "$candidate_confidence" \
+      --id "${CANDIDATE_ID:-}" \
+      --target "${VAULT}/${page}#${section}"
+  fi
+  _emit_fact "$content" "$old_content" "$action" "queued" "$bucket"
+}
+
+# Review is a real write gate. No action carrying needs_review=true may mutate a
+# vault before the user approves its sidecar.
+if [ "$needs_review" = "true" ] && [ "$action" != "duplicate" ]; then
+  case "$action" in
+    supersede|contradict) review_bucket="destructive" ;;
+    new) review_bucket=$(_bucket_for_confidence "$candidate_confidence") ;;
+    *) die "unknown review action: $action" ;;
+  esac
+  _queue_for_review "$review_bucket"
+  exit 0
+fi
 
 # --- Dispatch ---
 case "$action" in
 
   new)
-    if [ "$needs_review" = "true" ]; then
-      # Low/medium confidence fact: queue only, do NOT write to vault
-      bucket=$(_bucket_for_confidence "$candidate_confidence")
-      if [ "$DRY_RUN" = "1" ]; then
-        echo "apply-decision [dry-run]: would queue action=new bucket=$bucket title='$content' target=${VAULT}/${page}#${section}"
-      else
-        _write_sidecar
-        "$QUEUE_SH" append \
-          --bucket "$bucket" \
-          --title  "$content" \
-          --evidence "$rationale" \
-          --confidence "$candidate_confidence" \
-          --id     "${CANDIDATE_ID:-}" \
-          --target "${VAULT}/${page}#${section}"
-      fi
-      _emit_fact "$content" "" "new" "queued" "$bucket"
-    else
-      # High-confidence new fact: append directly to vault
-      "$WRITER" \
-        --vault    "$VAULT" \
-        --page     "$page" \
-        --section  "$section" \
-        --content  "$content" \
-        --mode     append \
-        --undo-log "$UNDO_LOG" \
-        --no-index-update \
-        $(_dry_flag)
-      _emit_fact "$content" "" "new" "written" ""
-    fi
+    "$WRITER" \
+      --vault    "$VAULT" \
+      --page     "$page" \
+      --section  "$section" \
+      --content  "$content" \
+      --mode     append \
+      --undo-log "$UNDO_LOG" \
+      --no-index-update \
+      $(_dry_flag)
+    _emit_fact "$content" "" "new" "written" ""
     ;;
 
   duplicate)
@@ -158,7 +173,7 @@ case "$action" in
     ;;
 
   supersede)
-    # Destructive: replace old line with new content, then queue for review
+    # This branch is reachable only after review approval forced needs_review=false.
     "$WRITER" \
       --vault       "$VAULT" \
       --page        "$page" \
@@ -169,53 +184,23 @@ case "$action" in
       --undo-log    "$UNDO_LOG" \
       --no-index-update \
       $(_dry_flag)
-    if [ "$DRY_RUN" = "1" ]; then
-      echo "apply-decision [dry-run]: would queue action=supersede bucket=destructive title='$content' target=${VAULT}/${page}#${section}"
-    else
-      _write_sidecar
-      "$QUEUE_SH" append \
-        --bucket destructive \
-        --title  "$content" \
-        --evidence "$rationale" \
-        --confidence "$candidate_confidence" \
-        --id     "${CANDIDATE_ID:-}" \
-        --target "${VAULT}/${page}#${section}"
-    fi
-    _emit_fact "$content" "$old_content" "supersede" "written" "destructive"
+    _emit_fact "$content" "$old_content" "supersede" "written" ""
     ;;
 
   contradict)
-    # Mark old line stale (struck through); queue the NEW content for human review.
-    # vault-writer --mode stale requires --content even though it only modifies the
-    # old line — we pass old_content as a harmless dummy to satisfy the interface.
+    # Approval resolves the ambiguity in favor of the proposed content. Undo
+    # preserves the previous exact line, so the page stays concise.
     "$WRITER" \
       --vault       "$VAULT" \
       --page        "$page" \
       --section     "$section" \
-      --content     "$old_content" \
-      --mode        stale \
+      --content     "$content" \
+      --mode        replace \
       --old-content "$old_content" \
       --undo-log    "$UNDO_LOG" \
       --no-index-update \
       $(_dry_flag)
-    # Queue the new contradicting content for human review (do NOT write to vault)
-    if [ "$DRY_RUN" = "1" ]; then
-      echo "apply-decision [dry-run]: would queue action=contradict bucket=destructive title='$content' target=${VAULT}/${page}#${section}"
-    else
-      _write_sidecar
-      "$QUEUE_SH" append \
-        --bucket destructive \
-        --title  "$content" \
-        --evidence "$rationale" \
-        --confidence "$candidate_confidence" \
-        --id     "${CANDIDATE_ID:-}" \
-        --target "${VAULT}/${page}#${section}"
-    fi
-    # Emit TWO run-summary facts:
-    # 1. The struck old line → receipt "Superseded" section
-    _emit_fact "$old_content" "" "contradict" "written" ""
-    # 2. The queued new content → receipt "Queued" section
-    _emit_fact "$content" "$old_content" "contradict" "queued" "destructive"
+    _emit_fact "$content" "$old_content" "contradict" "written" ""
     ;;
 
   *)

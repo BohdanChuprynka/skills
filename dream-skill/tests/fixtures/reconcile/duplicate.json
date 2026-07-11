@@ -7,7 +7,8 @@
     "evidence": "\"yeah I use Python day to day\"",
     "source_chat": "session-abc124",
     "source_date": "2026-06-01",
-    "suggested_section": "Languages"
+    "suggested_section": "Languages",
+    "memory_tier": "stable"
   },
   "target_page_snapshot": "# Skills\n\n## Languages\n\n- knows Python\n- TypeScript (proficient)\n",
   "run_date": "2026-06-03",

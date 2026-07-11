@@ -11,21 +11,28 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$SCRIPT_DIR/.."
 fail() { echo "FAIL: $*"; exit 1; }
 
-SKILL="$ROOT/skills/dream-skill/SKILL.md"
-README="$ROOT/README.md"
+if [ -f "$ROOT/skills/dream-skill/SKILL.md" ]; then
+  SKILL="$ROOT/skills/dream-skill/SKILL.md"
+  DOCS=("$SKILL" "$ROOT/README.md")
+else
+  SKILL="$ROOT/SKILL.md"
+  DOCS=("$SKILL")
+fi
 
 # 1. No serialized command form in user-facing docs (the self-trigger invariant).
-for f in "$SKILL" "$README"; do
+for f in "${DOCS[@]}"; do
   [ -f "$f" ] || fail "missing $f"
   grep -qE '<command-args>[^<]*--ignore' "$f" \
     && fail "$f contains serialized <command-args>…--ignore (self-trigger risk); use prose '/dream-skill --ignore'"
 done
 echo "PASS: docs contain no serialized <command-args>…--ignore form"
 
-# 2. Feature documented (prose) in SKILL.md + README.
+# 2. Feature documented in SKILL.md and, in the source checkout, README.
 grep -q -- '--ignore'   "$SKILL"  || fail "SKILL.md does not document --ignore"
 grep -q -- '--unignore' "$SKILL"  || fail "SKILL.md does not document --unignore"
-grep -q -- '--ignore'   "$README" || fail "README does not document --ignore"
+if [ "${#DOCS[@]}" -gt 1 ]; then
+  grep -q -- '--ignore' "${DOCS[1]}" || fail "README does not document --ignore"
+fi
 echo "PASS: --ignore/--unignore documented in SKILL.md and README"
 
 # 3. description: frontmatter advertises the opt-out (zero-config discoverability —

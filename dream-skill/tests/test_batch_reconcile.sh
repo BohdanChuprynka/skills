@@ -61,32 +61,32 @@ cat > "$ROUTED" <<'JSON'
 [
   {
     "candidate_id": "c000001",
-    "candidate": {"content":"lives in Munich","confidence":"high","source_chat":"a.jsonl","source_date":"2026-06-01","suggested_section":"Bio"},
+    "candidate": {"content":"lives in Munich","confidence":"high","source_chat":"a.jsonl","source_date":"2026-06-01","suggested_section":"Bio","memory_tier":"stable"},
     "route": {"status":"routed","vault":"me","page":"wiki/bio.md","section":"Bio","routing_confidence":"high"}
   },
   {
     "candidate_id": "c000002",
-    "candidate": {"content":"originally from Kyiv","confidence":"high","source_chat":"b.jsonl","source_date":"2026-06-02","suggested_section":"Bio"},
+    "candidate": {"content":"originally from Kyiv","confidence":"high","source_chat":"b.jsonl","source_date":"2026-06-02","suggested_section":"Bio","memory_tier":"stable"},
     "route": {"status":"routed","vault":"me","page":"wiki/bio.md","section":"Bio","routing_confidence":"high"}
   },
   {
     "candidate_id": "c000003",
-    "candidate": {"content":"uses PyTorch Lightning","confidence":"medium","source_chat":"c.jsonl","source_date":"2026-06-03","suggested_section":"Deep Learning"},
+    "candidate": {"content":"uses PyTorch Lightning","confidence":"medium","source_chat":"c.jsonl","source_date":"2026-06-03","suggested_section":"Deep Learning","memory_tier":"stable"},
     "route": {"status":"routed","vault":"me","page":"wiki/skills/deep-learning.md","section":"Deep Learning","routing_confidence":"high"}
   },
   {
     "candidate_id": "c000006",
-    "candidate": {"content":"uses Lightning callbacks","confidence":"high","source_chat":"f.jsonl","source_date":"2026-06-04","suggested_section":"Frameworks"},
+    "candidate": {"content":"uses Lightning callbacks","confidence":"high","source_chat":"f.jsonl","source_date":"2026-06-04","suggested_section":"Frameworks","memory_tier":"stable"},
     "route": {"status":"routed","vault":"me","page":"wiki/skills/deep-learning.md","section":"Frameworks","routing_confidence":"high"}
   },
   {
     "candidate_id": "c000004",
-    "candidate": {"content":"switched aximon auth to sessions","confidence":"high","source_chat":"d.jsonl","source_date":"2026-06-04","suggested_section":"Architecture"},
+    "candidate": {"content":"switched aximon auth to sessions","confidence":"high","source_chat":"d.jsonl","source_date":"2026-06-04","suggested_section":"Architecture","memory_tier":"current"},
     "route": {"status":"routed","vault":"projects","page":"wiki/aximon.md","section":"Architecture","routing_confidence":"high"}
   },
   {
     "candidate_id": "c000005",
-    "candidate": {"content":"unroutable fact","confidence":"low","source_chat":"e.jsonl","source_date":"2026-06-04"},
+    "candidate": {"content":"unroutable fact","confidence":"low","source_chat":"e.jsonl","source_date":"2026-06-04","memory_tier":"stable"},
     "route": {"status":"gap","vault":null,"page":null,"section":null,"routing_confidence":"low"}
   }
 ]

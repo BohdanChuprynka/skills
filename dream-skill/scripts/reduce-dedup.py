@@ -14,13 +14,12 @@ regardless of which section each agent guessed. Distinct facts about the same
 subject ("dataset = 10,238 rows" vs "Cliff delta = 0.949") share little vocabulary
 and stay below threshold, so they are NOT merged.
 
-Per surviving cluster: keep the highest-(confidence, evidence-length) member, set
-source_chat_count to the cluster's distinct source_chat count, and apply the same
-confidence promotion REDUCE always did (N>=2 -> >=medium, N>=3 -> high). Promotion
-now fires on near-dups across chats, which the exact-only version missed.
+Per surviving cluster: keep the highest-(confidence, evidence-length) member and
+set source_chat_count to the cluster's distinct source_chat count. Repetition does
+not promote confidence, and non-user evidence remains capped at medium.
 
-Graceful: if scikit-learn is unavailable, fall back to exact-dedup only (a run is
-never blocked on the optional near-dup layer).
+The sparse TF-IDF implementation uses only the Python standard library, so the
+same near-duplicate behavior runs in every environment.
 
 Input  (stdin):  JSON array of candidate-fact objects.
 Output (stdout): JSON array, deduplicated, each with an added source_chat_count int.
@@ -32,12 +31,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import re
 import sys
+from collections import Counter
 from typing import Any
 
 CONF_RANK = {"low": 0, "medium": 1, "high": 2}
 RANK_CONF = {v: k for k, v in CONF_RANK.items()}
+WORD_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has",
+    "he", "in", "is", "it", "of", "on", "or", "that", "the", "this", "to",
+    "was", "were", "will", "with",
+}
 
 
 def _norm(s: Any) -> str:
@@ -71,13 +79,44 @@ def exact_dedup(pool: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _promote(rep: dict[str, Any], n_sources: int) -> None:
+    """Finalize confidence without treating repetition as proof."""
     rank = CONF_RANK.get(rep.get("confidence", "low"), 0)
-    if n_sources >= 3:
-        rank = max(rank, 2)
-    elif n_sources == 2:
-        rank = max(rank, 1)
+    if rep.get("source_role") != "user":
+        rank = min(rank, CONF_RANK["medium"])
     rep["confidence"] = RANK_CONF[rank]
     rep["source_chat_count"] = n_sources
+
+
+def tfidf_vectors(texts: list[str]) -> list[dict[str, float]]:
+    counts = [
+        Counter(
+            token.casefold()
+            for token in WORD_RE.findall(text)
+            if token.casefold() not in STOP_WORDS
+        )
+        for text in texts
+    ]
+    document_frequency: Counter[str] = Counter()
+    for count in counts:
+        document_frequency.update(count.keys())
+    total = len(texts)
+    vectors: list[dict[str, float]] = []
+    for count in counts:
+        vector = {
+            term: frequency * (math.log((1 + total) / (1 + document_frequency[term])) + 1)
+            for term, frequency in count.items()
+        }
+        norm = math.sqrt(sum(weight * weight for weight in vector.values()))
+        vectors.append(
+            {term: weight / norm for term, weight in vector.items()} if norm else {}
+        )
+    return vectors
+
+
+def cosine(left: dict[str, float], right: dict[str, float]) -> float:
+    if len(left) > len(right):
+        left, right = right, left
+    return sum(weight * right.get(term, 0.0) for term, weight in left.items())
 
 
 def near_dedup(
@@ -91,40 +130,13 @@ def near_dedup(
             it.pop("_sources", None)
         report["out"] = len(items)
         return items, report
-    try:
-        from sklearn.feature_extraction.text import (  # type: ignore[import-untyped]
-            TfidfVectorizer,
-        )
-        from sklearn.metrics.pairwise import (  # type: ignore[import-untyped]
-            cosine_similarity,
-        )
-    except Exception as exc:  # pragma: no cover - environment fallback
-        print(f"reduce-dedup: sklearn unavailable ({exc}); exact-only", file=sys.stderr)
-        for it in items:
-            _promote(it, len(it.get("_sources") or {it.get("source_chat")}))
-            it.pop("_sources", None)
-        report["out"] = len(items)
-        report["fallback"] = True
-        return items, report
-
     texts = [str(it.get("content", "")) for it in items]
     # Word 1-grams (not bigrams): reworded extractions of the same fact reorder and
     # inflect words, which crushes bigram overlap. Calibration on real candidates:
     # true-dups score ~0.56-0.70, distinct facts about the same subject score <0.06,
     # leaving a wide empty gap. RECONCILE re-checks dups at the page level, so this
     # layer is biased to precision (never merge distinct facts), not recall.
-    vec = TfidfVectorizer(lowercase=True, stop_words="english", ngram_range=(1, 1), min_df=1)
-    try:
-        tfidf = vec.fit_transform(texts)
-    except ValueError:
-        # empty vocabulary (all stop words) -> no near-dup pass
-        for it in items:
-            _promote(it, len(it.get("_sources") or {it.get("source_chat")}))
-            it.pop("_sources", None)
-        report["out"] = len(items)
-        return items, report
-
-    sim = cosine_similarity(tfidf)
+    vectors = tfidf_vectors(texts)
     n = len(items)
     parent = list(range(n))
 
@@ -141,10 +153,11 @@ def near_dedup(
 
     for i in range(n):
         for j in range(i + 1, n):
-            if sim[i, j] >= threshold:
+            similarity = cosine(vectors[i], vectors[j])
+            if similarity >= threshold:
                 union(i, j)
                 report["merged_pairs"].append(
-                    {"sim": round(float(sim[i, j]), 3),
+                    {"sim": round(similarity, 3),
                      "a": texts[i][:70], "b": texts[j][:70]}
                 )
 
@@ -172,8 +185,8 @@ def near_dedup(
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="dream-skill REDUCE dedup (exact + TF-IDF near-dup).")
     ap.add_argument("--threshold", type=float,
-                    default=float(os.environ.get("DREAM_DEDUP_THRESHOLD", "0.50")),
-                    help="cosine >= threshold merges two candidates (default 0.50, word 1-gram TF-IDF)")
+                    default=float(os.environ.get("DREAM_DEDUP_THRESHOLD", "0.65")),
+                    help="cosine >= threshold merges two candidates (default 0.65, word 1-gram TF-IDF)")
     ap.add_argument("--report", action="store_true", help="write a dedup report to stderr")
     args = ap.parse_args(argv)
 

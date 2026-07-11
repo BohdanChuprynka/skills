@@ -76,6 +76,19 @@ if [ "$MODE" != "append" ]; then
   [ -n "$OLD_CONTENT" ] || die "--mode $MODE requires --old-content"
 fi
 
+# One decision owns one Markdown line. Reject multiline payloads before any
+# mutation; they previously produced malformed list entries and unsafe undo.
+case "$CONTENT$OLD_CONTENT" in
+  *$'\n'*|*$'\r'*) die "content and old-content must each be one line" ;;
+esac
+
+# MAP/Reconcile occasionally return a pre-bulleted additive fact. Normalize it
+# here so retries cannot create '- - fact' contamination.
+if [ "$MODE" = "append" ]; then
+  while [[ "$CONTENT" == "- "* ]]; do CONTENT="${CONTENT#- }"; done
+  [ -n "$CONTENT" ] || die "append content is empty after bullet normalization"
+fi
+
 # Confine the write to the vault root — $PAGE comes from LLM routing output (untrusted).
 assert_within_vault "$VAULT" "$PAGE"
 
@@ -138,7 +151,11 @@ trap 'rm -rf "$LOCK_PATH" 2>/dev/null || true' EXIT
 [ -L "$PAGE_PATH" ] && die "refusing to write through symlinked page: $PAGE"
 
 # --- ensure page exists ----------------------------------------------------
+CHANGED=0
 if [ ! -f "$PAGE_PATH" ]; then
+  if [ "$MODE" != "append" ]; then
+    die "target page does not exist for mode=$MODE: $PAGE"
+  fi
   echo "# $(basename "$PAGE" .md | tr '-' ' ' | awk '{print toupper(substr($0,1,1)) substr($0,2)}')" > "$PAGE_PATH"
 fi
 
@@ -184,16 +201,20 @@ if [ "$MODE" = "append" ]; then
         echo "$APPEND_LINE"
       } >> "$PAGE_PATH"
     fi
+    CHANGED=1
   fi
 else
-  # replace / stale: edit an existing exact line "- $OLD_CONTENT"
-  OLD_LINE="- $OLD_CONTENT"
+  # replace / stale: old-content and content are exact complete Markdown lines.
+  OLD_LINE="$OLD_CONTENT"
   if [ "$MODE" = "stale" ]; then
-    FINAL_CONTENT="~~${OLD_CONTENT}~~ <!-- superseded $(date +%F) -->"
+    case "$OLD_CONTENT" in
+      "- "*) FINAL_CONTENT="- ~~${OLD_CONTENT#- }~~ <!-- superseded $(date +%F) -->" ;;
+      *) FINAL_CONTENT="~~${OLD_CONTENT}~~ <!-- superseded $(date +%F) -->" ;;
+    esac
   else
     FINAL_CONTENT="$CONTENT"
   fi
-  NEW_LINE="- $FINAL_CONTENT"
+  NEW_LINE="$FINAL_CONTENT"
 
   if grep -Fxq -- "$OLD_LINE" "$PAGE_PATH"; then
     # ENVIRON (not awk -v) so backslashes in the line content survive verbatim.
@@ -201,6 +222,7 @@ else
       BEGIN { old = ENVIRON["old"]; new = ENVIRON["new"] }
       { if ($0 == old) print new; else print }
     ' "$PAGE_PATH" > "$PAGE_PATH.tmp" && mv "$PAGE_PATH.tmp" "$PAGE_PATH"
+    CHANGED=1
   elif grep -Fxq -- "$NEW_LINE" "$PAGE_PATH"; then
     : # already in target state — idempotent no-op
   else
@@ -209,8 +231,11 @@ else
 fi
 
 # --- undo log --------------------------------------------------------------
-if [ -n "$UNDO_LOG" ]; then
+# Log only real mutations. A no-op retry must not create an undo entry that can
+# later remove or overwrite a fact written by an earlier successful attempt.
+if [ -n "$UNDO_LOG" ] && [ "$CHANGED" = "1" ]; then
   mkdir -p "$(dirname "$UNDO_LOG")"
+  chmod 700 "$(dirname "$UNDO_LOG")" 2>/dev/null || true
   TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   if [ "$MODE" = "append" ]; then
     jq -cn --arg timestamp "$TS" --arg vault "$VAULT" --arg page "$PAGE" \
@@ -223,10 +248,11 @@ if [ -n "$UNDO_LOG" ]; then
       '{"timestamp":$timestamp,"vault":$vault,"page":$page,"section":$section,"old_content":$old_content,"content":$content,"action":"replace"}' \
       >> "$UNDO_LOG"
   fi
+  chmod 600 "$UNDO_LOG" 2>/dev/null || true
 fi
 
 # --- index update (idempotent, append mode only) ---------------------------
-if [ "$MODE" = "append" ] && [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ]; then
+if [ "$MODE" = "append" ] && [ "$CHANGED" = "1" ] && [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ]; then
   # Resolve index file: prefer <subdir>/wiki/index.md, fallback <subdir>/index.md
   PAGE_DIR=$(dirname "$PAGE")
   INDEX_FILE=""
@@ -266,6 +292,7 @@ if [ "$MODE" = "append" ] && [ "$UPDATE_INDEX" = "1" ] && [ -n "$INDEX_LABEL" ];
             --arg index_file "$INDEX_FILE" --arg line "$LINE" \
             '{"timestamp":$timestamp,"vault":$vault,"index_file":$index_file,"line":$line,"action":"index_append"}' \
             >> "$UNDO_LOG"
+          chmod 600 "$UNDO_LOG" 2>/dev/null || true
         fi
       fi
     fi

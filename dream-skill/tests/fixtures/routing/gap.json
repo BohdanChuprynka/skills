@@ -9,7 +9,8 @@
       "evidence": "cafeteria closes at 7",
       "source_chat": "mno345",
       "source_date": "2026-06-03",
-      "suggested_section": null
+      "suggested_section": null,
+      "memory_tier": "stable"
     },
     "routing_context": "(elided)"
   },
@@ -19,7 +20,7 @@
     "page": null,
     "section": null,
     "routing_confidence": "low",
-    "gap_note": "Transient logistical fact about an external location. Does not describe Bohdan's identity, skills, projects, fitness, learning, setup, active work, or personal notes. No vault owns this. Discard or route to personal-notes/Daily journal only if the user explicitly wants it tracked."
+    "gap_note": "Transient logistical fact about an external location. It does not describe the user's identity, skills, projects, fitness, learning, setup, active work, or notes. No configured vault owns it."
   },
-  "routing_rationale": "The global CLAUDE.md vault table's mission statement is 'persona model — does this help understand who Bohdan is'. A cafeteria closing time fails that test. Router should emit gap, not force a vault."
+  "routing_rationale": "The configured persona model should retain only durable context that improves future assistance. A cafeteria closing time fails that test, so the router emits a gap."
 }

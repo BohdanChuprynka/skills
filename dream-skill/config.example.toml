@@ -1,12 +1,19 @@
-# Dream-Skill vault config.
-# Copy to ~/.claude/dream-skill/config.toml and replace these paths.
+# Copy to ~/.claude/dream-skill/config.toml and replace every placeholder.
+# Keep the real config local: it may contain private vault paths and terms.
 
-reports_dir = "/path/to/Obsidian/dream-reports"
+reports_dir = "/absolute/path/to/dream-reports"
 
-[vaults.me]
-root = "/path/to/Obsidian/me"
-description = "Identity, skills, experience, goals, career, preferences"
+[vaults.personal]
+root = "/absolute/path/to/personal-vault"
+description = "Identity, preferences, goals, relationships, and long-lived context."
 
 [vaults.projects]
-root = "/path/to/Obsidian/projects"
-description = "Repositories, architecture, tech stack, current goals, known issues"
+root = "/absolute/path/to/projects-vault"
+description = "Repositories, architecture, constraints, and technical decisions."
+
+# Optional deterministic people-routing overrides. Roster pages are discovered
+# from configured vaults; this section only chooses a tie-break and suppresses
+# deployment-specific terms that are not person names.
+[entity_routing]
+preferred_vault = "personal"
+stop_terms = ["Example Organization", "Example Product"]

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Prefilter Claude Code JSONL transcripts for dream-skill MAP agents.
 
-The output is intentionally plain text:
-  USER: human-entered text
-  ASST: assistant user-facing text
+The output is intentionally plain text with deterministic source-event IDs:
+  USER[42]: human-entered text
+  ASST[43]: assistant user-facing text
 
 Tool payloads, internal thinking, command wrappers, attachments, and metadata are
 discarded before an extraction agent sees the transcript.
@@ -119,7 +119,7 @@ def iter_filtered_lines(path: Path) -> tuple[list[str], dict[str, int]]:
     out: list[str] = []
 
     with path.open("r", encoding="utf-8", errors="ignore") as fh:
-        for line in fh:
+        for event_number, line in enumerate(fh, start=1):
             stats["raw_lines"] += 1
             try:
                 evt = json.loads(line)
@@ -157,9 +157,9 @@ def iter_filtered_lines(path: Path) -> tuple[list[str], dict[str, int]]:
                 if not text:
                     stats["skipped_events"] += 1
                     continue
-                out.append(f"USER: {text}")
+                out.append(f"USER[{event_number}]: {text}")
             else:
-                out.append(f"ASST: {text}")
+                out.append(f"ASST[{event_number}]: {text}")
             stats["emitted_lines"] += 1
 
     return out, stats

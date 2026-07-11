@@ -1,4 +1,0 @@
-# dream-skill review server (Step 6) dependency.
-# Install before launching serve-review.py:
-#   python3 -m pip install -r requirements.txt
-flask>=3.0

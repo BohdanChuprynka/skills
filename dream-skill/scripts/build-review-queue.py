@@ -179,6 +179,11 @@ def main() -> int:
     ap.add_argument("--sidecars-dir", type=Path, required=True)
     ap.add_argument("--output",      type=Path, required=True)
     ap.add_argument("--existing-decisions", type=Path, default=None)
+    ap.add_argument(
+        "--include-orphans",
+        action="store_true",
+        help="include legacy pending entries without an applyable sidecar (diagnostics only)",
+    )
     args = ap.parse_args()
 
     if not args.pending_md.exists():
@@ -186,6 +191,8 @@ def main() -> int:
         # Write empty queue
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps({"entries": []}, indent=2))
+        args.output.chmod(0o600)
+        args.output.parent.chmod(0o700)
         return 0
 
     text = args.pending_md.read_text(encoding="utf-8", errors="ignore")
@@ -199,14 +206,23 @@ def main() -> int:
             pass
 
     entries = []
+    orphaned = 0
     for raw in raw_entries:
         sidecar = load_sidecar(args.sidecars_dir, raw["id"])
+        if sidecar is None and not args.include_orphans:
+            orphaned += 1
+            continue
         entry = build_entry(raw, sidecar, existing_decisions)
         entries.append(entry)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({"entries": entries}, indent=2))
-    print(f"build-review-queue: wrote {len(entries)} entries → {args.output}", file=sys.stderr)
+    args.output.chmod(0o600)
+    args.output.parent.chmod(0o700)
+    print(
+        f"build-review-queue: wrote {len(entries)} entries; skipped_orphans={orphaned} → {args.output}",
+        file=sys.stderr,
+    )
     return 0
 
 

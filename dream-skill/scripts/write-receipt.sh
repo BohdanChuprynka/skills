@@ -115,6 +115,15 @@ render_receipt() {
   ' || true
   printf '\n'
 
+  # Audit section: memory_tier=="audit" candidates synthesized by dream-run.py —
+  # recorded here for provenance but never routed, reconciled, or written to a vault.
+  printf '## Audit (recorded, not written to a vault)\n'
+  printf '%s' "$SUMMARY" | jq -r '
+    (.facts // [])[] | select(.review_status == "audit")
+    | "- \"\(.content)\" (confidence: \(.confidence // "?"))"
+  ' || true
+  printf '\n'
+
   # Superseded section (overview §8.8): review_status=="written" AND action=="contradict"
   # (the old line struck via stale when a contradict was applied)
   # (placed last so grep -A5 on Written cannot reach this section's content)

@@ -18,10 +18,10 @@ trap 'rm -rf "$TMPROOT"' EXIT
 CANDIDATES="$TMPROOT/candidates.json"
 cat > "$CANDIDATES" <<'JSON'
 [
-  {"content":"uses PyTorch Lightning","confidence":"high","source_chat":"a.jsonl","source_date":"2026-06-01","suggested_section":"Deep Learning"},
-  {"content":"switched aximon auth to sessions","confidence":"high","source_chat":"b.jsonl","source_date":"2026-06-02","suggested_section":"Architecture"},
-  {"content":"Marcus is a prospect","confidence":"medium","source_chat":"c.jsonl","source_date":"2026-06-03","suggested_section":"Pipeline"},
-  {"content":"cafeteria closes at 7pm","confidence":"low","source_chat":"d.jsonl","source_date":"2026-06-04"}
+  {"content":"uses PyTorch Lightning","confidence":"high","source_chat":"a.jsonl","source_date":"2026-06-01","suggested_section":"Deep Learning","memory_tier":"stable"},
+  {"content":"switched aximon auth to sessions","confidence":"high","source_chat":"b.jsonl","source_date":"2026-06-02","suggested_section":"Architecture","memory_tier":"current"},
+  {"content":"Marcus is a prospect","confidence":"medium","source_chat":"c.jsonl","source_date":"2026-06-03","suggested_section":"Pipeline","memory_tier":"stable"},
+  {"content":"cafeteria closes at 7pm","confidence":"low","source_chat":"d.jsonl","source_date":"2026-06-04","memory_tier":"stable"}
 ]
 JSON
 

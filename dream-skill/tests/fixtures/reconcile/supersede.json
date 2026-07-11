@@ -7,7 +7,8 @@
     "evidence": "\"I moved to Munich at the start of June\"",
     "source_chat": "session-abc125",
     "source_date": "2026-06-03",
-    "suggested_section": "Bio"
+    "suggested_section": "Bio",
+    "memory_tier": "current"
   },
   "target_page_snapshot": "# Bio\n\n## Bio\n\n- lives in Berlin\n- originally from Kyiv\n",
   "run_date": "2026-06-03",

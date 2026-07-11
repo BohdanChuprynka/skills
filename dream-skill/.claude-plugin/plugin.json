@@ -1,7 +1,7 @@
 {
   "name": "dream-skill",
-  "description": "Auto-record your Claude Code conversations to your Obsidian vault. Confident facts written on session close; uncertain or destructive edits queued for manual review.",
-  "version": "0.3.1",
+  "description": "Reliably sync durable Claude Code and Codex context into Obsidian with bounded retrieval, transactional review, rollback, and measurable canaries.",
+  "version": "0.4.0",
   "author": {
     "name": "Bohdan Chuprynka",
     "url": "https://github.com/BohdanChuprynka"
@@ -19,7 +19,7 @@
     "personal-wiki",
     "llm",
     "memory",
-    "auto-capture",
-    "session-end"
+    "batch-sync",
+    "codex"
   ]
 }

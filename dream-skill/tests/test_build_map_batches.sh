@@ -28,7 +28,7 @@ import sys
 p = sys.argv[1]
 with open(p, "w") as f:
     for i in range(3000):  # 3000 lines * ~45 bytes ≈ 135KB
-        f.write(f"USER: line {i:05d} bohdan said something distinctive number {i}\n")
+        f.write(f"USER: line {i:05d} the user said something distinctive number {i}\n")
 PY
 BIG_BYTES=$(wc -c < "$BIG")
 
@@ -68,6 +68,14 @@ for d in desc:
 print(f"  {len(desc)} units, all <= {cap} bytes")
 PY
 pass "every unit fits under the ${CAP}-byte Read cap"
+
+python3 - "$OUT" <<'PY' || fail "MAP unit files are not private"
+import json, os, stat, sys
+for unit in json.load(open(sys.argv[1])):
+    mode = stat.S_IMODE(os.stat(unit["unit_path"]).st_mode)
+    assert mode == 0o600, f"{unit['unit_path']}: {oct(mode)}"
+PY
+pass "every MAP unit is mode 0600"
 
 # ── Test 2: lossless — every original BIG line appears in some chunk ───────────
 python3 - "$OUT" "$BIG" <<'PY' || fail "big-file chunks dropped at least one original line (NOT lossless)"

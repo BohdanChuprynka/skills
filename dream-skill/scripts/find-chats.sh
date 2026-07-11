@@ -16,7 +16,7 @@
 #
 # Output (stdout):
 #   Lines of the form:
-#       BATCH:<YYYY-MM-DD>:<YYYY-MM-DD>
+#       BATCH:<YYYY-MM-DD>:<YYYY-MM-DD>:<start_epoch>:<end_epoch>
 #       <absolute-path-to-chat.jsonl>
 #       <absolute-path-to-chat.jsonl>
 #       BATCH:<YYYY-MM-DD>:<YYYY-MM-DD>   # next week boundary (--all only)
@@ -209,7 +209,7 @@ emit_batch() {
   local bs_fmt be_fmt
   bs_fmt=$(date -r "$batch_start" +%Y-%m-%d 2>/dev/null || date -d "@$batch_start" +%Y-%m-%d)
   be_fmt=$(date -r "$batch_end"   +%Y-%m-%d 2>/dev/null || date -d "@$batch_end"   +%Y-%m-%d)
-  echo "BATCH:${bs_fmt}:${be_fmt}"
+  echo "BATCH:${bs_fmt}:${be_fmt}:${batch_start}:${batch_end}"
   # enumerate chats whose mtime falls in [batch_start, batch_end)
   while IFS= read -r -d '' f; do
     fmtime=$(stat -c "%Y" "$f" 2>/dev/null || stat -f "%m" "$f" 2>/dev/null || echo 0)

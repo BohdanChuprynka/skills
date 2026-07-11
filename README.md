@@ -18,7 +18,7 @@ Each skill is independent: install one without the others. All MIT licensed. Run
 
 | Skill | What it does | Install path |
 |---|---|---|
-| [**dream-skill**](./dream-skill) | On-demand batch sync for Claude Code and Codex transcripts. Sweeps recent chats, extracts durable persona/project facts, routes and reconciles them against Obsidian vault pages, queues uncertain/destructive changes for review, writes receipts, and tracks source-specific markers. | `./setup.sh` or Claude plugin |
+| [**dream-skill**](./dream-skill) | On-demand or scheduled batch sync for Claude Code and Codex transcripts. Uses a selectable Codex/Claude agent engine, bounded local retrieval, transactional review, and shadow canaries to synchronize durable context into configured Obsidian vaults. | `./setup.sh` or Claude plugin |
 | [**clean-wiki**](./clean-wiki) | Monthly Obsidian vault cleanup. Claude Code or Codex scans your vaults for stale facts, contradictions, broken wikilinks, index drift, orphans, and frontmatter drift. You swipe approve/reject in a local web UI. The agent applies approved changes with an undo log. | `./setup.sh` |
 | [**routing-mode**](./routing-mode) | Claude Code workflow that routes planning and review to Claude, gates the plan through a zero-context audit, delegates implementation to the Codex CLI, then brings the diff back for verification. | Claude plugin or symlink |
 | [**claude-relay**](./claude-relay) | Claude Code-only model-routing discipline: a user-started Opus coordinator delegates bounded phases to Claude Code subagents and verifies every handoff. | Symlink |

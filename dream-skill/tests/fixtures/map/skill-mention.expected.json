@@ -6,6 +6,7 @@
     "source_date": "2026-06-01",
     "type": "experience",
     "evidence": "I've been learning Rust lately. Only a few weeks in but it's starting to click.",
-    "suggested_section": "Skills"
+    "suggested_section": "Skills",
+    "memory_tier": "stable"
   }
 ]
