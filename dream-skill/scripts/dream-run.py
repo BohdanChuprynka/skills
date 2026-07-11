@@ -577,6 +577,13 @@ def process_batch(
                 stage_update(state, state_path, "reconcile", status="success", total=0, completed=0, failed=0)
 
             vaults = load_vault_config(args.config)
+            candidate_content = {
+                str(record.get("candidate_id")): str(
+                    (record.get("candidate") or {}).get("content") or ""
+                )
+                for record in routed
+                if record.get("candidate_id")
+            }
             fact_lines = []
             apply_errors = 0
             for record in decisions:
@@ -610,6 +617,8 @@ def process_batch(
                     except json.JSONDecodeError:
                         continue
                     if isinstance(value, dict):
+                        if value.get("action") == "duplicate" and not value.get("content"):
+                            value["candidate_content"] = candidate_content.get(candidate_id, "")
                         fact_lines.append(value)
             stage_update(
                 state,

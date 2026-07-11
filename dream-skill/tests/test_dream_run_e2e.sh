@@ -13,7 +13,7 @@ SINCE=$(date -v-1d +%F 2>/dev/null || date -d 'yesterday' +%F)
 
 mkdir -p "$TMP/chats/project" "$TMP/empty-codex" "$TMP/vault/wiki" "$TMP/reports"
 cat > "$TMP/chats/project/chat.jsonl" <<'JSONL'
-{"message":{"role":"user","content":[{"type":"text","text":"I prefer concise reports. Taylor Park mentioned a new project idea."}]}}
+{"message":{"role":"user","content":[{"type":"text","text":"I prefer practical answers and concise reports. Taylor Park mentioned a new project idea."}]}}
 {"message":{"role":"assistant","content":[{"type":"text","text":"The user may prefer weekly summaries."}]}}
 JSONL
 touch -t "${SINCE//-/}1200" "$TMP/chats/project/chat.jsonl"
@@ -48,7 +48,8 @@ case "$stage" in
     source_chat=$(printf '%s\n' "$header" | sed -E 's/^.*source_chat=(.*) source_date=[0-9-]+ =====$/\1/')
     source_date=$(printf '%s\n' "$header" | sed -E 's/^.*source_date=([0-9-]+) =====$/\1/')
     jq -n --arg chat "$source_chat" --arg date "$source_date" '[
-      {"content":"The user prefers concise reports.","confidence":"high","source_chat":$chat,"source_date":$date,"source_role":"user","source_event":1,"evidence":"I prefer concise reports.","type":"preference","suggested_section":"Preferences","memory_tier":"stable"},
+      {"content":"The user prefers practical answers.","confidence":"high","source_chat":$chat,"source_date":$date,"source_role":"user","source_event":1,"evidence":"I prefer practical answers and concise reports.","type":"preference","suggested_section":"Preferences","memory_tier":"stable"},
+      {"content":"The user prefers concise reports.","confidence":"high","source_chat":$chat,"source_date":$date,"source_role":"user","source_event":1,"evidence":"I prefer practical answers and concise reports.","type":"preference","suggested_section":"Preferences","memory_tier":"stable"},
       {"content":"The user may prefer weekly summaries.","confidence":"medium","source_chat":$chat,"source_date":$date,"source_role":"assistant_context","source_event":2,"evidence":"The user may prefer weekly summaries.","type":"preference","suggested_section":"Preferences","memory_tier":"stable"},
       {"content":"Taylor Park mentioned a new project idea.","confidence":"high","source_chat":$chat,"source_date":$date,"source_role":"user","source_event":1,"evidence":"Taylor Park mentioned a new project idea.","type":"relationship","suggested_section":"People","memory_tier":"stable"}
     ]' > "$out"
@@ -57,7 +58,9 @@ case "$stage" in
     jq '[. as $batch | .candidates[] | . as $candidate | ($candidate.allowed_page_ids[0]) as $pid | ($batch.page_catalog[] | select(.page_id==$pid)) as $page | {candidate_id:$candidate.candidate_id,status:"routed",vault:$page.vault,page:$page.page,section:"Preferences",routing_confidence:"high"}]' "$input" > "$out"
     ;;
   reconcile)
-    jq '[. as $batch | .candidates[] | {candidate_id:.candidate_id,decision:{action:"new",mode:"append",target:{vault:$batch.target.vault,page:$batch.target.page,section:.route.section},content:.candidate.content,candidate_confidence:.candidate.confidence,needs_review:(.candidate.confidence != "high"),rationale:"Preference is absent."}}]' "$input" > "$out"
+    jq '[. as $batch | .candidates[] | . as $item
+      | ($item.candidate.content == "The user prefers practical answers.") as $duplicate
+      | {candidate_id:$item.candidate_id,decision:{action:(if $duplicate then "duplicate" else "new" end),mode:(if $duplicate then "none" else "append" end),target:{vault:$batch.target.vault,page:$batch.target.page,section:$item.route.section},content:(if $duplicate then "" else $item.candidate.content end),candidate_confidence:$item.candidate.confidence,needs_review:(if $duplicate then false else ($item.candidate.confidence != "high") end),rationale:(if $duplicate then "Preference is already present." else "Preference is absent." end)}}]' "$input" > "$out"
     ;;
   *) exit 9 ;;
 esac
@@ -103,6 +106,8 @@ chmod 600 "$WORKDIR/route-log-route-9999-attempt-01.txt"
   --reconcile-concurrency 1 > "$TMP/real-result.json"
 REAL_RUN_ID=$(jq -er '.runs[0].run_id' "$TMP/real-result.json")
 REAL_STATE="$TMP/state/runs/$REAL_RUN_ID.json"
+RECEIPT_DATE=$(jq -er '.window.end' "$REAL_STATE")
+RECEIPT_FILE="$TMP/reports/$RECEIPT_DATE.md"
 jq -e '.status == "completed" and .marker_allowed == true' "$REAL_STATE" >/dev/null
 jq -e 'has("error") | not' "$REAL_STATE" >/dev/null
 jq -e '.timing.started_at != null and .timing.ended_at != null and .timing.duration_seconds >= 0' \
@@ -113,6 +118,9 @@ MARKER_VALUE=$(jq -r '.marker_value' "$REAL_STATE")
 [ "$(cat "$TMP/state/last-run")" = "$MARKER_VALUE" ]
 rg -Fq -- '- The user prefers concise reports.' "$TMP/vault/wiki/Preferences.md"
 ! rg -Fq -- 'The user may prefer weekly summaries.' "$TMP/vault/wiki/Preferences.md"
+rg -Fq -- '- "The user prefers practical answers." — already present in [[me/wiki/Preferences]]' "$RECEIPT_FILE"
+! rg -Fq -- '- "" — already present' "$RECEIPT_FILE"
+rg -Fxq -- '## Skipped as duplicates' "$RECEIPT_FILE"
 [ "$(find "$TMP/state/queue/sidecars" -name '*.json' | wc -l | tr -d ' ')" = "1" ]
 rg -Fq -- 'The user may prefer weekly summaries.' "$TMP/state/queue/pending.md"
 python3 - "$TMP/state" <<'PY'
