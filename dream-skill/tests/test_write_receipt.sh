@@ -73,8 +73,16 @@ SUMMARY=$(cat <<'EOF'
       "confidence":    "medium"
     },
     {
-      "content":       "Python 3.12",
+      "content":       "",
+      "candidate_content": "Python 3.12",
       "target":        "me/wiki/Skills.md",
+      "action":        "duplicate",
+      "review_status": "skipped",
+      "confidence":    "high"
+    },
+    {
+      "content":       "",
+      "target":        "me/wiki/Legacy.md",
       "action":        "duplicate",
       "review_status": "skipped",
       "confidence":    "high"
@@ -131,6 +139,12 @@ echo "PASS: supersede(written) in Written; contradict(written) in Superseded —
 # ── test 4: skipped section contains duplicate fact (action=duplicate) ───────
 grep -A5 "^## Skipped" "$RECEIPT" | grep -q "Python 3.12" \
   || fail "Skipped section missing duplicate fact (action=duplicate)"
+grep -q '^## Skipped as duplicates$' "$RECEIPT" \
+  || fail "Skipped section has misleading heading"
+grep -A5 "^## Skipped" "$RECEIPT" | grep -q -- '- ""' \
+  && fail "Skipped section rendered an empty duplicate fact"
+grep -A5 "^## Skipped" "$RECEIPT" | grep -Fq -- 'Duplicate already present in [[me/wiki/Legacy]]' \
+  || fail "Skipped section missing target-only fallback for a legacy duplicate"
 echo "PASS: Skipped section populated with duplicate"
 
 # ── test 5: queued section contains queued contradict new-fact with bucket ────

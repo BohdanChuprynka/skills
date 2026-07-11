@@ -100,10 +100,16 @@ render_receipt() {
 
   # Skipped section (overview §8.8): action=="duplicate" or review_status=="skipped"
   # (placed before Superseded so that grep -A5 on Written does not spill into Superseded content)
-  printf '## Skipped (duplicate / low-confidence)\n'
+  printf '## Skipped as duplicates\n'
   printf '%s' "$SUMMARY" | jq -r '
     (.facts // [])[] | select(.action == "duplicate" or .review_status == "skipped")
-    | "- \"\(.content)\" — already present in \(.target | gsub("\\.md$";"") | "[[" + . + "]]")"
+    | (.candidate_content // .content // "") as $candidate
+    | (.target | gsub("\\.md$";"") | "[[" + . + "]]") as $target
+    | if $candidate == "" then
+        "- Duplicate already present in \($target)"
+      else
+        "- \"\($candidate)\" — already present in \($target)"
+      end
   ' || true
   printf '\n'
 
