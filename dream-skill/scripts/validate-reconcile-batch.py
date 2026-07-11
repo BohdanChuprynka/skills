@@ -61,12 +61,34 @@ def read_json_stdin() -> Any:
 def validate_batch(batch: Any) -> list[dict[str, Any]]:
     if not isinstance(batch, dict):
         raise ValueError("batch must be a JSON object")
+    if "page_groups" in batch:
+        groups = batch.get("page_groups")
+        if not isinstance(groups, list) or not groups:
+            raise ValueError("batch page_groups must be a non-empty array")
+        grouped = [item for group in groups for item in validate_batch(group)]
+        candidates = batch.get("candidates")
+        if not isinstance(candidates, list):
+            raise ValueError("packed batch missing flat candidates array")
+        grouped_ids = [item.get("candidate_id") for item in grouped]
+        flat_ids = [item.get("candidate_id") for item in candidates if isinstance(item, dict)]
+        if grouped_ids != flat_ids:
+            raise ValueError("packed batch candidates do not match page_groups")
+        if len(set(grouped_ids)) != len(grouped_ids):
+            raise ValueError("packed batch repeats a candidate across page_groups")
+        return grouped
     target = batch.get("target")
     if not isinstance(target, dict):
         raise ValueError("batch missing target object")
     for key in ("vault", "page"):
         if not isinstance(target.get(key), str) or not target[key].strip():
             raise ValueError(f"batch target missing {key}")
+    if not isinstance(batch.get("target_page"), str):
+        raise ValueError("batch missing target_page string")
+    if "allowed_old_lines" in batch and (
+        not isinstance(batch["allowed_old_lines"], list)
+        or not all(isinstance(line, str) for line in batch["allowed_old_lines"])
+    ):
+        raise ValueError("batch allowed_old_lines must be an array of strings")
     candidates = batch.get("candidates")
     if not isinstance(candidates, list):
         raise ValueError("batch missing candidates array")
@@ -119,6 +141,8 @@ def validate_decision(
     batch_target: dict[str, Any],
     candidate: dict[str, Any],
     expected_section: str,
+    target_page: str,
+    allowed_old_lines: list[str],
 ) -> None:
     missing = sorted(REQUIRED_DECISION_KEYS - set(decision))
     if missing:
@@ -135,7 +159,7 @@ def validate_decision(
         "new": "append",
         "duplicate": "none",
         "supersede": "replace",
-        "contradict": "stale",
+        "contradict": "replace",
     }[action]
     if mode != expected_mode:
         raise ValueError(f"{candidate_id}: action {action!r} requires mode {expected_mode!r}")
@@ -182,6 +206,74 @@ def validate_decision(
     elif not isinstance(content, str) or not content.strip():
         raise ValueError(f"{candidate_id}: {action} requires non-empty content")
 
+    if isinstance(content, str) and ("\n" in content or "\r" in content):
+        raise ValueError(f"{candidate_id}: content must be exactly one line")
+
+    if action == "new" and isinstance(content, str) and content.startswith("- "):
+        raise ValueError(f"{candidate_id}: new content must not include a Markdown bullet prefix")
+
+    if action in {"supersede", "contradict"}:
+        old_content = decision["old_content"]
+        if "\n" in old_content or "\r" in old_content:
+            raise ValueError(f"{candidate_id}: old_content must be exactly one line")
+        matches = allowed_old_lines.count(old_content)
+        if matches != 1:
+            raise ValueError(
+                f"{candidate_id}: old_content must match exactly one complete line in the supplied page context; "
+                f"found {matches}"
+            )
+        if old_content.startswith("#"):
+            raise ValueError(f"{candidate_id}: destructive decisions may not replace headings")
+        if old_content.startswith("- ") and not content.startswith("- "):
+            raise ValueError(f"{candidate_id}: replacement must preserve Markdown bullet syntax")
+        if old_content.startswith("|") and not (
+            content.startswith("|") and content.rstrip().endswith("|")
+        ):
+            raise ValueError(f"{candidate_id}: replacement must preserve Markdown table-row syntax")
+
+
+def canonicalize_decision(
+    decision: dict[str, Any],
+    batch_target: dict[str, Any],
+    candidate: dict[str, Any],
+    section: str,
+) -> dict[str, Any]:
+    """Derive mechanical fields locally; leave only semantic action/old-line choice to the model."""
+    action = decision.get("action")
+    if action not in ACTIONS:
+        return decision
+    normalized = dict(decision)
+    normalized["mode"] = {
+        "new": "append",
+        "duplicate": "none",
+        "supersede": "replace",
+        "contradict": "replace",
+    }[action]
+    normalized["target"] = {
+        "vault": batch_target.get("vault"),
+        "page": batch_target.get("page"),
+        "section": section,
+    }
+    confidence = candidate.get("confidence")
+    normalized["candidate_confidence"] = confidence
+    normalized["needs_review"] = not (
+        action == "duplicate" or (action == "new" and confidence == "high")
+    )
+    candidate_content = candidate.get("content")
+    if action == "duplicate":
+        normalized["content"] = ""
+        normalized.pop("old_content", None)
+    elif action == "new":
+        normalized["content"] = candidate_content
+        normalized.pop("old_content", None)
+    elif isinstance(candidate_content, str):
+        old_content = normalized.get("old_content")
+        if isinstance(old_content, str) and old_content.startswith("- "):
+            normalized["content"] = "- " + candidate_content.removeprefix("- ")
+        elif isinstance(old_content, str) and not old_content.startswith("|"):
+            normalized["content"] = candidate_content
+    return normalized
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate one dream-skill RECONCILE batch output.")
@@ -207,6 +299,11 @@ def main(argv: list[str] | None = None) -> int:
             )
             for item in inputs
         }
+        context_by_id: dict[str, dict[str, Any]] = {}
+        groups = batch.get("page_groups") if isinstance(batch.get("page_groups"), list) else [batch]
+        for group in groups:
+            for item in group["candidates"]:
+                context_by_id[item["candidate_id"]] = group
         normalized = [normalize_decision(record) for record in output]
         decision_ids = [candidate_id for candidate_id, _ in normalized]
         duplicate_decision_ids = sorted(
@@ -227,13 +324,23 @@ def main(argv: list[str] | None = None) -> int:
         decision_by_id = dict(normalized)
         joined = []
         for candidate_id in input_ids:
-            decision = decision_by_id[candidate_id]
+            context = context_by_id[candidate_id]
+            decision = canonicalize_decision(
+                decision_by_id[candidate_id],
+                context["target"],
+                candidate_by_id[candidate_id],
+                section_by_id[candidate_id],
+            )
             validate_decision(
                 candidate_id,
                 decision,
-                batch["target"],
+                context["target"],
                 candidate_by_id[candidate_id],
                 section_by_id[candidate_id],
+                context.get("target_page", ""),
+                context.get(
+                    "allowed_old_lines", context.get("target_page", "").splitlines()
+                ),
             )
             joined.append({"candidate_id": candidate_id, "decision": decision})
     except ValueError as exc:

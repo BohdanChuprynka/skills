@@ -7,7 +7,8 @@
     "evidence": "\"I just passed my AWS SA cert last week\"",
     "source_chat": "session-abc123",
     "source_date": "2026-05-28",
-    "suggested_section": "Certifications"
+    "suggested_section": "Certifications",
+    "memory_tier": "stable"
   },
   "target_page_snapshot": "# Skills\n\n## Languages\n\n- Python (proficient)\n- TypeScript (proficient)\n\n## Frameworks\n\n- React\n- FastAPI\n",
   "run_date": "2026-06-03",

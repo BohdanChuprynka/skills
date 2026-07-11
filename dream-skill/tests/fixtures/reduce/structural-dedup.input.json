@@ -1,11 +1,11 @@
 {
   "_comment": "REDUCE golden fixture (manual-eval, not CI — REDUCE is an orchestrator step, SKILL.md Step 3). INPUT = the flattened candidate pool from MAP across several chats, BEFORE reduce. Two facts each appear in multiple distinct source_chats with identical (content, suggested_section). Expected output in structural-dedup.expected.json. Closes REVIEW-2026-06-04 I4 / overview I6/§8.7.",
   "candidate_pool": [
-    { "content": "learning Rust", "confidence": "low", "source_chat": "sess-1", "source_date": "2026-06-01", "type": "observation", "suggested_section": "Learning" },
-    { "content": "learning Rust", "confidence": "low", "source_chat": "sess-2", "source_date": "2026-06-02", "type": "observation", "suggested_section": "Learning" },
-    { "content": "learning Rust", "confidence": "low", "source_chat": "sess-3", "source_date": "2026-06-03", "type": "observation", "suggested_section": "Learning" },
-    { "content": "prefers tabs over spaces", "confidence": "low", "source_chat": "sess-1", "source_date": "2026-06-01", "type": "belief", "suggested_section": "Preferences" },
-    { "content": "prefers tabs over spaces", "confidence": "low", "source_chat": "sess-2", "source_date": "2026-06-02", "type": "belief", "suggested_section": "Preferences" },
-    { "content": "passed AWS SAA exam", "confidence": "high", "source_chat": "sess-2", "source_date": "2026-06-02", "type": "world-fact", "evidence": "\"finally passed the AWS Solutions Architect exam\"", "suggested_section": "Certifications" }
+    { "content": "learning Rust", "confidence": "low", "source_chat": "sess-1", "source_date": "2026-06-01", "type": "observation", "suggested_section": "Learning", "memory_tier": "stable" },
+    { "content": "learning Rust", "confidence": "low", "source_chat": "sess-2", "source_date": "2026-06-02", "type": "observation", "suggested_section": "Learning", "memory_tier": "stable" },
+    { "content": "learning Rust", "confidence": "low", "source_chat": "sess-3", "source_date": "2026-06-03", "type": "observation", "suggested_section": "Learning", "memory_tier": "stable" },
+    { "content": "prefers tabs over spaces", "confidence": "low", "source_chat": "sess-1", "source_date": "2026-06-01", "type": "belief", "suggested_section": "Preferences", "memory_tier": "stable" },
+    { "content": "prefers tabs over spaces", "confidence": "low", "source_chat": "sess-2", "source_date": "2026-06-02", "type": "belief", "suggested_section": "Preferences", "memory_tier": "stable" },
+    { "content": "passed AWS SAA exam", "confidence": "high", "source_chat": "sess-2", "source_date": "2026-06-02", "type": "world-fact", "evidence": "\"finally passed the AWS Solutions Architect exam\"", "suggested_section": "Certifications", "memory_tier": "stable" }
   ]
 }

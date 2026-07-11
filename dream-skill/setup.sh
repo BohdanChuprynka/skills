@@ -29,9 +29,10 @@ copy_codex_skill() {
 
   cp "$SKILL_SRC/SKILL.md" "$CODEX_INSTALL/SKILL.md"
   cp "$REPO_DIR/ROUTING.md" "$CODEX_INSTALL/ROUTING.md"
-  cp "$REPO_DIR/requirements.txt" "$CODEX_INSTALL/requirements.txt"
   cp "$REPO_DIR/codex/agents/openai.example.yaml" "$CODEX_INSTALL/agents/openai.yaml"
+  cp -R "$REPO_DIR/prompts" "$CODEX_INSTALL/prompts"
   cp -R "$REPO_DIR/scripts" "$CODEX_INSTALL/scripts"
+  cp -R "$REPO_DIR/tests" "$CODEX_INSTALL/tests"
   cp -R "$REPO_DIR/web" "$CODEX_INSTALL/web"
 
   find "$CODEX_INSTALL" -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -prune -exec rm -rf {} +
@@ -53,8 +54,12 @@ if [[ $have_claude -eq 1 ]]; then ok "claude: $(claude --version 2>&1 | head -1)
 if [[ $have_codex -eq 1 ]]; then ok "codex: $(codex --version 2>&1 | head -1)"; else warn "codex not on PATH"; fi
 
 heading "1. Runtime state"
-mkdir -p "$STATE_DIR/queue/sidecars" "$STATE_DIR/log" "$STATE_DIR/undo" "$STATE_DIR/tmp"
-ok "ensured $STATE_DIR/{queue/sidecars,log,undo,tmp}"
+mkdir -p "$STATE_DIR/queue/sidecars" "$STATE_DIR/log" "$STATE_DIR/undo" \
+  "$STATE_DIR/runs" "$STATE_DIR/evals" "$STATE_DIR/gaps" "$STATE_DIR/shadow-markers"
+chmod 700 "$STATE_DIR" "$STATE_DIR/queue" "$STATE_DIR/queue/sidecars" \
+  "$STATE_DIR/log" "$STATE_DIR/undo" "$STATE_DIR/runs" "$STATE_DIR/evals" \
+  "$STATE_DIR/gaps" "$STATE_DIR/shadow-markers"
+ok "ensured private Dream runtime directories"
 if [[ -f "$STATE_DIR/config.toml" ]]; then
   ok "kept existing $STATE_DIR/config.toml"
 else
@@ -96,12 +101,12 @@ echo
 echo "  Config: $STATE_DIR/config.toml"
 echo
 echo "  Claude Code:"
-echo "    /dream-skill --dry-run"
+echo "    /dream-skill --shadow"
 echo "    /dream-skill"
 echo
 echo "  Codex:"
 echo "    Restart Codex, then run:"
-echo "    Use \$dream-skill --dry-run"
+echo "    Use \$dream-skill --shadow"
 echo "    Use \$dream-skill"
 echo
 echo "  Source options:"

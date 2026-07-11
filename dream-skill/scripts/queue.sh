@@ -10,14 +10,36 @@
 #   queue.sh list
 
 set -euo pipefail
+umask 077
 
 QUEUE_FILE="${DREAM_QUEUE_FILE:-$HOME/.claude/dream-skill/queue/pending.md}"
 
 die() { echo "queue: $*" >&2; exit 1; }
 
+LOCK_PATH="${QUEUE_FILE}.lock"
+
+acquire_lock() {
+  local retries=100 holder=""
+  mkdir -p "$(dirname "$QUEUE_FILE")"
+  while ! mkdir "$LOCK_PATH" 2>/dev/null; do
+    [ -f "$LOCK_PATH/pid" ] && holder=$(cat "$LOCK_PATH/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$LOCK_PATH" 2>/dev/null || true
+      continue
+    fi
+    retries=$((retries - 1))
+    [ "$retries" -gt 0 ] || die "lock timeout: $QUEUE_FILE"
+    sleep 0.05
+  done
+  printf '%s\n' "$$" > "$LOCK_PATH/pid"
+  trap 'rm -rf "$LOCK_PATH" 2>/dev/null || true' EXIT
+}
+
 ensure_queue_file() {
   mkdir -p "$(dirname "$QUEUE_FILE")"
   [ -f "$QUEUE_FILE" ] || touch "$QUEUE_FILE"
+  chmod 700 "$(dirname "$QUEUE_FILE")" 2>/dev/null || true
+  chmod 600 "$QUEUE_FILE" 2>/dev/null || true
 }
 
 bucket_header() {
@@ -106,6 +128,8 @@ ${id_line}**Target:** $target
 EOF
 
   # Insert entry after the section header (before the next ## or EOF)
+  local queue_tmp
+  queue_tmp=$(mktemp "${QUEUE_FILE}.tmp.XXXXXX")
   awk -v header="$header" -v entry_file="$entry_file" '
     BEGIN {
       inserted = 0
@@ -130,7 +154,7 @@ EOF
         print entry
       }
     }
-  ' "$QUEUE_FILE" > "$QUEUE_FILE.tmp" && mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+  ' "$QUEUE_FILE" > "$queue_tmp" && mv "$queue_tmp" "$QUEUE_FILE"
 
   rm -f "$entry_file"
 }
@@ -162,6 +186,8 @@ cmd_remove() {
 
   # Block-scan: read entry blocks (### TITLE ... --- terminator). Drop the
   # block iff BOTH the title line AND the target line match. Keep all others.
+  local queue_tmp
+  queue_tmp=$(mktemp "${QUEUE_FILE}.tmp.XXXXXX")
   target_title="### $title" target_target="**Target:** $target" awk '
     BEGIN { target_title = ENVIRON["target_title"]; target_target = ENVIRON["target_target"] }
     function flush_block(   should_keep) {
@@ -195,18 +221,18 @@ cmd_remove() {
       flush_block()
       if (removed_count == 0) exit 2  # signal: no match
     }
-  ' "$QUEUE_FILE" > "$QUEUE_FILE.tmp"
+  ' "$QUEUE_FILE" > "$queue_tmp"
   local rc=$?
 
   if [ $rc -eq 0 ]; then
-    mv "$QUEUE_FILE.tmp" "$QUEUE_FILE"
+    mv "$queue_tmp" "$QUEUE_FILE"
     return 0
   elif [ $rc -eq 2 ]; then
-    rm -f "$QUEUE_FILE.tmp"
+    rm -f "$queue_tmp"
     echo "queue: no entry matched title='$title' target='$target'" >&2
     return 1
   else
-    rm -f "$QUEUE_FILE.tmp"
+    rm -f "$queue_tmp"
     die "remove failed (awk rc=$rc)"
   fi
 }
@@ -216,8 +242,8 @@ cmd_remove() {
 
 SUBCMD="$1"; shift
 case "$SUBCMD" in
-  append) cmd_append "$@" ;;
+  append) acquire_lock; cmd_append "$@" ;;
   list)   cmd_list "$@" ;;
-  remove) cmd_remove "$@" ;;
+  remove) acquire_lock; cmd_remove "$@" ;;
   *) die "unknown subcommand: $SUBCMD" ;;
 esac

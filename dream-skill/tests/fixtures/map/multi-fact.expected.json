@@ -6,7 +6,8 @@
     "source_date": "2026-06-01",
     "type": "world-fact",
     "evidence": "I'm moving to San Francisco in two months. SF is for a new job.",
-    "suggested_section": "Location"
+    "suggested_section": "Location",
+    "memory_tier": "current"
   },
   {
     "content": "Building a gesture recognition model with PyTorch as a side project (computer vision)",
@@ -15,6 +16,7 @@
     "source_date": "2026-06-01",
     "type": "experience",
     "evidence": "Been diving deep into PyTorch for a computer vision side project. Working on a gesture recognition model.",
-    "suggested_section": "Skills"
+    "suggested_section": "Skills",
+    "memory_tier": "stable"
   }
 ]

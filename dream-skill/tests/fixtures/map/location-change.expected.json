@@ -6,6 +6,7 @@
     "source_date": "2026-06-01",
     "type": "world-fact",
     "evidence": "I'm moving to New York next month. I got a job offer there.",
-    "suggested_section": "Location"
+    "suggested_section": "Location",
+    "memory_tier": "current"
   }
 ]

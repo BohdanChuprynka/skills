@@ -9,7 +9,8 @@
       "evidence": "Marcus Chen said he's interested, wants a follow-up call",
       "source_chat": "ghi789",
       "source_date": "2026-06-03",
-      "suggested_section": "Pipeline"
+      "suggested_section": "Pipeline",
+      "memory_tier": "current"
     },
     "routing_context": "(elided)"
   },

@@ -7,7 +7,8 @@
     "evidence": "\"I've been thinking maybe PM could be interesting\"",
     "source_chat": "session-abc127",
     "source_date": "2026-06-02",
-    "suggested_section": "Goals"
+    "suggested_section": "Goals",
+    "memory_tier": "stable"
   },
   "target_page_snapshot": "# Goals\n\n## Goals\n\n- become a strong ML engineer\n",
   "run_date": "2026-06-03",

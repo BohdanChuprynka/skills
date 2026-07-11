@@ -8,7 +8,10 @@ SETUP="$ROOT/setup.sh"
 
 fail() { echo "FAIL: $*"; exit 1; }
 
-[ -x "$SETUP" ] || fail "setup.sh missing or not executable"
+if [ ! -x "$SETUP" ]; then
+  echo "SKIP: setup.sh is source-checkout-only"
+  exit 0
+fi
 
 TMPHOME=$(mktemp -d "/tmp/dream-setup-home-XXXXXX")
 FAKEBIN=$(mktemp -d "/tmp/dream-setup-bin-XXXXXX")
@@ -46,8 +49,10 @@ test -x "$TMPHOME/.codex/skills/dream-skill/scripts/find-chats.sh" \
   || fail "Codex scripts/find-chats.sh missing or not executable"
 test -f "$TMPHOME/.codex/skills/dream-skill/ROUTING.md" \
   || fail "Codex ROUTING.md not copied"
-test -f "$TMPHOME/.codex/skills/dream-skill/requirements.txt" \
-  || fail "Codex requirements.txt not copied"
+test -f "$TMPHOME/.codex/skills/dream-skill/prompts/map.md" \
+  || fail "Codex stage prompts not copied"
+test -x "$TMPHOME/.codex/skills/dream-skill/tests/run.sh" \
+  || fail "Codex tests not copied"
 test -f "$TMPHOME/.codex/skills/dream-skill/web/dream-review.html" \
   || fail "Codex review web asset not copied"
 test -f "$TMPHOME/.codex/skills/dream-skill/agents/openai.yaml" \

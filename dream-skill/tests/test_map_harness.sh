@@ -17,13 +17,13 @@ VALIDATE_SCRIPT="$SCRIPT_DIR/../scripts/validate-candidates.sh"
 source "$VALIDATE_SCRIPT"
 
 # ── Test 1: valid candidate, required fields only (no optionals) ──────────────
-VALID='[{"content":"c","confidence":"high","source_chat":"/a.jsonl","source_date":"2026-06-01"}]'
+VALID='[{"content":"c","confidence":"high","source_chat":"/a.jsonl","source_date":"2026-06-01","memory_tier":"stable"}]'
 OUT=$(validate_candidates "$VALID")
 echo "$OUT" | jq 'length' | grep -q "^1$" || fail "valid candidate (required-only) was filtered out"
 echo "PASS: valid candidate (required fields only) passes validation"
 
 # ── Test 2: candidate with optional fields also passes ────────────────────────
-VALID_OPT='[{"content":"c","confidence":"high","source_chat":"/a.jsonl","source_date":"2026-06-01","type":"world-fact","evidence":"quote","suggested_section":"Skills"}]'
+VALID_OPT='[{"content":"c","confidence":"high","source_chat":"/a.jsonl","source_date":"2026-06-01","type":"world-fact","evidence":"quote","suggested_section":"Skills","memory_tier":"stable"}]'
 OUT_OPT=$(validate_candidates "$VALID_OPT")
 echo "$OUT_OPT" | jq 'length' | grep -q "^1$" || fail "candidate with optional fields was filtered out"
 echo "PASS: candidate with optional fields (type, evidence, suggested_section) passes validation"
@@ -72,9 +72,9 @@ echo "PASS: empty array is valid"
 # ── Test 9: mixed array — only valid items survive ───────────────────────────
 # One item has all 4 required fields; one is missing source_date; one is missing confidence.
 MIXED='[
-  {"content":"valid","confidence":"high","source_chat":"/b.jsonl","source_date":"2026-05-01"},
-  {"content":"no-date","confidence":"medium","source_chat":"/c.jsonl"},
-  {"content":"no-conf","source_chat":"/d.jsonl","source_date":"2026-05-02"}
+  {"content":"valid","confidence":"high","source_chat":"/b.jsonl","source_date":"2026-05-01","memory_tier":"stable"},
+  {"content":"no-date","confidence":"medium","source_chat":"/c.jsonl","memory_tier":"stable"},
+  {"content":"no-conf","source_chat":"/d.jsonl","source_date":"2026-05-02","memory_tier":"stable"}
 ]'
 OUT_MIXED=$(validate_candidates "$MIXED")
 echo "$OUT_MIXED" | jq 'length' | grep -q "^1$" || fail "mixed array: expected 1 valid candidate, got something else"
@@ -84,9 +84,9 @@ echo "PASS: mixed array — only the fully-valid candidate survives"
 # ── Test 10: optional-fields-missing does NOT drop the fact ──────────────────
 # This is the normative invariant from overview §4.
 # Confirm type/evidence/suggested_section each independently absent → still valid.
-NO_TYPE='[{"content":"c","confidence":"medium","source_chat":"/e.jsonl","source_date":"2026-06-02"}]'
-NO_EVIDENCE='[{"content":"c","confidence":"low","source_chat":"/f.jsonl","source_date":"2026-06-02","type":"observation"}]'
-NO_SECTION='[{"content":"c","confidence":"high","source_chat":"/g.jsonl","source_date":"2026-06-02","evidence":"quote"}]'
+NO_TYPE='[{"content":"c","confidence":"medium","source_chat":"/e.jsonl","source_date":"2026-06-02","memory_tier":"stable"}]'
+NO_EVIDENCE='[{"content":"c","confidence":"low","source_chat":"/f.jsonl","source_date":"2026-06-02","type":"observation","memory_tier":"stable"}]'
+NO_SECTION='[{"content":"c","confidence":"high","source_chat":"/g.jsonl","source_date":"2026-06-02","evidence":"quote","memory_tier":"stable"}]'
 for CASE in "$NO_TYPE" "$NO_EVIDENCE" "$NO_SECTION"; do
   OUT_OPT2=$(validate_candidates "$CASE")
   echo "$OUT_OPT2" | jq 'length' | grep -q "^1$" || fail "optional-fields-missing case filtered incorrectly: $CASE"

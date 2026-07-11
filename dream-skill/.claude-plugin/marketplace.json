@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "dream-skill-marketplace",
-  "description": "Distribution marketplace for dream-skill — auto-record Claude Code conversations to your Obsidian vault.",
+  "description": "Distribution marketplace for reliable Claude Code and Codex to Obsidian synchronization.",
   "owner": {
     "name": "Bohdan Chuprynka",
     "url": "https://github.com/BohdanChuprynka"
@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "dream-skill",
-      "description": "Auto-record Claude Code conversations to your Obsidian vault. Confident facts written on session close; uncertain or destructive edits queued for manual review.",
-      "version": "0.3.1",
+      "description": "Sync durable Claude Code and Codex context into Obsidian with transactional review and measurable canaries.",
+      "version": "0.4.0",
       "source": "./",
       "category": "productivity",
       "author": {
