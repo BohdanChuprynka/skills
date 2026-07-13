@@ -74,4 +74,6 @@ curl -fsS -X POST -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' 
 wait "$SERVER_PID"
 SERVER_PID=""
 
+python3 "$SKILL_DIR/tests/test_serve_review.py"
+
 echo "test_review_server: ok"

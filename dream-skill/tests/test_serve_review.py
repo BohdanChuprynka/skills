@@ -8,6 +8,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SERVE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "serve-review.py"
@@ -18,6 +19,24 @@ spec.loader.exec_module(serve)
 
 
 class ReviewServerHelpersTest(unittest.TestCase):
+    def test_loopback_server_bind_does_not_resolve_dns(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            root = Path(raw_tmp)
+            handler = serve.make_handler(
+                root / "queue.json",
+                root / "decisions.json",
+                root / "review.html",
+                "test-token",
+                root / "feedback.json",
+            )
+            with patch("socket.getfqdn", side_effect=AssertionError("reverse DNS called")):
+                server = serve.LoopbackThreadingHTTPServer(("127.0.0.1", 0), handler)
+            try:
+                self.assertEqual(server.server_name, "localhost")
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.server_close()
+
     def test_host_parser_keeps_loopback_forms(self) -> None:
         self.assertEqual(serve.host_name("localhost:5174"), "localhost")
         self.assertEqual(serve.host_name("127.0.0.1:5174"), "127.0.0.1")
