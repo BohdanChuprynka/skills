@@ -42,8 +42,8 @@ curl -fsS -X POST -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' 
   -d '{"id":"c-test","decision":"approve"}' "$BASE/api/decide" | jq -e '.ok' >/dev/null
 jq -e '."c-test" == "approve"' "$TMP/decisions.json" >/dev/null
 jq -e '."c-test".decision == "approve" and ."c-test".reason == "accepted"' "$TMP/feedback.json" >/dev/null
-[ "$(stat -f '%Lp' "$TMP/decisions.json" 2>/dev/null || stat -c '%a' "$TMP/decisions.json")" = "600" ]
-[ "$(stat -f '%Lp' "$TMP/feedback.json" 2>/dev/null || stat -c '%a' "$TMP/feedback.json")" = "600" ]
+[ "$(stat -c '%a' "$TMP/decisions.json" 2>/dev/null || stat -f '%Lp' "$TMP/decisions.json")" = "600" ]
+[ "$(stat -c '%a' "$TMP/feedback.json" 2>/dev/null || stat -f '%Lp' "$TMP/feedback.json")" = "600" ]
 curl -fsS -X POST -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' \
   -d '{"id":"c-reject","decision":"reject","reason":"not_durable"}' "$BASE/api/decide" | jq -e '.ok' >/dev/null
 jq -e '."c-reject".decision == "reject" and ."c-reject".reason == "not_durable"' "$TMP/feedback.json" >/dev/null

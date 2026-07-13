@@ -21,6 +21,6 @@ python3 "$SKILL_DIR/scripts/dream-health.py" --home "$TMP" > "$TMP/health.json"
 jq -e '.queue.pending_entries == 1 and .queue.orphan_pending == 0 and .privacy.unsafe_paths > 0 and .runs.active == 1 and .runs.stale == 1' "$TMP/health.json" >/dev/null
 jq -e '.alerts | any(test("stale run state"))' "$TMP/health.json" >/dev/null
 python3 "$SKILL_DIR/scripts/dream-health.py" --home "$TMP" --fix-permissions > "$TMP/fixed.json"
-[ "$(stat -f '%Lp' "$TMP/queue" 2>/dev/null || stat -c '%a' "$TMP/queue")" = "700" ]
+[ "$(stat -c '%a' "$TMP/queue" 2>/dev/null || stat -f '%Lp' "$TMP/queue")" = "700" ]
 
 echo "test_dream_health: ok"

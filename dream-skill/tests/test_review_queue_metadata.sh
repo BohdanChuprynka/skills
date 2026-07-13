@@ -87,6 +87,6 @@ rg -q 'reconciliation rationale' "$HTML"
 rg -q 'person identity' "$HTML"
 node "$SKILL_DIR/tests/test_review_ui_persistence.mjs" "$HTML"
 
-[ "$(stat -f '%Lp' "$TMP/review.json" 2>/dev/null || stat -c '%a' "$TMP/review.json")" = "600" ]
+[ "$(stat -c '%a' "$TMP/review.json" 2>/dev/null || stat -f '%Lp' "$TMP/review.json")" = "600" ]
 
 echo "test_review_queue_metadata: ok"

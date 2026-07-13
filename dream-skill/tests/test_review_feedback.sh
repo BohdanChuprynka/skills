@@ -38,6 +38,6 @@ jq -e '.groups.memory_tier.current.outcomes.reject == 1 and .groups.quality_revi
 jq -e '.groups.historical_review.historical.rejection_reasons.not_durable == 1 and .groups.vault.projects.rejection_reasons.wrong_target == 1 and .groups.run_id."run-week-1".reviewed == 2' "$TMP/summary.json" >/dev/null
 jq -e '.improvement_signals | length == 2' "$TMP/summary.json" >/dev/null
 ! rg -q 'private candidate text|another private fact|third private fact|"a"|"b"|"c"' "$TMP/summary.json"
-[ "$(stat -f '%Lp' "$TMP/summary.json" 2>/dev/null || stat -c '%a' "$TMP/summary.json")" = "600" ]
+[ "$(stat -c '%a' "$TMP/summary.json" 2>/dev/null || stat -f '%Lp' "$TMP/summary.json")" = "600" ]
 
 echo "test_review_feedback: ok"

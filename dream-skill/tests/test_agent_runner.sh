@@ -32,8 +32,8 @@ chmod +x "$TMP/fake-codex"
 "$RUNNER" --stage route --workdir "$TMP/work" --instructions "$TMP/instructions.md" \
   --codex-bin "$TMP/fake-codex" --concurrency 1 --retries 1 --timeout 30 >/dev/null
 jq -e '.failed == 0 and .completed == 1 and .results[0].attempts == 2' "$TMP/work/route-run-summary.json" >/dev/null
-[ "$(stat -f '%Lp' "$TMP/work/route-out-route-0001.json")" = "600" ]
-[ "$(stat -f '%Lp' "$TMP/work/route-log-route-0001-attempt-02.txt")" = "600" ]
+[ "$(stat -c '%a' "$TMP/work/route-out-route-0001.json" 2>/dev/null || stat -f '%Lp' "$TMP/work/route-out-route-0001.json")" = "600" ]
+[ "$(stat -c '%a' "$TMP/work/route-log-route-0001-attempt-02.txt" 2>/dev/null || stat -f '%Lp' "$TMP/work/route-log-route-0001-attempt-02.txt")" = "600" ]
 
 "$RUNNER" --stage route --workdir "$TMP/work" --instructions "$TMP/instructions.md" \
   --codex-bin "$TMP/fake-codex" --concurrency 1 --retries 1 --timeout 30 >/dev/null
