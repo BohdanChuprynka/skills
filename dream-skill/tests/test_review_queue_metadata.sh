@@ -77,10 +77,10 @@ jq -e '.entries[] | select(.id == "c-legacy") |
   .decided == true and .decision == "defer"' "$TMP/review.json" >/dev/null
 
 HTML="$SKILL_DIR/web/dream-review.html"
-for control in filterSample filterHistorical filterCohort filterVault filterPage filterTier filterClass sortOrder; do
-  rg -q "id=\"$control\"" "$HTML"
-done
-rg -q 'value="quality_first"' "$HTML"
+! rg -q 'id="filterbar"|id="filterSample"|id="sortOrder"' "$HTML"
+rg -Fq 'VIEW_QUEUE = pendingEntries().sort(compareEntries)' "$HTML"
+rg -Fq 'grid-template-columns: repeat(4, minmax(0, 1fr))' "$HTML"
+rg -q 'class="meta-cell meta-type"' "$HTML"
 rg -q 'quality_review_sample' "$HTML"
 rg -q 'exact source evidence' "$HTML"
 rg -q 'reconciliation rationale' "$HTML"

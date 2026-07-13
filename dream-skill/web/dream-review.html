@@ -126,29 +126,6 @@
   }
   .top-btn.primary:hover { background: #0fd693; border-color: #0fd693; }
 
-  /* ─────────── Review filters ─────────── */
-  .filterbar {
-    flex-shrink: 0; display: flex; align-items: center; gap: 8px;
-    padding: 10px 28px; border-bottom: 1px solid var(--border-soft);
-    background: var(--bg-elev-1); overflow-x: auto;
-  }
-  .filterbar select {
-    min-width: 118px; max-width: 210px; padding: 7px 28px 7px 9px;
-    border: 1px solid var(--border); border-radius: 6px;
-    background: var(--bg-elev-2); color: var(--text-2);
-    font: 11px/1.2 var(--mono); cursor: pointer;
-  }
-  .filterbar select:focus { outline: 1px solid var(--accent-line); border-color: var(--accent-line); }
-  .filter-summary {
-    margin-left: auto; white-space: nowrap; color: var(--text-3);
-    font: 11px/1 var(--mono);
-  }
-  .reset-filters {
-    border: 0; background: transparent; color: var(--link); cursor: pointer;
-    white-space: nowrap; font: 11px/1 var(--mono); padding: 7px;
-  }
-  .reset-filters:hover { color: var(--text); }
-
   /* ─────────── Stage / cards ─────────── */
   .stage {
     position: relative;
@@ -183,28 +160,36 @@
 
   /* ─────────── Card meta ─────────── */
   .meta-row {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    column-gap: 24px; row-gap: 18px;
     margin-bottom: 28px; padding-bottom: 22px;
     border-bottom: 1px solid var(--border-soft);
   }
   .meta-cell {
+    min-width: 0;
     display: flex; flex-direction: column; gap: 5px;
-    padding: 0 18px 0 0; margin-right: 18px;
-    border-right: 1px solid var(--border-soft);
   }
-  .meta-cell:last-of-type { border-right: none; margin-right: 0; padding-right: 0; }
+  .meta-cell.meta-type {
+    grid-column: 1 / -1;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border-soft);
+  }
   .meta-label {
     font-family: var(--mono); font-size: 10.5px; font-weight: 500;
     letter-spacing: 0.04em; color: var(--text-4); text-transform: lowercase; line-height: 1;
   }
   .meta-value {
     font-family: var(--sans); font-size: 14px; font-weight: 500;
-    color: var(--text); letter-spacing: -0.005em; line-height: 1;
-    display: inline-flex; align-items: center;
+    color: var(--text); letter-spacing: -0.005em; line-height: 1.3;
+    display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    overflow-wrap: anywhere;
   }
+  .meta-type .meta-value { font-size: 16px; gap: 8px; }
   .conf-dot {
     display: inline-block; width: 7px; height: 7px;
-    border-radius: 50%; margin-right: 6px; vertical-align: middle; transform: translateY(-1px);
+    border-radius: 50%; vertical-align: middle; transform: translateY(-1px);
+    flex: 0 0 7px;
   }
   .conf-dot.high   { background: var(--conf-high); box-shadow: 0 0 6px rgba(16,185,129,0.6); }
   .conf-dot.medium { background: var(--conf-med);  box-shadow: 0 0 6px rgba(245,158,11,0.5); }
@@ -366,13 +351,13 @@
     color: var(--text-3); font: 500 10px/1 var(--mono);
   }
   .historical-flag {
-    display: inline-flex; align-items: center; padding: 3px 7px; margin-left: 7px;
+    display: inline-flex; align-items: center; padding: 3px 7px;
     border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 4px;
     color: var(--defer); background: var(--defer-soft);
     font: 600 9px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
   }
   .sample-flag {
-    display: inline-flex; align-items: center; padding: 3px 7px; margin-left: 7px;
+    display: inline-flex; align-items: center; padding: 3px 7px;
     border: 1px solid rgba(96, 165, 250, 0.35); border-radius: 4px;
     color: var(--link); background: var(--link-soft);
     font: 600 9px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
@@ -424,6 +409,32 @@
   }
   .apply-btn:hover { background: #0fd693; border-color: #0fd693; }
 
+  @media (max-width: 720px) {
+    .topbar { padding: 14px 18px; }
+    .progress-bar { width: 110px; }
+    .stage { padding: 20px 16px; }
+    .card { padding: 26px 24px 28px; }
+    .meta-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .meta-cell.meta-type { grid-column: 1 / -1; }
+    .actionbar { height: 80px; gap: 8px; padding: 0 14px; }
+    .act { min-width: 0; padding: 13px 16px; }
+  }
+
+  @media (max-width: 520px) {
+    .topbar { grid-template-columns: 1fr auto; }
+    .brand { display: none; }
+    .progress { justify-self: start; }
+    .progress-bar { display: none; }
+    .actions-top { grid-column: 2; }
+    .top-btn { padding: 8px 10px; }
+    .card { padding: 22px 18px 24px; border-radius: 10px; }
+    .meta-row { column-gap: 18px; }
+    .path { font-size: 16px; }
+    .actionbar { gap: 6px; }
+    .act { gap: 6px; padding: 12px 10px; }
+    .act .kbd { display: none; }
+  }
+
   /* ─────────── Utility ─────────── */
   .hidden { display: none !important; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -445,37 +456,6 @@
     <button class="top-btn primary" onclick="confirmFinishNow()">Finish</button>
   </div>
 </header>
-
-<div class="filterbar hidden" id="filterbar" aria-label="Review filters">
-  <select id="filterSample" onchange="applyFilters()" aria-label="Quality sample">
-    <option value="all">sample · all</option>
-    <option value="sample">sample · only</option>
-    <option value="not_sample">sample · exclude</option>
-  </select>
-  <select id="filterHistorical" onchange="applyFilters()" aria-label="Historical review">
-    <option value="all">historical · all</option>
-    <option value="historical">historical · only</option>
-    <option value="not_historical">historical · exclude</option>
-  </select>
-  <select id="filterCohort" onchange="applyFilters()" aria-label="Cohort">
-    <option value="all">cohort · all</option>
-    <option value="run">cohort · run</option>
-    <option value="legacy">cohort · legacy</option>
-  </select>
-  <select id="filterVault" onchange="applyFilters()" aria-label="Vault"><option value="all">vault · all</option></select>
-  <select id="filterPage" onchange="applyFilters()" aria-label="Page"><option value="all">page · all</option></select>
-  <select id="filterTier" onchange="applyFilters()" aria-label="Memory tier"><option value="all">tier · all</option></select>
-  <select id="filterClass" onchange="applyFilters()" aria-label="Fact class"><option value="all">class · all</option></select>
-  <select id="sortOrder" onchange="applyFilters()" aria-label="Sort order">
-    <option value="quality_first">sort · quality sample first</option>
-    <option value="newest">sort · newest first</option>
-    <option value="oldest">sort · oldest first</option>
-    <option value="vault">sort · vault</option>
-    <option value="page">sort · page</option>
-  </select>
-  <button class="reset-filters" onclick="resetFilters()">reset</button>
-  <span class="filter-summary" id="filterSummary"></span>
-</div>
 
 <main class="stage" id="stage"></main>
 
@@ -584,103 +564,33 @@ async function loadQueue(data) {
 
   document.querySelector('.topbar .progress').classList.remove('hidden');
   document.querySelector('.actions-top').classList.remove('hidden');
-  document.getElementById('filterbar').classList.remove('hidden');
   document.getElementById('progressTotal').textContent = total;
 
   if (total === 0) { renderEmpty(); return; }
   document.getElementById('actionbar').classList.remove('hidden');
-  populateFilters();
-  applyFilters();
+  refreshView();
 }
-
-function valueOf(e, key, fallback = 'unknown') {
-  const value = String(e[key] || '').trim();
-  return value || fallback;
-}
-
-function setDynamicOptions(id, prefix, values) {
-  const select = document.getElementById(id);
-  const current = select.value;
-  const options = [...new Set(values)].sort((a, b) => a.localeCompare(b));
-  select.innerHTML = `<option value="all">${escHtml(prefix)} · all</option>` +
-    options.map(value => `<option value="${escHtml(value)}">${escHtml(prefix)} · ${escHtml(value)}</option>`).join('');
-  if (options.includes(current)) select.value = current;
-}
-
-function populateFilters() {
-  setDynamicOptions('filterVault', 'vault', QUEUE.map(e => valueOf(e, 'vault', 'unrouted')));
-  setDynamicOptions('filterPage', 'page', QUEUE.map(e => valueOf(e, 'target_file')));
-  setDynamicOptions('filterTier', 'tier', QUEUE.map(e => valueOf(e, 'memory_tier')));
-  setDynamicOptions('filterClass', 'class', QUEUE.map(e => valueOf(e, 'fact_class')));
-}
-
-function selected(id) { return document.getElementById(id).value; }
 
 function pendingEntries() {
   return QUEUE.filter(e => !decisions[e.id]);
 }
 
-function filterMatches(e) {
-  const sample = selected('filterSample');
-  const historical = selected('filterHistorical');
-  const cohort = selected('filterCohort');
-  if (sample === 'sample' && !e.quality_review_sample) return false;
-  if (sample === 'not_sample' && e.quality_review_sample) return false;
-  if (historical === 'historical' && !e.historical_review) return false;
-  if (historical === 'not_historical' && e.historical_review) return false;
-  if (cohort !== 'all' && valueOf(e, 'review_cohort', e.run_id ? 'run' : 'legacy') !== cohort) return false;
-  if (selected('filterVault') !== 'all' && valueOf(e, 'vault', 'unrouted') !== selected('filterVault')) return false;
-  if (selected('filterPage') !== 'all' && valueOf(e, 'target_file') !== selected('filterPage')) return false;
-  if (selected('filterTier') !== 'all' && valueOf(e, 'memory_tier') !== selected('filterTier')) return false;
-  if (selected('filterClass') !== 'all' && valueOf(e, 'fact_class') !== selected('filterClass')) return false;
-  return true;
-}
-
 function dateKey(e) { return String(e.source_date || e.first_seen || ''); }
 
 function compareEntries(a, b) {
-  const order = selected('sortOrder');
-  if (order === 'quality_first') {
-    const sampleDelta = Number(Boolean(b.quality_review_sample)) - Number(Boolean(a.quality_review_sample));
-    if (sampleDelta) return sampleDelta;
-    const historicalDelta = Number(Boolean(b.historical_review)) - Number(Boolean(a.historical_review));
-    if (historicalDelta) return historicalDelta;
-    return dateKey(b).localeCompare(dateKey(a)) || String(a.id).localeCompare(String(b.id));
-  }
-  if (order === 'oldest') return dateKey(a).localeCompare(dateKey(b)) || String(a.id).localeCompare(String(b.id));
-  if (order === 'vault') return valueOf(a, 'vault').localeCompare(valueOf(b, 'vault')) || valueOf(a, 'target_file').localeCompare(valueOf(b, 'target_file'));
-  if (order === 'page') return valueOf(a, 'target_file').localeCompare(valueOf(b, 'target_file')) || dateKey(b).localeCompare(dateKey(a));
+  const sampleDelta = Number(Boolean(b.quality_review_sample)) - Number(Boolean(a.quality_review_sample));
+  if (sampleDelta) return sampleDelta;
+  const historicalDelta = Number(Boolean(b.historical_review)) - Number(Boolean(a.historical_review));
+  if (historicalDelta) return historicalDelta;
   return dateKey(b).localeCompare(dateKey(a)) || String(a.id).localeCompare(String(b.id));
 }
 
-function applyFilters() {
-  VIEW_QUEUE = pendingEntries().filter(filterMatches).sort(compareEntries);
+function refreshView() {
+  VIEW_QUEUE = pendingEntries().sort(compareEntries);
   const pending = pendingEntries().length;
-  document.getElementById('filterSummary').textContent = `${VIEW_QUEUE.length} shown · ${pending} pending`;
   if (!pending) { renderSummary(false); return; }
-  if (!VIEW_QUEUE.length) { renderFilteredEmpty(); return; }
   document.getElementById('actionbar').classList.remove('hidden');
   renderCards();
-}
-
-function resetFilters() {
-  ['filterSample', 'filterHistorical', 'filterCohort', 'filterVault', 'filterPage', 'filterTier', 'filterClass'].forEach(id => {
-    document.getElementById(id).value = 'all';
-  });
-  document.getElementById('sortOrder').value = 'quality_first';
-  applyFilters();
-}
-
-function renderFilteredEmpty() {
-  document.getElementById('actionbar').classList.add('hidden');
-  document.getElementById('stage').innerHTML = `
-    <div class="summary">
-      <div class="eyebrow">filtered view</div>
-      <h2>No matching facts.</h2>
-      <p class="lede">Pending facts remain outside this filter.</p>
-      <div class="summary-buttons"><button class="apply-btn" onclick="resetFilters()">Reset filters</button></div>
-    </div>`;
-  updateProgress();
 }
 
 function renderNoQueue() {
@@ -710,7 +620,7 @@ function renderEmpty() {
 function renderCards() {
   const stage = document.getElementById('stage');
   stage.innerHTML = '';
-  if (!VIEW_QUEUE.length) { applyFilters(); return; }
+  if (!VIEW_QUEUE.length) return;
 
   for (let offset = 2; offset >= 0; offset--) {
     const idx = offset;
@@ -762,7 +672,7 @@ function buildCard(e) {
 
   return `
     <div class="meta-row">
-      <div class="meta-cell">
+      <div class="meta-cell meta-type">
         <span class="meta-label">type</span>
         <span class="meta-value">${escHtml(factClass)}${historicalFlag}${sampleFlag}${personFlag}</span>
       </div>
@@ -895,7 +805,7 @@ async function commitDecision(action, reason) {
       else if (action === 'reject') cur.classList.add('swipe-left');
       else cur.classList.add('swipe-up');
     }
-    setTimeout(() => { applyFilters(); }, 320);
+    setTimeout(() => { refreshView(); }, 320);
   } catch (error) {
     const detail = error instanceof Error && error.message ? error.message : 'request failed';
     showDecisionError(detail);
