@@ -27,12 +27,21 @@ python3 "$SKILL_DIR/scripts/serve-review.py" \
   --port "$PORT" --no-browser > "$TMP/server.log" 2>&1 &
 SERVER_PID=$!
 
-for _ in $(seq 1 50); do
+for _ in $(seq 1 200); do
   rg -q 'token=' "$TMP/server.log" && break
-  sleep 0.05
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "review server exited before becoming ready" >&2
+    cat "$TMP/server.log" >&2
+    exit 1
+  fi
+  sleep 0.1
 done
 TOKEN=$(sed -n 's/^.*token=\([^ ]*\)$/\1/p' "$TMP/server.log" | head -n 1)
-[ -n "$TOKEN" ]
+if [ -z "$TOKEN" ]; then
+  echo "review server did not become ready within 20 seconds" >&2
+  cat "$TMP/server.log" >&2
+  exit 1
+fi
 
 BASE="http://localhost:$PORT"
 [ "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/api/queue")" = "403" ]
