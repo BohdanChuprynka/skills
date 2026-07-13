@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -35,6 +36,20 @@ REASONS = {
     },
 }
 DEFAULT_REASON = {"approve": "accepted", "defer": "review_later", "reject": "unspecified"}
+
+
+class LoopbackThreadingHTTPServer(ThreadingHTTPServer):
+    """HTTP server that never blocks startup on reverse DNS for loopback."""
+
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind() calls socket.getfqdn(host).  That can block
+        # for tens of seconds on offline or misconfigured macOS runners even
+        # when host is 127.0.0.1.  TCPServer performs the actual safe bind;
+        # Dream already fixes the server to loopback, so no lookup is needed.
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = "localhost" if host in {"127.0.0.1", "::1"} else host
+        self.server_port = port
 
 
 def load_json(path: Path, default: object) -> object:
@@ -72,7 +87,9 @@ def make_handler(
         server_version = "DreamReview/1"
 
         def log_message(self, fmt: str, *args: object) -> None:
-            print(f"review: {self.address_string()} {fmt % args}")
+            # BaseHTTPRequestHandler.address_string() also performs reverse
+            # DNS.  Log the already-known numeric loopback address instead.
+            print(f"review: {self.client_address[0]} {fmt % args}")
 
         def send_bytes(self, status: int, payload: bytes, content_type: str) -> None:
             self.send_response(status)
@@ -260,7 +277,7 @@ def main() -> int:
     if not html_path.is_file():
         parser.error(f"review UI not found: {html_path}")
     token = secrets.token_urlsafe(32)
-    server = ThreadingHTTPServer(
+    server = LoopbackThreadingHTTPServer(
         ("127.0.0.1", args.port),
         make_handler(args.queue, args.decisions, html_path, token, args.feedback),
     )
