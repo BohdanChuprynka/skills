@@ -13,7 +13,6 @@ or silently mis-attributed.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -21,6 +20,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from candidate_identity import candidate_id
 from vault_search import PageSearch, build_page_docs
 
 
@@ -47,12 +47,6 @@ def parse_positive_int(value: str, name: str) -> int:
     if parsed < 1:
         raise ValueError(f"{name} must be >= 1")
     return parsed
-
-
-def candidate_id(candidate: dict[str, Any]) -> str:
-    """Return a stable ID that cannot collide merely because a later run reordered facts."""
-    canonical = json.dumps(candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return "c-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
 
 
 def validate_candidate(candidate: Any, index: int) -> None:
@@ -117,6 +111,7 @@ def build_batches(
                             "page": row["page"],
                             "title": row["title"],
                             "headings": row["headings"][:6],
+                            "retrieval_score": row.get("score"),
                         }
                     )
                 allowed_ids.append(page_id)

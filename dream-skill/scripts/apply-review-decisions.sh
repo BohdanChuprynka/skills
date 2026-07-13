@@ -63,6 +63,19 @@ while IFS= read -r line; do
       vault_root=$(jq -r '.vault_root // empty' "$sidecar")
       title=$(jq -r '.title // .content // ""' "$sidecar")
       target_display=$(jq -r '.target_display // ((.vault_root // "") + "/" + (.target.page // "") + "#" + (.target.section // ""))' "$sidecar")
+      sidecar_run_id=$(jq -r '.run_id // empty' "$sidecar")
+      selected_undo_log="$UNDO_LOG"
+      if [ -n "$sidecar_run_id" ]; then
+        case "$sidecar_run_id" in
+          .|..|*[!A-Za-z0-9._-]*)
+            echo "apply-review-decisions: sidecar $cid has unsafe run_id" >&2
+            ERRORS=$((ERRORS+1)); continue
+            ;;
+        esac
+        # Modern approvals remain attributable to the original candidate run,
+        # even when the operator supplied a legacy/date-shaped fallback path.
+        selected_undo_log="$(dirname "$UNDO_LOG")/${sidecar_run_id}.jsonl"
+      fi
       [ -n "$vault_root" ] || { echo "apply-review-decisions: sidecar $cid missing vault_root" >&2; ERRORS=$((ERRORS+1)); continue; }
       [ -d "$vault_root" ] || { echo "apply-review-decisions: vault_root not found: $vault_root" >&2; ERRORS=$((ERRORS+1)); continue; }
 
@@ -78,7 +91,8 @@ while IFS= read -r line; do
       else
         apply_stdout=$(mktemp)
         apply_stderr=$(mktemp)
-        if ! "$APPLY_SH" --vault "$vault_root" --decision "$PATCHED" --undo-log "$UNDO_LOG" \
+        if ! "$APPLY_SH" --vault "$vault_root" --decision "$PATCHED" \
+          --undo-log "$selected_undo_log" --candidate-id "$cid" \
           >"$apply_stdout" 2>"$apply_stderr"; then
           echo "apply-review-decisions: approve failed for $cid; queue and sidecar retained" >&2
           sed 's/^/  /' "$apply_stderr" >&2 || true

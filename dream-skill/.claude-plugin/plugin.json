@@ -6,8 +6,8 @@
     "name": "Bohdan Chuprynka",
     "url": "https://github.com/BohdanChuprynka"
   },
-  "homepage": "https://github.com/BohdanChuprynka/dream-skill",
-  "repository": "https://github.com/BohdanChuprynka/dream-skill",
+  "homepage": "https://github.com/BohdanChuprynka/skills/tree/main/dream-skill",
+  "repository": "https://github.com/BohdanChuprynka/skills",
   "license": "MIT",
   "hooks": "./hooks/hooks.json",
   "skills": "./skills",

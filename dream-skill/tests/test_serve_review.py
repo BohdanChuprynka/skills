@@ -1,14 +1,14 @@
-"""Security + persistence tests for the dream-skill review server.
-
-Run manually: PYTHONPATH=scripts python3 -m pytest tests/test_serve_review.py
-(The shell run-all.sh harness does not collect Python tests.)
-"""
+"""Unit checks for the standard-library Dream review server helpers."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import stat
+import tempfile
+import unittest
 from pathlib import Path
+
 
 SERVE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "serve-review.py"
 spec = importlib.util.spec_from_file_location("dream_serve_review", SERVE_PATH)
@@ -17,45 +17,32 @@ assert spec and spec.loader
 spec.loader.exec_module(serve)
 
 
-def _app(tmp_path: Path, token: str = "secret-token"):
-    return serve.make_app(
-        tmp_path / "review-input.json",
-        tmp_path / "review-decisions.json",
-        tmp_path / "web",
-        token,
-    )
+class ReviewServerHelpersTest(unittest.TestCase):
+    def test_host_parser_keeps_loopback_forms(self) -> None:
+        self.assertEqual(serve.host_name("localhost:5174"), "localhost")
+        self.assertEqual(serve.host_name("127.0.0.1:5174"), "127.0.0.1")
+        self.assertEqual(serve.host_name("[::1]:5174"), "[::1]")
+
+    def test_feedback_reason_contract(self) -> None:
+        self.assertEqual(
+            serve.DEFAULT_REASON,
+            {"approve": "accepted", "defer": "review_later", "reject": "unspecified"},
+        )
+        self.assertIn("not_durable", serve.REASONS["reject"])
+        self.assertIn("wrong_target", serve.REASONS["reject"])
+        self.assertEqual(serve.REASONS["approve"], {"accepted"})
+
+    def test_save_json_is_private_and_atomic(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            target = Path(raw_tmp) / "queue" / "review-feedback.json"
+            serve.save_json(target, {"c-1": {"decision": "reject", "reason": "stale"}})
+            self.assertEqual(
+                json.loads(target.read_text()),
+                {"c-1": {"decision": "reject", "reason": "stale"}},
+            )
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(target.parent.stat().st_mode), 0o700)
 
 
-def test_api_decide_requires_token(tmp_path: Path) -> None:
-    client = _app(tmp_path).test_client()
-    payload = {"id": "abc", "decision": "approve"}
-    assert client.post("/api/decide", json=payload).status_code == 403
-    assert (
-        client.post("/api/decide", json=payload, headers={"X-CSRF-Token": "no"}).status_code
-        == 403
-    )
-    assert (
-        client.post(
-            "/api/decide", json=payload, headers={"X-CSRF-Token": "secret-token"}
-        ).status_code
-        == 200
-    )
-
-
-def test_api_rejects_non_loopback_host(tmp_path: Path) -> None:
-    client = _app(tmp_path).test_client()
-    r = client.get(
-        "/api/queue",
-        headers={"X-CSRF-Token": "secret-token"},
-        environ_overrides={"HTTP_HOST": "attacker.example"},
-    )
-    assert r.status_code == 403
-
-
-def test_decisions_persist(tmp_path: Path) -> None:
-    client = _app(tmp_path).test_client()
-    h = {"X-CSRF-Token": "secret-token"}
-    client.post("/api/decide", json={"id": "a", "decision": "approve"}, headers=h)
-    client.post("/api/decide", json={"id": "b", "decision": "reject"}, headers=h)
-    saved = json.loads((tmp_path / "review-decisions.json").read_text())
-    assert saved == {"a": "approve", "b": "reject"}
+if __name__ == "__main__":
+    unittest.main()

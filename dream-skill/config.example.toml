@@ -6,6 +6,11 @@ reports_dir = "/absolute/path/to/dream-reports"
 [vaults.personal]
 root = "/absolute/path/to/personal-vault"
 description = "Identity, preferences, goals, relationships, and long-lived context."
+# Optional safeguards for vaults where Dream may suggest changes but should
+# never auto-write, or where only selected folders are valid routing targets.
+# review_only = true
+# route_include = ["Notes", "References"]
+# route_exclude = ["Templates", "_archive"]
 
 [vaults.projects]
 root = "/absolute/path/to/projects-vault"

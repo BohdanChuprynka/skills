@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,13 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def create_private_file(path: Path) -> None:
+    """Create or truncate a subprocess artifact as 0600 before it is opened."""
+    descriptor = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    os.close(descriptor)
+    os.chmod(path, 0o600)
+
+
 def expected_ids(stage: str, task: dict[str, Any]) -> set[str] | None:
     if stage == "map":
         return None
@@ -78,6 +86,67 @@ def valid_output(path: Path, expected: set[str] | None) -> tuple[bool, int]:
         if ids != expected or len(payload) != len(expected):
             return False, len(payload)
     return True, len(payload)
+
+
+def semantic_validator_command(
+    stage: str,
+    input_path: Path,
+    config: Path | None,
+) -> list[str] | None:
+    """Return the production validator command for model-authored decisions.
+
+    The lightweight JSON/ID check above is deliberately cheap, but ROUTE and
+    RECONCILE have stronger contracts that must be checked before an output is
+    considered resumable.  Dream passes --config for production runs; direct
+    runner callers that omit it retain the lightweight behavior used by older
+    integrations and test stubs.
+    """
+    if config is None:
+        return None
+    script_dir = Path(__file__).resolve().parent
+    if stage == "route":
+        return [
+            str(script_dir / "validate-route-batch.py"),
+            "--batch",
+            str(input_path),
+            "--config",
+            str(config),
+            "--missing-page-policy",
+            "gap",
+        ]
+    if stage == "reconcile":
+        return [
+            str(script_dir / "validate-reconcile-batch.py"),
+            "--batch",
+            str(input_path),
+        ]
+    return None
+
+
+def semantic_output_valid(
+    stage: str,
+    input_path: Path,
+    output_path: Path,
+    config: Path | None,
+) -> tuple[bool, str]:
+    command = semantic_validator_command(stage, input_path, config)
+    if command is None:
+        return True, ""
+    try:
+        result = subprocess.run(
+            command,
+            input=output_path.read_bytes(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"validator execution failed: {exc}"
+    if result.returncode == 0:
+        return True, ""
+    detail = result.stderr.decode("utf-8", errors="replace").strip()
+    return False, detail[:2000] or f"validator exited {result.returncode}"
 
 
 def normalize_claude_json_array(path: Path) -> None:
@@ -239,6 +308,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--codex-bin", default=os.environ.get("CODEX_BIN", "codex"))
     parser.add_argument("--claude-bin", default=os.environ.get("CLAUDE_BIN", "claude"))
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="enable production ROUTE/RECONCILE semantic validation with this Dream config",
+    )
     parser.add_argument("--model")
     parser.add_argument("--effort")
     parser.add_argument("--concurrency", default="4")
@@ -254,6 +328,8 @@ def main(argv: list[str] | None = None) -> int:
         os.chmod(args.workdir, 0o700)
         if not args.instructions.is_file():
             raise ValueError(f"instructions not found: {args.instructions}")
+        if args.config is not None and not args.config.is_file():
+            raise ValueError(f"config not found: {args.config}")
         source_name = "map-units.json" if args.stage == "map" else f"{args.stage}-batches.json"
         tasks = load_json(args.workdir / source_name)
         if not isinstance(tasks, list):
@@ -282,7 +358,12 @@ def main(argv: list[str] | None = None) -> int:
         expected = expected_ids(args.stage, task)
         fingerprint = task_fingerprint(task, input_path, prompt_hash)
         valid, count = valid_output(output_path, expected)
-        if valid and previous_fingerprints.get(batch_id) == fingerprint:
+        semantic_valid, _ = (
+            semantic_output_valid(args.stage, input_path, output_path, args.config)
+            if valid
+            else (False, "")
+        )
+        if valid and semantic_valid and previous_fingerprints.get(batch_id) == fingerprint:
             return {
                 "batch_id": batch_id,
                 "status": "skipped-existing",
@@ -298,12 +379,23 @@ def main(argv: list[str] | None = None) -> int:
         os.chmod(prompt_path, 0o600)
         started = time.monotonic()
         last_status = "failed"
+        last_validation_error = ""
         attempts_done = 0
-        for attempt in range(1, retries + 2):
-            attempts_done = attempt
-            log = args.workdir / f"{args.stage}-log-{batch_id}-attempt-{attempt:02d}.txt"
+        attempt_logs: list[str] = []
+        previous_numbers: list[int] = []
+        for previous_log in args.workdir.glob(f"{args.stage}-log-{batch_id}-attempt-*.txt"):
+            match = re.search(r"-attempt-(\d+)\.txt$", previous_log.name)
+            if match:
+                previous_numbers.append(int(match.group(1)))
+        first_attempt_number = max(previous_numbers, default=0) + 1
+        for local_attempt in range(1, retries + 2):
+            attempts_done = local_attempt
+            attempt_number = first_attempt_number + local_attempt - 1
+            log = args.workdir / f"{args.stage}-log-{batch_id}-attempt-{attempt_number:02d}.txt"
+            attempt_logs.append(log.name)
             for path in (output_path, log):
                 path.unlink(missing_ok=True)
+                create_private_file(path)
             try:
                 if args.engine == "claude":
                     with prompt_path.open("rb") as stdin, output_path.open("wb") as stdout, log.open(
@@ -342,23 +434,57 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             valid, count = valid_output(output_path, expected)
             if valid:
+                semantic_valid, semantic_error = semantic_output_valid(
+                    args.stage,
+                    input_path,
+                    output_path,
+                    args.config,
+                )
+                if not semantic_valid:
+                    with log.open("a", encoding="utf-8") as handle:
+                        handle.write(f"\nsemantic validation failed: {semantic_error}\n")
+                    last_status = "semantic-validation-failed"
+                    last_validation_error = semantic_error
+                    feedback = semantic_error[:1000]
+                    prompt_path.write_text(
+                        task_prompt(
+                            args.stage,
+                            args.instructions,
+                            task,
+                            input_path,
+                            output_path,
+                            args.routing_rules,
+                        )
+                        + "\nThe previous output failed the trusted local validator. "
+                        + "Correct this exact contract error on the next attempt:\n"
+                        + feedback
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    os.chmod(prompt_path, 0o600)
+                    continue
                 os.chmod(output_path, 0o600)
                 return {
                     "batch_id": batch_id,
                     "status": "ok",
                     "count": count,
-                    "attempts": attempt,
+                    "attempts": local_attempt,
+                    "attempt_logs": attempt_logs,
                     "seconds": round(time.monotonic() - started, 3),
                     "fingerprint": fingerprint,
                 }
             last_status = "invalid-or-missing-output"
-        return {
+        failure = {
             "batch_id": batch_id,
             "status": last_status,
             "attempts": attempts_done,
+            "attempt_logs": attempt_logs,
             "seconds": round(time.monotonic() - started, 3),
             "fingerprint": fingerprint,
         }
+        if last_validation_error:
+            failure["validation_error"] = last_validation_error[:2000]
+        return failure
 
     results: list[dict[str, Any]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
@@ -381,6 +507,20 @@ def main(argv: list[str] | None = None) -> int:
     summary_path = args.workdir / f"{args.stage}-run-summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.chmod(summary_path, 0o600)
+    ledger_path = args.workdir / f"{args.stage}-attempt-ledger.jsonl"
+    with ledger_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "recorded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "stage": args.stage,
+                    "results": results,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+    os.chmod(ledger_path, 0o600)
     return 1 if failures else 0
 
 

@@ -259,6 +259,13 @@ def canonicalize_decision(
     normalized["needs_review"] = not (
         action == "duplicate" or (action == "new" and confidence == "high")
     )
+    # Provenance is immutable candidate data, not something the reconciliation
+    # model may summarize or recreate. Carry the exact validated MAP source into
+    # every decision so queued sidecars remain independently auditable after
+    # successful-run work artifacts are cleaned.
+    for key in ("source_chat", "source_event", "evidence"):
+        if key in candidate:
+            normalized[key] = candidate[key]
     candidate_content = candidate.get("content")
     if action == "duplicate":
         normalized["content"] = ""

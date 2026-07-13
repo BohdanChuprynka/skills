@@ -126,6 +126,29 @@
   }
   .top-btn.primary:hover { background: #0fd693; border-color: #0fd693; }
 
+  /* ─────────── Review filters ─────────── */
+  .filterbar {
+    flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+    padding: 10px 28px; border-bottom: 1px solid var(--border-soft);
+    background: var(--bg-elev-1); overflow-x: auto;
+  }
+  .filterbar select {
+    min-width: 118px; max-width: 210px; padding: 7px 28px 7px 9px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-elev-2); color: var(--text-2);
+    font: 11px/1.2 var(--mono); cursor: pointer;
+  }
+  .filterbar select:focus { outline: 1px solid var(--accent-line); border-color: var(--accent-line); }
+  .filter-summary {
+    margin-left: auto; white-space: nowrap; color: var(--text-3);
+    font: 11px/1 var(--mono);
+  }
+  .reset-filters {
+    border: 0; background: transparent; color: var(--link); cursor: pointer;
+    white-space: nowrap; font: 11px/1 var(--mono); padding: 7px;
+  }
+  .reset-filters:hover { color: var(--text); }
+
   /* ─────────── Stage / cards ─────────── */
   .stage {
     position: relative;
@@ -238,6 +261,8 @@
     border-radius: 6px; padding: 14px 16px; border: 1px solid var(--border-soft);
     white-space: pre-wrap; max-height: 130px; overflow-y: auto;
   }
+  .context.unavailable { color: var(--text-4); font-style: italic; }
+  .review-detail + .review-detail { margin-top: 16px; }
 
   /* ─────────── Action bar ─────────── */
   .actionbar {
@@ -246,6 +271,7 @@
     background: var(--bg);
     display: flex; align-items: center; justify-content: center;
     gap: 12px; padding: 0 28px;
+    position: relative;
   }
   .act {
     background: var(--bg-elev-1); border: 1px solid var(--border);
@@ -270,6 +296,17 @@
   .act.go:hover { background: var(--accent); border-color: var(--accent); }
   .act.go:hover .kbd   { background: rgba(255,255,255,0.15); border-color: transparent; color: #07120e; }
   .act.go:hover .label { color: #07120e; }
+  .act:disabled {
+    cursor: wait; opacity: 0.55; transform: none; pointer-events: none;
+  }
+  .decision-error {
+    position: absolute; left: 50%; top: -42px; transform: translateX(-50%);
+    z-index: 20;
+    max-width: min(680px, calc(100vw - 56px)); padding: 9px 13px;
+    border: 1px solid rgba(232, 93, 117, 0.45); border-radius: 7px;
+    background: var(--reject-soft); color: var(--reject);
+    font: 12px/1.4 var(--mono); text-align: center;
+  }
 
   /* ─────────── Modal ─────────── */
   .modal-backdrop {
@@ -309,6 +346,41 @@
   .modal-btn:hover { border-color: var(--border-bright); color: var(--text); }
   .modal-btn.primary { background: var(--accent); border-color: var(--accent); color: #07120e; font-weight: 600; }
   .modal-btn.primary:hover { background: #0fd693; border-color: #0fd693; }
+  .reason-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px; margin-top: 18px;
+  }
+  .reason-btn {
+    display: flex; align-items: center; gap: 10px; min-height: 48px;
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg-elev-1);
+    color: var(--text-2); text-align: left; font: 500 13px/1.25 var(--sans);
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  .reason-btn:hover, .reason-btn:focus-visible {
+    border-color: var(--reject); color: var(--text); background: var(--reject-soft); outline: none;
+  }
+  .reason-key {
+    width: 21px; height: 21px; flex: 0 0 21px; display: inline-grid; place-items: center;
+    border: 1px solid var(--border-bright); border-radius: 5px;
+    color: var(--text-3); font: 500 10px/1 var(--mono);
+  }
+  .historical-flag {
+    display: inline-flex; align-items: center; padding: 3px 7px; margin-left: 7px;
+    border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 4px;
+    color: var(--defer); background: var(--defer-soft);
+    font: 600 9px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .sample-flag {
+    display: inline-flex; align-items: center; padding: 3px 7px; margin-left: 7px;
+    border: 1px solid rgba(96, 165, 250, 0.35); border-radius: 4px;
+    color: var(--link); background: var(--link-soft);
+    font: 600 9px/1 var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .feedback-summary {
+    margin: -8px 0 24px; color: var(--text-3);
+    font: 12px/1.6 var(--mono);
+  }
 
   /* ─────────── Summary ─────────── */
   .summary {
@@ -374,9 +446,41 @@
   </div>
 </header>
 
+<div class="filterbar hidden" id="filterbar" aria-label="Review filters">
+  <select id="filterSample" onchange="applyFilters()" aria-label="Quality sample">
+    <option value="all">sample · all</option>
+    <option value="sample">sample · only</option>
+    <option value="not_sample">sample · exclude</option>
+  </select>
+  <select id="filterHistorical" onchange="applyFilters()" aria-label="Historical review">
+    <option value="all">historical · all</option>
+    <option value="historical">historical · only</option>
+    <option value="not_historical">historical · exclude</option>
+  </select>
+  <select id="filterCohort" onchange="applyFilters()" aria-label="Cohort">
+    <option value="all">cohort · all</option>
+    <option value="run">cohort · run</option>
+    <option value="legacy">cohort · legacy</option>
+  </select>
+  <select id="filterVault" onchange="applyFilters()" aria-label="Vault"><option value="all">vault · all</option></select>
+  <select id="filterPage" onchange="applyFilters()" aria-label="Page"><option value="all">page · all</option></select>
+  <select id="filterTier" onchange="applyFilters()" aria-label="Memory tier"><option value="all">tier · all</option></select>
+  <select id="filterClass" onchange="applyFilters()" aria-label="Fact class"><option value="all">class · all</option></select>
+  <select id="sortOrder" onchange="applyFilters()" aria-label="Sort order">
+    <option value="quality_first">sort · quality sample first</option>
+    <option value="newest">sort · newest first</option>
+    <option value="oldest">sort · oldest first</option>
+    <option value="vault">sort · vault</option>
+    <option value="page">sort · page</option>
+  </select>
+  <button class="reset-filters" onclick="resetFilters()">reset</button>
+  <span class="filter-summary" id="filterSummary"></span>
+</div>
+
 <main class="stage" id="stage"></main>
 
 <div class="actionbar hidden" id="actionbar">
+  <div class="decision-error hidden" id="decisionError" role="alert" aria-live="assertive"></div>
   <button class="act no"   onclick="decide('reject')">
     <span class="kbd">←</span><span class="label">Discard</span>
   </button>
@@ -413,11 +517,33 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="modalRejectReason">
+  <div class="modal">
+    <h3>Why discard this fact?</h3>
+    <p>One label turns this review into a concrete Dream improvement signal.</p>
+    <div class="reason-grid" id="reasonGrid"></div>
+    <div class="modal-buttons" style="margin-top:18px">
+      <button class="modal-btn" onclick="closeModal('modalRejectReason')">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
-let currentIdx = 0;
 let decisions = {};
+let feedback = {};
 let QUEUE = [];
+let VIEW_QUEUE = [];
 let total = 0;
+let decisionInFlight = false;
+const REJECT_REASONS = [
+  ['not_durable', 'Not durable'],
+  ['unsupported', 'Unsupported'],
+  ['duplicate', 'Duplicate'],
+  ['stale', 'Stale now'],
+  ['wrong_target', 'Wrong destination'],
+  ['bad_wording', 'Bad wording'],
+  ['other', 'Other'],
+];
 
 // The server issues a per-run token in the page URL (?token=…). Echo it on every
 // /api/* call so cross-site pages (which can't read this URL) can't forge requests.
@@ -450,18 +576,111 @@ async function bootstrap() {
 async function loadQueue(data) {
   QUEUE = (data.entries || []).filter(e => e.category !== 'auto');
   // Restore prior decisions
-  QUEUE.forEach(e => { if (e.decided && e.decision) decisions[e.id] = e.decision; });
+  QUEUE.forEach(e => {
+    if (e.decided && e.decision) decisions[e.id] = e.decision;
+    if (e.feedback) feedback[e.id] = e.feedback;
+  });
   total = QUEUE.length;
-  currentIdx = 0;
-  while (currentIdx < total && decisions[QUEUE[currentIdx].id]) currentIdx++;
 
   document.querySelector('.topbar .progress').classList.remove('hidden');
   document.querySelector('.actions-top').classList.remove('hidden');
+  document.getElementById('filterbar').classList.remove('hidden');
   document.getElementById('progressTotal').textContent = total;
 
   if (total === 0) { renderEmpty(); return; }
   document.getElementById('actionbar').classList.remove('hidden');
+  populateFilters();
+  applyFilters();
+}
+
+function valueOf(e, key, fallback = 'unknown') {
+  const value = String(e[key] || '').trim();
+  return value || fallback;
+}
+
+function setDynamicOptions(id, prefix, values) {
+  const select = document.getElementById(id);
+  const current = select.value;
+  const options = [...new Set(values)].sort((a, b) => a.localeCompare(b));
+  select.innerHTML = `<option value="all">${escHtml(prefix)} · all</option>` +
+    options.map(value => `<option value="${escHtml(value)}">${escHtml(prefix)} · ${escHtml(value)}</option>`).join('');
+  if (options.includes(current)) select.value = current;
+}
+
+function populateFilters() {
+  setDynamicOptions('filterVault', 'vault', QUEUE.map(e => valueOf(e, 'vault', 'unrouted')));
+  setDynamicOptions('filterPage', 'page', QUEUE.map(e => valueOf(e, 'target_file')));
+  setDynamicOptions('filterTier', 'tier', QUEUE.map(e => valueOf(e, 'memory_tier')));
+  setDynamicOptions('filterClass', 'class', QUEUE.map(e => valueOf(e, 'fact_class')));
+}
+
+function selected(id) { return document.getElementById(id).value; }
+
+function pendingEntries() {
+  return QUEUE.filter(e => !decisions[e.id]);
+}
+
+function filterMatches(e) {
+  const sample = selected('filterSample');
+  const historical = selected('filterHistorical');
+  const cohort = selected('filterCohort');
+  if (sample === 'sample' && !e.quality_review_sample) return false;
+  if (sample === 'not_sample' && e.quality_review_sample) return false;
+  if (historical === 'historical' && !e.historical_review) return false;
+  if (historical === 'not_historical' && e.historical_review) return false;
+  if (cohort !== 'all' && valueOf(e, 'review_cohort', e.run_id ? 'run' : 'legacy') !== cohort) return false;
+  if (selected('filterVault') !== 'all' && valueOf(e, 'vault', 'unrouted') !== selected('filterVault')) return false;
+  if (selected('filterPage') !== 'all' && valueOf(e, 'target_file') !== selected('filterPage')) return false;
+  if (selected('filterTier') !== 'all' && valueOf(e, 'memory_tier') !== selected('filterTier')) return false;
+  if (selected('filterClass') !== 'all' && valueOf(e, 'fact_class') !== selected('filterClass')) return false;
+  return true;
+}
+
+function dateKey(e) { return String(e.source_date || e.first_seen || ''); }
+
+function compareEntries(a, b) {
+  const order = selected('sortOrder');
+  if (order === 'quality_first') {
+    const sampleDelta = Number(Boolean(b.quality_review_sample)) - Number(Boolean(a.quality_review_sample));
+    if (sampleDelta) return sampleDelta;
+    const historicalDelta = Number(Boolean(b.historical_review)) - Number(Boolean(a.historical_review));
+    if (historicalDelta) return historicalDelta;
+    return dateKey(b).localeCompare(dateKey(a)) || String(a.id).localeCompare(String(b.id));
+  }
+  if (order === 'oldest') return dateKey(a).localeCompare(dateKey(b)) || String(a.id).localeCompare(String(b.id));
+  if (order === 'vault') return valueOf(a, 'vault').localeCompare(valueOf(b, 'vault')) || valueOf(a, 'target_file').localeCompare(valueOf(b, 'target_file'));
+  if (order === 'page') return valueOf(a, 'target_file').localeCompare(valueOf(b, 'target_file')) || dateKey(b).localeCompare(dateKey(a));
+  return dateKey(b).localeCompare(dateKey(a)) || String(a.id).localeCompare(String(b.id));
+}
+
+function applyFilters() {
+  VIEW_QUEUE = pendingEntries().filter(filterMatches).sort(compareEntries);
+  const pending = pendingEntries().length;
+  document.getElementById('filterSummary').textContent = `${VIEW_QUEUE.length} shown · ${pending} pending`;
+  if (!pending) { renderSummary(false); return; }
+  if (!VIEW_QUEUE.length) { renderFilteredEmpty(); return; }
+  document.getElementById('actionbar').classList.remove('hidden');
   renderCards();
+}
+
+function resetFilters() {
+  ['filterSample', 'filterHistorical', 'filterCohort', 'filterVault', 'filterPage', 'filterTier', 'filterClass'].forEach(id => {
+    document.getElementById(id).value = 'all';
+  });
+  document.getElementById('sortOrder').value = 'quality_first';
+  applyFilters();
+}
+
+function renderFilteredEmpty() {
+  document.getElementById('actionbar').classList.add('hidden');
+  document.getElementById('stage').innerHTML = `
+    <div class="summary">
+      <div class="eyebrow">filtered view</div>
+      <h2>No matching facts.</h2>
+      <p class="lede">Pending facts remain outside this filter.</p>
+      <div class="summary-buttons"><button class="apply-btn" onclick="resetFilters()">Reset filters</button></div>
+    </div>`;
+  updateProgress();
 }
 
 function renderNoQueue() {
@@ -491,18 +710,18 @@ function renderEmpty() {
 function renderCards() {
   const stage = document.getElementById('stage');
   stage.innerHTML = '';
-  if (currentIdx >= total) { renderSummary(false); return; }
+  if (!VIEW_QUEUE.length) { applyFilters(); return; }
 
   for (let offset = 2; offset >= 0; offset--) {
-    const idx = currentIdx + offset;
-    if (idx >= total) continue;
+    const idx = offset;
+    if (idx >= VIEW_QUEUE.length) continue;
     const card = document.createElement('article');
     card.className = 'card';
     if (offset === 0) card.classList.add('current');
     if (offset === 1) card.classList.add('behind-1');
     if (offset === 2) card.classList.add('behind-2');
     card.dataset.idx = idx;
-    card.innerHTML = buildCard(QUEUE[idx]);
+    card.innerHTML = buildCard(VIEW_QUEUE[idx]);
     stage.appendChild(card);
   }
   updateProgress();
@@ -523,22 +742,45 @@ function buildCard(e) {
     diffInner = `<div class="diff-line before"><span class="sigil">−</span><span class="text">${escHtml(d.removeLine)}</span></div>`;
   }
 
-  const note = d.note ? `<div class="diff-note">${escHtml(d.note)}</div>` : '';
+  const rationale = e.reconciliation_rationale || d.note || '';
+  const note = rationale ? `<div class="diff-note"><span class="context-label">reconciliation rationale</span><br>${escHtml(rationale)}</div>` : '';
   const sectionHint = e.target_section ? `<span class="section-hint"> → ${escHtml(e.target_section)}</span>` : '';
+  const historicalFlag = e.historical_review ? `<span class="historical-flag">historical</span>` : '';
+  const sampleFlag = e.quality_review_sample ? `<span class="sample-flag">quality sample</span>` : '';
+  const personFlag = e.review_kind === 'person_identity' ? `<span class="historical-flag">person identity</span>` : '';
+  const memoryTier = e.memory_tier ? ` · ${escHtml(e.memory_tier)}` : '';
+  const factClass = e.fact_class || 'unknown';
+  const cohort = e.review_cohort || (e.run_id ? 'run' : 'legacy');
+  const sourceEvidence = e.source_evidence || '';
+  const legacyContext = !sourceEvidence && !('source_evidence' in e) ? (e.context || '') : '';
+  const evidenceBlock = sourceEvidence
+    ? `<pre class="context">${escHtml(sourceEvidence)}</pre>`
+    : legacyContext
+      ? `<pre class="context">${escHtml(legacyContext)}</pre>`
+      : `<div class="context unavailable">Exact source evidence was not retained for this card.</div>`;
+  const evidenceLabel = sourceEvidence ? 'exact source evidence' : (legacyContext ? 'legacy review context' : 'exact source evidence');
 
   return `
     <div class="meta-row">
       <div class="meta-cell">
         <span class="meta-label">type</span>
-        <span class="meta-value">${escHtml(e.signal_label || e.signal || '')}</span>
+        <span class="meta-value">${escHtml(factClass)}${historicalFlag}${sampleFlag}${personFlag}</span>
       </div>
       <div class="meta-cell">
         <span class="meta-label">confidence</span>
-        <span class="meta-value"><span class="conf-dot ${escHtml(e.confidence)}"></span>${escHtml(e.confidence)}</span>
+        <span class="meta-value"><span class="conf-dot ${escHtml(e.confidence)}"></span>${escHtml(e.confidence)}${memoryTier}</span>
       </div>
       <div class="meta-cell">
         <span class="meta-label">vault</span>
         <span class="meta-value">${escHtml(e.vault || '')}</span>
+      </div>
+      <div class="meta-cell">
+        <span class="meta-label">source date</span>
+        <span class="meta-value">${escHtml(e.source_date || '')}</span>
+      </div>
+      <div class="meta-cell">
+        <span class="meta-label">cohort</span>
+        <span class="meta-value">${escHtml(cohort)}</span>
       </div>
     </div>
 
@@ -553,9 +795,9 @@ function buildCard(e) {
       ${note}
     </div>
 
-    <div>
-      <div class="context-label">evidence</div>
-      <pre class="context">${escHtml(e.context || '')}</pre>
+    <div class="review-detail">
+      <div class="context-label">${evidenceLabel}</div>
+      ${evidenceBlock}
     </div>
   `;
 }
@@ -567,28 +809,110 @@ function escHtml(s) {
 }
 
 function updateProgress() {
-  document.getElementById('progressNow').textContent = currentIdx + 1;
-  document.getElementById('progressFill').style.transform = `scaleX(${currentIdx / total})`;
+  const reviewed = total - pendingEntries().length;
+  document.getElementById('progressNow').textContent = reviewed;
+  document.getElementById('progressFill').style.transform = `scaleX(${total ? reviewed / total : 1})`;
 }
 
 function decide(action) {
-  if (currentIdx >= total) return;
-  const entry = QUEUE[currentIdx];
-  decisions[entry.id] = action;
-
-  apiFetch('/api/decide', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: entry.id, decision: action }),
-  }).catch(() => {});
-
-  const cur = document.querySelector('.card.current');
-  if (cur) {
-    if (action === 'approve') cur.classList.add('swipe-right');
-    else if (action === 'reject') cur.classList.add('swipe-left');
-    else cur.classList.add('swipe-up');
+  if (decisionInFlight || !VIEW_QUEUE.length || decisions[VIEW_QUEUE[0].id]) return;
+  if (action === 'reject') {
+    openRejectReason();
+    return;
   }
-  setTimeout(() => { currentIdx++; renderCards(); }, 320);
+  commitDecision(action, action === 'approve' ? 'accepted' : 'review_later');
+}
+
+function openRejectReason() {
+  if (decisionInFlight) return;
+  const grid = document.getElementById('reasonGrid');
+  grid.innerHTML = REJECT_REASONS.map(([value, label], idx) => `
+    <button class="reason-btn" onclick="chooseRejectReason('${value}')">
+      <span class="reason-key">${idx + 1}</span><span>${escHtml(label)}</span>
+    </button>`).join('');
+  document.getElementById('modalRejectReason').classList.add('open');
+}
+
+function chooseRejectReason(reason) {
+  if (decisionInFlight) return;
+  closeModal('modalRejectReason');
+  commitDecision('reject', reason);
+}
+
+function setDecisionPending(pending) {
+  decisionInFlight = pending;
+  const actionbar = document.getElementById('actionbar');
+  if (actionbar) actionbar.setAttribute('aria-busy', String(pending));
+  document.querySelectorAll('.act, .reason-btn').forEach(button => {
+    button.disabled = pending;
+  });
+}
+
+function clearDecisionError() {
+  const error = document.getElementById('decisionError');
+  if (!error) return;
+  error.textContent = '';
+  error.classList.add('hidden');
+}
+
+function showDecisionError(message) {
+  const error = document.getElementById('decisionError');
+  if (!error) return;
+  error.textContent = `Could not save this decision: ${message}. The card is still pending; try again.`;
+  error.classList.remove('hidden');
+}
+
+async function commitDecision(action, reason) {
+  if (decisionInFlight || !VIEW_QUEUE.length || decisions[VIEW_QUEUE[0].id]) return;
+  const entry = VIEW_QUEUE[0];
+  clearDecisionError();
+  setDecisionPending(true);
+
+  try {
+    const response = await apiFetch('/api/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: entry.id, decision: action, reason }),
+    });
+    let result = null;
+    try { result = await response.json(); } catch {}
+    const confirmed = response.ok && result && result.ok === true &&
+      result.saved && result.saved[entry.id] === action;
+    if (!confirmed) {
+      const detail = result && typeof result.error === 'string'
+        ? result.error
+        : `server returned ${response.status || 'an invalid response'}`;
+      throw new Error(detail);
+    }
+
+    // Only a server-confirmed durable write counts as reviewed in the local UI.
+    decisions[entry.id] = action;
+    feedback[entry.id] = { decision: action, reason };
+
+    const cur = document.querySelector('.card.current');
+    if (cur) {
+      if (action === 'approve') cur.classList.add('swipe-right');
+      else if (action === 'reject') cur.classList.add('swipe-left');
+      else cur.classList.add('swipe-up');
+    }
+    setTimeout(() => { applyFilters(); }, 320);
+  } catch (error) {
+    const detail = error instanceof Error && error.message ? error.message : 'request failed';
+    showDecisionError(detail);
+  } finally {
+    setDecisionPending(false);
+  }
+}
+
+function rejectionReasonSummary() {
+  const labels = Object.fromEntries(REJECT_REASONS);
+  const counts = {};
+  Object.values(feedback).forEach(item => {
+    if (item && item.decision === 'reject') counts[item.reason] = (counts[item.reason] || 0) + 1;
+  });
+  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (!rows.length) return '';
+  return `<div class="feedback-summary">discard signals · ${rows.map(([key, count]) => `${escHtml(labels[key] || key)} ${count}`).join(' · ')}</div>`;
 }
 
 function getCounts() {
@@ -618,14 +942,15 @@ function renderSummary(earlyExit) {
   document.getElementById('actionbar').classList.add('hidden');
   document.getElementById('progressFill').style.transform = 'scaleX(1)';
   const c = getCounts();
-  const carry = c.defer + (earlyExit ? c.undecided : 0);
+  const carry = c.defer + c.undecided;
+  const reviewed = total - c.undecided;
   const eyebrow = earlyExit ? 'Saved' : 'Complete';
   const headline = earlyExit ? 'See you next time' : 'Review complete';
   const lede = earlyExit
-    ? `${Object.keys(decisions).length} of ${total} reviewed. Nothing applied yet. ${carry} entries queued for next run.`
+    ? `${reviewed} of ${total} reviewed. Nothing applied yet. ${carry} entries queued for next run.`
     : c.approve
-      ? `${total} reviewed. ${c.approve} fact${c.approve === 1 ? '' : 's'} approved — Claude will write them to your vaults.`
-      : `${total} reviewed. Nothing approved — closing exits without vault changes.`;
+      ? `${reviewed} of ${total} reviewed. ${c.approve} fact${c.approve === 1 ? '' : 's'} approved; ${carry} will return next run.`
+      : `${reviewed} of ${total} reviewed. Nothing approved; ${carry} will return next run.`;
 
   document.getElementById('stage').innerHTML = `
     <div class="summary">
@@ -637,6 +962,7 @@ function renderSummary(earlyExit) {
         <div class="stat reject"><div class="num">${c.reject}</div><div class="lbl">discarded</div></div>
         <div class="stat defer"><div class="num">${carry}</div><div class="lbl">next run</div></div>
       </div>
+      ${rejectionReasonSummary()}
       <div class="summary-buttons">
         <button class="apply-btn" onclick="cleanExit()">${earlyExit ? 'Save &amp; exit' : 'Finish — hand back to Claude'}</button>
       </div>
@@ -655,8 +981,17 @@ document.addEventListener('keydown', e => {
     document.querySelectorAll('.modal-backdrop.open').forEach(m => m.classList.remove('open'));
     return;
   }
+  const rejectModal = document.getElementById('modalRejectReason');
+  if (rejectModal.classList.contains('open')) {
+    const index = Number(e.key) - 1;
+    if (index >= 0 && index < REJECT_REASONS.length) {
+      e.preventDefault();
+      chooseRejectReason(REJECT_REASONS[index][0]);
+    }
+    return;
+  }
   if (document.querySelector('.modal-backdrop.open')) return;
-  if (currentIdx >= total) return;
+  if (!VIEW_QUEUE.length) return;
   if (e.key === 'ArrowRight') { e.preventDefault(); decide('approve'); }
   else if (e.key === 'ArrowLeft')  { e.preventDefault(); decide('reject'); }
   else if (e.key === 'ArrowUp')    { e.preventDefault(); decide('defer'); }

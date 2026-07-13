@@ -60,6 +60,11 @@ review. Low-confidence candidates are capped at medium routing confidence.
 - Emit the exact vault, relative page path, and section supplied in the batch
   allow-list.
 - Prefer generated-wiki pages when the vault exposes a `wiki/index.md` catalog.
+- The canonical retrieval surface excludes archive, raw, and log paths plus
+  pages whose frontmatter status is `archived` or `completed`. Per-vault
+  `route_include` and `route_exclude` policy further bounds that surface.
+- Retrieval uses stable path, title, heading, vault-purpose, and bounded
+  introductory-synopsis signals. Existing fact bodies are not routing evidence.
 - Do not create pages, directories, or aliases.
 - Route a fact with no durable persona, project, or operating value to `gap`.
 - Preserve uncertainty: `gap` is safer than a plausible but wrong destination.

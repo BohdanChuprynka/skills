@@ -13,7 +13,7 @@ cat > "$TMP/batch.json" <<'JSON'
   "target_page": "# Page\n\n## Facts\n\n- Old fact\n",
   "candidates": [{
     "candidate_id": "c-stable",
-    "candidate": {"content":"new fact","confidence":"high","source_chat":"x","source_date":"2026-07-01","memory_tier":"stable"},
+    "candidate": {"content":"new fact","confidence":"high","source_chat":"/private/x.jsonl","source_date":"2026-07-01","source_event":9,"evidence":"exact user words","memory_tier":"stable"},
     "route": {"vault":"me","page":"wiki/page.md","section":"Facts"}
   }]
 }
@@ -22,7 +22,8 @@ JSON
 cat > "$TMP/good.json" <<'JSON'
 [{"candidate_id":"c-stable","decision":{"action":"supersede","mode":"replace","target":{"vault":"me","page":"wiki/page.md","section":"Facts"},"old_content":"- Old fact","content":"- New fact","candidate_confidence":"high","needs_review":true,"rationale":"newer user statement"}}]
 JSON
-"$VALIDATOR" --batch "$TMP/batch.json" < "$TMP/good.json" >/dev/null
+"$VALIDATOR" --batch "$TMP/batch.json" < "$TMP/good.json" > "$TMP/good-normalized.json"
+jq -e '.[0].decision.source_chat == "/private/x.jsonl" and .[0].decision.source_event == 9 and .[0].decision.evidence == "exact user words"' "$TMP/good-normalized.json" >/dev/null
 
 jq '.[0].decision = {
   action:"duplicate", mode:"append",

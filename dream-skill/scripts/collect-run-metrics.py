@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from candidate_identity import candidate_id
+
 
 TOKEN_RE = re.compile(r"^tokens used\s*\n\s*([0-9][0-9,]*)\s*$", re.MULTILINE)
 MODEL_RE = re.compile(r"^model:\s*(.+?)\s*$", re.MULTILINE)
@@ -102,7 +104,24 @@ def counter_dict(values: list[Any]) -> dict[str, int]:
 
 
 def active_stage_logs(workdir: Path, phase: str) -> list[Path]:
-    """Return only logs belonging to batches in the current stage summary."""
+    """Return every recorded attempt log without accepting unrelated files."""
+    ledger = workdir / f"{phase}-attempt-ledger.jsonl"
+    ledger_paths: list[Path] = []
+    if ledger.is_file():
+        for raw in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                entry = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            for result in entry.get("results", []) if isinstance(entry, dict) else []:
+                if not isinstance(result, dict):
+                    continue
+                for name in result.get("attempt_logs", []) or []:
+                    if isinstance(name, str) and Path(name).name == name:
+                        ledger_paths.append(workdir / name)
+        return [path for path in dict.fromkeys(ledger_paths) if path.is_file()]
+
+    # Backward-compatible fallback for workdirs created before the ledger.
     summary = load_json(workdir / f"{phase}-run-summary.json", {})
     results = summary.get("results") if isinstance(summary, dict) else None
     if not isinstance(results, list):
@@ -126,6 +145,90 @@ def active_stage_logs(workdir: Path, phase: str) -> list[Path]:
     return [path for path in dict.fromkeys(paths) if path.is_file()]
 
 
+def source_kind(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    if "/.codex/sessions/" in normalized:
+        return "codex"
+    if "/.claude/projects/" in normalized:
+        return "claude"
+    return "other"
+
+
+def collect_map_unit_metrics(workdir: Path, units: list[dict[str, Any]]) -> dict[str, Any]:
+    by_kind: dict[str, Counter[str]] = defaultdict(Counter)
+    per_source_units: Counter[str] = Counter()
+    source_kinds: Counter[str] = Counter()
+    zero_yield = 0
+    for unit in units:
+        if not isinstance(unit, dict):
+            continue
+        kind = str(unit.get("kind") or "unknown")
+        unit_path = Path(str(unit.get("unit_path") or ""))
+        try:
+            input_bytes = unit_path.stat().st_size
+        except OSError:
+            input_bytes = 0
+        output = load_json(workdir / f"map-out-{unit.get('batch_id')}.json", [])
+        candidate_count = len(output) if isinstance(output, list) else 0
+        if candidate_count == 0:
+            zero_yield += 1
+        by_kind[kind]["units"] += 1
+        by_kind[kind]["input_bytes"] += input_bytes
+        by_kind[kind]["candidates"] += candidate_count
+        by_kind[kind]["zero_yield_units"] += int(candidate_count == 0)
+        members = unit.get("members") if isinstance(unit.get("members"), list) else []
+        sources = (
+            [str(unit.get("source_chat"))]
+            if unit.get("source_chat")
+            else [str(item.get("source_chat")) for item in members if isinstance(item, dict) and item.get("source_chat")]
+        )
+        for source in sources:
+            per_source_units[source] += 1
+            source_kinds[source_kind(source)] += 1
+    return {
+        "by_kind": {key: dict(value) for key, value in sorted(by_kind.items())},
+        "zero_yield_units": zero_yield,
+        "max_units_per_source_chat": max(per_source_units.values(), default=0),
+        "source_chat_counts": dict(sorted(source_kinds.items())),
+    }
+
+
+def collect_prefilter_metrics(workdir: Path) -> dict[str, Any]:
+    manifest = load_json(workdir / "map-manifest.json", [])
+    if not isinstance(manifest, list):
+        return {}
+    totals: Counter[str] = Counter()
+    by_source: dict[str, Counter[str]] = defaultdict(Counter)
+    for item in manifest:
+        if not isinstance(item, dict):
+            continue
+        kind = source_kind(str(item.get("raw") or ""))
+        for key in (
+            "raw_bytes",
+            "output_bytes",
+            "raw_lines",
+            "parsed_events",
+            "emitted_lines",
+            "skipped_events",
+            "malformed_lines",
+        ):
+            value = item.get(key)
+            if isinstance(value, int):
+                totals[key] += value
+                by_source[kind][key] += value
+        totals["transcripts"] += 1
+        by_source[kind]["transcripts"] += 1
+    result: dict[str, Any] = {
+        "totals": dict(totals),
+        "by_source": {key: dict(value) for key, value in sorted(by_source.items())},
+    }
+    if totals.get("raw_bytes"):
+        result["output_to_raw_byte_ratio"] = round(
+            totals.get("output_bytes", 0) / totals["raw_bytes"], 4
+        )
+    return result
+
+
 def collect_usage(workdir: Path) -> tuple[dict[str, Any], list[datetime]]:
     phases: dict[str, dict[str, Any]] = {}
     all_times: list[datetime] = []
@@ -133,6 +236,9 @@ def collect_usage(workdir: Path) -> tuple[dict[str, Any], list[datetime]]:
 
     for phase in ("map", "route", "reconcile"):
         logs = active_stage_logs(workdir, phase)
+        if phase == "route" and (workdir / "route-fallback").is_dir():
+            logs.extend(active_stage_logs(workdir / "route-fallback", phase))
+            logs = list(dict.fromkeys(logs))
         tokens = 0
         observed = 0
         models: Counter[str] = Counter()
@@ -202,19 +308,103 @@ def collect_review(args: argparse.Namespace) -> dict[str, Any]:
     }
     by_confidence: dict[str, Counter[str]] = defaultdict(Counter)
     by_vault: dict[str, Counter[str]] = defaultdict(Counter)
+    by_fact_class: dict[str, Counter[str]] = defaultdict(Counter)
+    by_memory_tier: dict[str, Counter[str]] = defaultdict(Counter)
+    by_review_cohort: dict[str, Counter[str]] = defaultdict(Counter)
     for candidate_id, outcome in changed.items():
         entry = by_id.get(str(candidate_id), {})
         confidence = str(entry.get("confidence") or "unknown")
         vault = str(entry.get("vault") or "unrouted")
+        fact_class = str(entry.get("fact_class") or "other")
+        memory_tier = str(entry.get("memory_tier") or "unknown")
+        cohort = (
+            "quality_sample"
+            if entry.get("quality_review_sample") is True
+            else "historical"
+            if entry.get("historical_review") is True
+            else "standard"
+        )
         by_confidence[confidence][str(outcome)] += 1
         by_vault[vault][str(outcome)] += 1
+        by_fact_class[fact_class][str(outcome)] += 1
+        by_memory_tier[memory_tier][str(outcome)] += 1
+        by_review_cohort[cohort][str(outcome)] += 1
     result["outcomes_by_confidence"] = {
         key: dict(sorted(value.items())) for key, value in sorted(by_confidence.items())
     }
     result["outcomes_by_vault"] = {
         key: dict(sorted(value.items())) for key, value in sorted(by_vault.items())
     }
+    result["outcomes_by_fact_class"] = {
+        key: dict(sorted(value.items())) for key, value in sorted(by_fact_class.items())
+    }
+    result["outcomes_by_memory_tier"] = {
+        key: dict(sorted(value.items())) for key, value in sorted(by_memory_tier.items())
+    }
+    result["outcomes_by_review_cohort"] = {
+        key: dict(sorted(value.items())) for key, value in sorted(by_review_cohort.items())
+    }
     return result
+
+
+def gate_dispositions(
+    routable: list[dict[str, Any]],
+    routed_records: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+    people: list[dict[str, Any]],
+) -> dict[str, Any]:
+    routes = {
+        str(record.get("candidate_id")): route_value(record, "status")
+        for record in routed_records
+        if isinstance(record, dict) and record.get("candidate_id")
+    }
+    decision_map = {
+        str(record.get("candidate_id")): record.get("decision") or record
+        for record in decisions
+        if isinstance(record, dict) and record.get("candidate_id")
+    }
+    people_ids = {
+        str(record.get("candidate_id"))
+        for record in people
+        if isinstance(record, dict) and record.get("candidate_id")
+    }
+
+    def disposition(cid: str) -> str:
+        if cid in people_ids:
+            return "people_review"
+        status = routes.get(cid)
+        if status in {"gap", "ambiguous"}:
+            return str(status)
+        decision = decision_map.get(cid)
+        if not isinstance(decision, dict):
+            return "unresolved"
+        action = str(decision.get("action") or "unknown")
+        if action == "duplicate":
+            return "duplicate"
+        if decision.get("needs_review") is True or action in {"supersede", "contradict"}:
+            return "queued"
+        if action == "new":
+            return "written"
+        return action
+
+    cohorts: dict[str, Counter[str]] = defaultdict(Counter)
+    for candidate in routable:
+        if not isinstance(candidate, dict):
+            continue
+        cid = candidate_id(candidate)
+        selected: list[str] = []
+        if candidate.get("historical_review") is True:
+            selected.append("historical")
+        if candidate.get("quality_review_sample") is True:
+            selected.append("quality_sample")
+        if candidate.get("policy_review_only") is True:
+            selected.append("policy_review")
+        for cohort in selected:
+            cohorts[cohort][disposition(cid)] += 1
+    return {
+        key: {"selected": sum(value.values()), "dispositions": dict(sorted(value.items()))}
+        for key, value in sorted(cohorts.items())
+    }
 
 
 def collect(args: argparse.Namespace) -> dict[str, Any]:
@@ -230,13 +420,17 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     map_validation = load_json(workdir / "map-validation-summary.json", {})
-    map_valid_records: list[dict[str, Any]] = []
+    map_valid_path = first_existing(workdir, ("map-valid.json", "map-candidates.json"))
+    map_valid_data = load_json(map_valid_path, None)
+    map_valid_records: list[dict[str, Any]] = (
+        [item for item in map_valid_data if isinstance(item, dict)]
+        if isinstance(map_valid_data, list)
+        else []
+    )
     if isinstance(map_validation, dict) and isinstance(map_validation.get("total_valid"), int):
         map_valid = map_validation["total_valid"]
         invalid_map = len(map_validation.get("invalid_units") or [])
     else:
-        map_valid_path = first_existing(workdir, ("map-valid.json", "map-candidates.json"))
-        map_valid_data = load_json(map_valid_path, None)
         if isinstance(map_valid_data, list):
             map_valid = len(map_valid_data)
             map_valid_records = [item for item in map_valid_data if isinstance(item, dict)]
@@ -246,6 +440,12 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
 
     reduced_data = load_json(workdir / "reduced.json", [])
     reduced = len(reduced_data) if isinstance(reduced_data, list) else 0
+    routable_data = load_json(workdir / "routable.json", [])
+    if not isinstance(routable_data, list):
+        routable_data = []
+    people_data = load_json(workdir / "people-review-queue.json", [])
+    if not isinstance(people_data, list):
+        people_data = []
 
     route_batches = load_json(workdir / "route-batches.json", [])
     route_batch_count = len(route_batches) if isinstance(route_batches, list) else 0
@@ -292,7 +492,12 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
     reconcile_batch_count = len(reconcile_batches) if isinstance(reconcile_batches, list) else 0
     reconcile_path = first_existing(
         workdir,
-        ("reconcile-decisions-all.json", "reconcile-decisions.json"),
+        (
+            "reconcile-decisions-enforced.json",
+            "reconcile-decisions-gated.json",
+            "reconcile-decisions-all.json",
+            "reconcile-decisions.json",
+        ),
     )
     decisions = load_json(reconcile_path, [])
     if not isinstance(decisions, list):
@@ -318,6 +523,9 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
 
     usage, observed_times = collect_usage(workdir)
     review_metrics = collect_review(args)
+    map_unit_metrics = collect_map_unit_metrics(workdir, map_units)
+    prefilter_metrics = collect_prefilter_metrics(workdir)
+    gate_metrics = gate_dispositions(routable_data, routed_records, decisions, people_data)
     started_at = args.started_at
     ended_at = args.ended_at
     if not started_at and observed_times:
@@ -401,6 +609,9 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
                 "source_roles": counter_dict([item.get("source_role") for item in map_valid_records]),
                 "confidence": counter_dict([item.get("confidence") for item in map_valid_records]),
                 "types": counter_dict([item.get("type") for item in map_valid_records]),
+                "fact_classes": counter_dict([item.get("fact_class") for item in map_valid_records]),
+                "units_detail": map_unit_metrics,
+                "prefilter": prefilter_metrics,
             },
             "reduce": {
                 "input_candidates": map_valid,
@@ -412,6 +623,14 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
                 "types": counter_dict(
                     [item.get("type") for item in reduced_data if isinstance(item, dict)]
                 ),
+                "routable_memory_tiers": counter_dict(
+                    [item.get("memory_tier") for item in routable_data if isinstance(item, dict)]
+                ),
+                "routable_fact_classes": counter_dict(
+                    [item.get("fact_class") for item in routable_data if isinstance(item, dict)]
+                ),
+                "gate_dispositions": gate_metrics,
+                "people_review": len(people_data),
             },
             "route": {
                 "batches": route_batch_count,
@@ -433,6 +652,16 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
                 "fact_events": len(facts),
                 "actions": apply_actions,
                 "review_status": apply_statuses,
+                "target_vaults": counter_dict(
+                    [
+                        str(fact.get("target") or "").split("/", 1)[0]
+                        for fact in facts
+                        if isinstance(fact, dict) and "/" in str(fact.get("target") or "")
+                    ]
+                ),
+                "target_pages": counter_dict(
+                    [fact.get("target") for fact in facts if isinstance(fact, dict)]
+                ),
             },
         },
         "usage": usage,

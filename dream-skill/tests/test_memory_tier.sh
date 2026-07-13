@@ -6,6 +6,8 @@ set -euo pipefail
 SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VALIDATOR="$SKILL_DIR/scripts/validate-candidates.sh"
 SPLITTER="$SKILL_DIR/scripts/split-memory-tiers.py"
+HISTORICAL_GATE="$SKILL_DIR/scripts/gate-historical-current.py"
+QUALITY_SAMPLER="$SKILL_DIR/scripts/sample-quality-review.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -84,5 +86,33 @@ if "$SPLITTER" < "$TMP/bad-input.json" >/dev/null 2>&1; then
   exit 1
 fi
 echo "PASS: split-memory-tiers.py errors out on a candidate with a missing memory_tier"
+
+# ── 4) stale current facts are preserved but forced to medium-confidence review ─
+cat > "$TMP/historical.json" <<'JSON'
+[
+  {"content":"Stable preference","confidence":"high","source_chat":"a","source_date":"2026-04-01","memory_tier":"stable"},
+  {"content":"Old active blocker","confidence":"high","source_chat":"b","source_date":"2026-04-01","memory_tier":"current"},
+  {"content":"Recent active blocker","confidence":"high","source_chat":"c","source_date":"2026-06-25","memory_tier":"current"},
+  {"content":"Already uncertain old state","confidence":"low","source_chat":"d","source_date":"2026-04-01","memory_tier":"current"}
+]
+JSON
+"$HISTORICAL_GATE" --as-of 2026-07-01 --review-after-days 30 --report \
+  < "$TMP/historical.json" > "$TMP/historical-out.json" 2> "$TMP/historical-report.txt"
+jq -e '.[0].confidence == "high" and (.[0].historical_review // false) == false' "$TMP/historical-out.json" >/dev/null
+jq -e '.[1].confidence == "medium" and .[1].original_confidence == "high" and .[1].historical_review == true and .[1].historical_age_days == 91' "$TMP/historical-out.json" >/dev/null
+jq -e '.[2].confidence == "high" and (.[2].historical_review // false) == false' "$TMP/historical-out.json" >/dev/null
+jq -e '.[3].confidence == "low" and .[3].historical_review == true' "$TMP/historical-out.json" >/dev/null
+grep -q '^gate-historical-current: in=4 gated=2 review_after_days=30 as_of=2026-07-01$' "$TMP/historical-report.txt"
+echo "PASS: stale current facts are retained and marked review-only"
+
+# ── 5) quality sampling is deterministic and never samples non-high facts ───
+"$QUALITY_SAMPLER" --percent 100 --report < "$TMP/historical-out.json" \
+  > "$TMP/sample-out.json" 2> "$TMP/sample-report.txt"
+jq -e '.[0].confidence == "medium" and .[0].quality_review_sample == true and .[0].original_confidence == "high"' "$TMP/sample-out.json" >/dev/null
+jq -e '.[1].historical_review == true and (.[1].quality_review_sample // false) == false' "$TMP/sample-out.json" >/dev/null
+jq -e '.[3].confidence == "low" and (.[3].quality_review_sample // false) == false' "$TMP/sample-out.json" >/dev/null
+grep -q '^sample-quality-review: in=4 sampled=2 percent=100$' "$TMP/sample-report.txt"
+cmp -s <("$QUALITY_SAMPLER" --percent 37 < "$TMP/historical.json") <("$QUALITY_SAMPLER" --percent 37 < "$TMP/historical.json")
+echo "PASS: quality review sampling is deterministic and high-confidence only"
 
 echo "test_memory_tier: ok"

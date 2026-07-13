@@ -8,6 +8,7 @@ Extraction discipline:
 
 - For each source chat, normally emit 0-3 facts. Exceed 5 only when the user states more than five distinct facts that will still matter in future conversations.
 - Merge tightly coupled details into one compact fact. Do not turn every implementation choice, edge case, or review finding into a separate record.
+- Make every project or work fact self-contained: name the owning project, employer, internship, or domain explicitly. Never emit vague owners such as "the project", "this work", or "the classifier" when the source does not establish a durable named owner; drop the fact instead.
 - Drop temporary PR/branch/merge state and one-off planning instructions unless they are an explicit active blocker the user will need recalled later.
 - Worktree choice, docs-only scope, handoff/review procedure, and "do not merge yet" instructions are execution process, not durable project context. Drop them unless the user states a standing workflow preference that applies beyond the current task.
 - Scan direct user events for named people. Emit one relationship fact when a name establishes a role, relationship, recurring relevance, or concrete follow-up; drop incidental name mentions and meeting-by-meeting narration.

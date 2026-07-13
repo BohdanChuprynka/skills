@@ -9,14 +9,15 @@
 #   DREAM_CONFIG    — path to config.toml (default: ~/.claude/dream-skill/config.toml)
 #
 # Output files:
-#   $REPORTS_DIR/<date>.md   — full receipt
+#   $REPORTS_DIR/<run-id>.md — full receipt
 #   $REPORTS_DIR/index.md    — one-line per run summary (idempotent append)
 #
 # --dry-run: write receipt to stdout only; skip index.md update.
-# Always exits 0 on best-effort rendering errors; exits 1 only on missing input.
+# Exits nonzero on invalid input, unsafe run identity, or persistence failure.
 
-set -uo pipefail
+set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN=0
 CONFIG_FILE="${DREAM_CONFIG:-$HOME/.claude/dream-skill/config.toml}"
 while [ $# -gt 0 ]; do
@@ -35,6 +36,13 @@ SUMMARY=$(cat)
 command -v jq >/dev/null 2>&1 || { echo "write-receipt.sh: jq required" >&2; exit 1; }
 
 RUN_ID=$(printf '%s' "$SUMMARY"      | jq -r '.run_id')
+[ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] || {
+  echo "write-receipt.sh: summary missing run_id" >&2; exit 1;
+}
+case "$RUN_ID" in
+  ""|[._-]*|*[!A-Za-z0-9._-]*) echo "write-receipt.sh: unsafe run_id: $RUN_ID" >&2; exit 1 ;;
+esac
+[ "${#RUN_ID}" -le 128 ] || { echo "write-receipt.sh: run_id is too long" >&2; exit 1; }
 # Receipt date: prefer an explicit .date, else the batch end (.window_end), else today.
 # Never let a missing key collapse to the literal "null" (which would misfile every
 # receipt to null.md and clobber the index — see REVIEW-2026-06-04 C1).
@@ -43,6 +51,22 @@ DATE=$(printf '%s' "$SUMMARY"        | jq -r '.date // .window_end // empty')
 WIN_START=$(printf '%s' "$SUMMARY"   | jq -r '.window_start')
 WIN_END=$(printf '%s' "$SUMMARY"     | jq -r '.window_end')
 CHATS=$(printf '%s' "$SUMMARY"       | jq -r '.chats_scanned')
+UNDO_LOG=$(printf '%s' "$SUMMARY"    | jq -r '.undo_log // empty')
+UNDO_HOME=$(printf '%s' "$SUMMARY"   | jq -r '.undo_home // empty')
+
+# Modern summaries identify the concrete per-run log. Reject a mismatched path
+# so a receipt can never advertise a --run-id selector that actually resolves
+# to a shared dated log. Old standalone producers may omit these fields; their
+# receipts still use the real --run-id interface but are labeled legacy below.
+if [ -n "$UNDO_LOG" ]; then
+  [ "$(basename "$UNDO_LOG")" = "${RUN_ID}.jsonl" ] || {
+    echo "write-receipt.sh: undo_log is not scoped to run_id $RUN_ID" >&2; exit 1;
+  }
+fi
+if [ -z "$UNDO_HOME" ] && [ -n "$UNDO_LOG" ]; then
+  UNDO_HOME=$(dirname "$(dirname "$UNDO_LOG")")
+fi
+UNDO_HOME="${UNDO_HOME:-$HOME/.claude/dream-skill}"
 
 # Resolve reports dir — parse config.toml like scripts/report.sh does
 # Priority: DREAM_RUNS_DIR env var > config.toml reports_dir
@@ -56,7 +80,7 @@ fi
 RUNS_DIR="${RUNS_DIR:-$HOME/.claude/dream-skill/dream-reports}"
 mkdir -p "$RUNS_DIR"
 
-RECEIPT_FILE="$RUNS_DIR/${DATE}.md"
+RECEIPT_FILE="$RUNS_DIR/${RUN_ID}.md"
 INDEX_FILE="$RUNS_DIR/index.md"
 
 # ── count facts by action + review_status (overview §8.8) ───────────────────
@@ -81,10 +105,17 @@ render_receipt() {
   printf -- '---\n'
   printf 'date: %s\n' "$DATE"
   printf 'run_id: %s\n' "$RUN_ID"
+  printf 'undo_run_id: %s\n' "$RUN_ID"
   printf 'window: %s → %s\n' "$WIN_START" "$WIN_END"
   printf 'chats_scanned: %s\n' "$CHATS"
   printf -- '---\n\n'
   printf '# Dream run — %s\n\n' "$DATE"
+  printf 'Run ID: `%s`  \n' "$RUN_ID"
+  if [ $((N_WRITTEN + N_SUPERSEDED)) -gt 0 ]; then
+    printf 'Rollback: `%s/apply-undo.sh --home "%s" --run-id "%s"`\n\n' "$SCRIPT_DIR" "$UNDO_HOME" "$RUN_ID"
+  else
+    printf 'Rollback: none (this run made no vault mutations).\n\n'
+  fi
 
   # Written section (overview §8.8): review_status=="written" AND action IN (new, supersede)
   printf '## Written\n'
@@ -146,17 +177,64 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-render_receipt > "$RECEIPT_FILE"
+# Persist the receipt through a same-directory temporary file. Refuse special
+# paths up front: a directory or symlink at the run receipt path must never be
+# mistaken for a successful run artifact.
+if [ -e "$RECEIPT_FILE" ] && [ ! -f "$RECEIPT_FILE" ]; then
+  echo "write-receipt.sh: receipt path is not a regular file: $RECEIPT_FILE" >&2
+  exit 1
+fi
+[ ! -L "$RECEIPT_FILE" ] || {
+  echo "write-receipt.sh: refusing symlinked receipt path: $RECEIPT_FILE" >&2
+  exit 1
+}
+_receipt_tmp=$(mktemp "$RUNS_DIR/.${RUN_ID}.md.tmp.XXXXXX")
+_index_tmp=""
+trap 'rm -f "${_receipt_tmp:-}" "${_index_tmp:-}"' EXIT
+if ! render_receipt > "$_receipt_tmp"; then
+  echo "write-receipt.sh: failed to render receipt: $RECEIPT_FILE" >&2
+  exit 1
+fi
+chmod 600 "$_receipt_tmp"
+if ! mv -f -- "$_receipt_tmp" "$RECEIPT_FILE"; then
+  echo "write-receipt.sh: failed to persist receipt: $RECEIPT_FILE" >&2
+  exit 1
+fi
+_receipt_tmp=""
 
-# ── idempotent one-line append to index.md ────────────────────────────────────
+# ── idempotent one-line update to index.md ────────────────────────────────────
 RUNS_BASENAME=$(basename "$RUNS_DIR")
-INDEX_LINE="- ${DATE} | ${CHATS} chats | ${N_WRITTEN_CLEAN} written · ${N_SUPERSEDED} superseded · ${N_QUEUED} queued · ${N_SKIPPED} skipped → [[${RUNS_BASENAME}/${DATE}]]"
+INDEX_MARKER="<!-- dream-run:${RUN_ID} -->"
+INDEX_LINE="- ${DATE} | ${CHATS} chats | ${N_WRITTEN_CLEAN} written · ${N_SUPERSEDED} superseded · ${N_QUEUED} queued · ${N_SKIPPED} skipped → [[${RUNS_BASENAME}/${RUN_ID}]] ${INDEX_MARKER}"
 
-if [ ! -f "$INDEX_FILE" ]; then
-  printf '# Dream runs index\n\n' > "$INDEX_FILE"
+if [ -e "$INDEX_FILE" ] && [ ! -f "$INDEX_FILE" ]; then
+  echo "write-receipt.sh: index path is not a regular file: $INDEX_FILE" >&2
+  exit 1
 fi
-
-# Only append if this date is not already in the index (idempotent)
-if ! grep -qF "[[${RUNS_BASENAME}/${DATE}]]" "$INDEX_FILE" 2>/dev/null; then
-  printf '%s\n' "$INDEX_LINE" >> "$INDEX_FILE"
+[ ! -L "$INDEX_FILE" ] || {
+  echo "write-receipt.sh: refusing symlinked index path: $INDEX_FILE" >&2
+  exit 1
+}
+_index_tmp=$(mktemp "$RUNS_DIR/.index.md.tmp.XXXXXX")
+if [ -f "$INDEX_FILE" ] && grep -qF "$INDEX_MARKER" "$INDEX_FILE" 2>/dev/null; then
+  marker="$INDEX_MARKER" replacement="$INDEX_LINE" awk '
+    index($0, ENVIRON["marker"]) { print ENVIRON["replacement"]; next }
+    { print }
+  ' "$INDEX_FILE" > "$_index_tmp"
+elif [ -f "$INDEX_FILE" ]; then
+  {
+    cat "$INDEX_FILE"
+    printf '%s\n' "$INDEX_LINE"
+  } > "$_index_tmp"
+else
+  {
+    printf '# Dream runs index\n\n'
+    printf '%s\n' "$INDEX_LINE"
+  } > "$_index_tmp"
 fi
+chmod 600 "$_index_tmp"
+if ! mv -f -- "$_index_tmp" "$INDEX_FILE"; then
+  echo "write-receipt.sh: failed to persist index: $INDEX_FILE" >&2
+  exit 1
+fi
+_index_tmp=""
