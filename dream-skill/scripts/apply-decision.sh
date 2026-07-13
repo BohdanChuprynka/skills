@@ -67,10 +67,31 @@ old_content=$(jq -r '.old_content // ""'         "$DECISION")
 candidate_confidence=$(jq -r '.candidate_confidence // empty' "$DECISION")
 needs_review=$(jq -r '.needs_review // empty'    "$DECISION")
 rationale=$(jq -r '.rationale // ""'             "$DECISION")
+run_id=$(jq -r '.run_id // empty'                 "$DECISION")
+source_evidence=$(jq -r '.evidence // ""'        "$DECISION")
 
 [ -n "$action" ]  || die "decision missing .action"
 [ -n "$page" ]    || die "decision missing .target.page"
 [ -n "$section" ] || die "decision missing .target.section"
+
+if [ -n "$source_evidence" ]; then
+  case "$source_evidence" in
+    *$'\n'*|*$'\r'*) die "decision .evidence must be exactly one line" ;;
+  esac
+  [ "${#source_evidence}" -le 160 ] \
+    || die "decision .evidence exceeds the validated 160-character bound"
+fi
+
+# Modern decisions are run-scoped. Refuse to put their undo events in a dated
+# or otherwise shared file; this is what makes --run-id rollback an isolation
+# boundary rather than merely a filename convention. Legacy decisions without
+# run_id remain supported and receive deterministic legacy provenance in the
+# low-level writer.
+if [ -n "$run_id" ]; then
+  case "$run_id" in
+    .|..|*[!A-Za-z0-9._-]*) die "decision has unsafe .run_id: $run_id" ;;
+  esac
+fi
 
 # Flat target string for run-summary facts: "<vault_name>/<page>"
 # This is the single place that owns the object→string flatten (FIX 1).
@@ -124,6 +145,7 @@ _write_sidecar() {
 
 _queue_for_review() {
   local bucket="$1"
+  local queue_evidence="${source_evidence:-$rationale}"
   if [ "$DRY_RUN" = "1" ]; then
     echo "apply-decision [dry-run]: would queue action=$action bucket=$bucket title='$content' target=${VAULT}/${page}#${section}"
   else
@@ -131,7 +153,7 @@ _queue_for_review() {
     "$QUEUE_SH" append \
       --bucket "$bucket" \
       --title "$content" \
-      --evidence "$rationale" \
+      --evidence "$queue_evidence" \
       --confidence "$candidate_confidence" \
       --id "${CANDIDATE_ID:-}" \
       --target "${VAULT}/${page}#${section}"
@@ -151,6 +173,13 @@ if [ "$needs_review" = "true" ] && [ "$action" != "duplicate" ]; then
   exit 0
 fi
 
+# Queue staging above performs no vault mutation, so it does not need a live
+# undo destination. Enforce run isolation only on paths that can actually write.
+if [ -n "$run_id" ]; then
+  [ "$(basename "$UNDO_LOG")" = "${run_id}.jsonl" ] \
+    || die "undo log must be run-scoped as ${run_id}.jsonl"
+fi
+
 # --- Dispatch ---
 case "$action" in
 
@@ -162,6 +191,8 @@ case "$action" in
       --content  "$content" \
       --mode     append \
       --undo-log "$UNDO_LOG" \
+      --run-id   "$run_id" \
+      --candidate-id "$CANDIDATE_ID" \
       --no-index-update \
       $(_dry_flag)
     _emit_fact "$content" "" "new" "written" ""
@@ -182,6 +213,8 @@ case "$action" in
       --mode        replace \
       --old-content "$old_content" \
       --undo-log    "$UNDO_LOG" \
+      --run-id      "$run_id" \
+      --candidate-id "$CANDIDATE_ID" \
       --no-index-update \
       $(_dry_flag)
     _emit_fact "$content" "$old_content" "supersede" "written" ""
@@ -198,6 +231,8 @@ case "$action" in
       --mode        replace \
       --old-content "$old_content" \
       --undo-log    "$UNDO_LOG" \
+      --run-id      "$run_id" \
+      --candidate-id "$CANDIDATE_ID" \
       --no-index-update \
       $(_dry_flag)
     _emit_fact "$content" "$old_content" "contradict" "written" ""

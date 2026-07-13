@@ -14,6 +14,9 @@ from typing import Any
 
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_+-]*", re.IGNORECASE)
 EXCLUDED_NAMES = {"AGENTS.md", "CLAUDE.md", "index.md"}
+NONCANONICAL_PATH_TERMS = {"archive", "archives", "raw", "log", "logs"}
+NONCANONICAL_STATUSES = {"archived", "completed"}
+OVERVIEW_TOKEN_LIMIT = 96
 
 
 def tokens(text: str) -> list[str]:
@@ -48,6 +51,71 @@ def load_vault_config(config_path: Path) -> dict[str, tuple[Path, str]]:
     return result
 
 
+def load_vault_policies(config_path: Path) -> dict[str, dict[str, Any]]:
+    """Load optional per-vault safety and routing policy without changing the
+    long-standing load_vault_config() return shape used by callers."""
+    with config_path.open("rb") as handle:
+        parsed = tomllib.load(handle)
+    vaults = parsed.get("vaults")
+    if not isinstance(vaults, dict):
+        return {}
+    policies: dict[str, dict[str, Any]] = {}
+    for name, value in vaults.items():
+        if not isinstance(value, dict):
+            continue
+        include = value.get("route_include")
+        exclude = value.get("route_exclude")
+        policies[str(name)] = {
+            "review_only": value.get("review_only") is True,
+            "route_include": [str(item).strip("/") for item in include if isinstance(item, str) and item.strip("/")]
+            if isinstance(include, list)
+            else [],
+            "route_exclude": [str(item).strip("/") for item in exclude if isinstance(item, str) and item.strip("/")]
+            if isinstance(exclude, list)
+            else [],
+        }
+    return policies
+
+
+def route_path_allowed(relative: str, policy: dict[str, Any]) -> bool:
+    def matches(prefix: str) -> bool:
+        return relative == prefix or relative.startswith(prefix + "/")
+
+    includes = policy.get("route_include") or []
+    excludes = policy.get("route_exclude") or []
+    if includes and not any(matches(prefix) for prefix in includes):
+        return False
+    return not any(matches(prefix) for prefix in excludes)
+
+
+def default_route_exclusion_reason(relative: str, frontmatter_status: str) -> str | None:
+    """Explain why a page is unsafe as an automatic canonical destination.
+
+    Explicit ``route_include``/``route_exclude`` policy bounds the search tree;
+    this default guard then removes archival and work-output surfaces inside
+    that tree.  Separating the reason from the boolean makes diagnostics and
+    regression tests precise without exposing excluded pages to the model.
+    """
+    parts = Path(relative).parts
+    for part in parts[:-1]:
+        normalized = part.casefold().strip(" ._-")
+        if normalized in NONCANONICAL_PATH_TERMS:
+            return f"noncanonical directory: {part}"
+
+    stem_terms = {
+        term.casefold()
+        for term in re.findall(r"[a-z0-9]+", Path(relative).stem, re.IGNORECASE)
+    }
+    matched_terms = sorted(stem_terms & NONCANONICAL_PATH_TERMS)
+    if matched_terms:
+        return f"noncanonical page type: {matched_terms[0]}"
+
+    normalized_status = frontmatter_status.casefold().strip()
+    if normalized_status in NONCANONICAL_STATUSES:
+        return f"frontmatter status: {normalized_status}"
+    return None
+
+
 def content_page(path: Path) -> bool:
     return (
         path.suffix.casefold() == ".md"
@@ -57,30 +125,56 @@ def content_page(path: Path) -> bool:
     )
 
 
-def parse_page(path: Path) -> tuple[str, list[str], str]:
+def parse_page(path: Path) -> tuple[str, list[str], str, str]:
     text = path.read_text(encoding="utf-8", errors="ignore")
     title = ""
     headings: list[str] = []
-    body_lines: list[str] = []
-    in_frontmatter = text.startswith("---\n")
-    for index, line in enumerate(text.splitlines()):
+    overview_lines: list[str] = []
+    frontmatter_status = ""
+    lines = text.splitlines()
+    in_frontmatter = bool(lines and lines[0].strip() == "---")
+    in_code_fence = False
+    reached_h2 = False
+    for index, line in enumerate(lines):
         if index == 0 and in_frontmatter:
             continue
         if in_frontmatter:
             if line.strip() == "---":
                 in_frontmatter = False
+                continue
+            status_match = re.match(r"^\s*status\s*:\s*(.*?)\s*$", line, re.IGNORECASE)
+            if status_match:
+                raw_status = status_match.group(1).split("#", 1)[0].strip()
+                frontmatter_status = raw_status.strip("'\"[] ")
+            continue
+        if line.strip().startswith("```"):
+            in_code_fence = not in_code_fence
+            continue
+        if in_code_fence:
             continue
         if line.startswith("# ") and not title:
             title = line[2:].strip()
         elif line.startswith("## "):
             headings.append(line[3:].strip())
-        if not line.startswith("```"):
-            body_lines.append(line)
-    return title, headings[:20], "\n".join(body_lines)
+            reached_h2 = True
+        elif (
+            not reached_h2
+            and not line.startswith("#")
+            and not re.match(r"^\s*(?:[-*+] |\d+[.)] |\|)", line)
+            and line.strip()
+        ):
+            # Only index a short prose synopsis before the first H2. Facts
+            # appended by Dream live under H2 sections and therefore cannot
+            # increase their target page's future retrieval score.
+            overview_lines.append(line.strip())
+
+    overview_terms = tokens(" ".join(overview_lines))[:OVERVIEW_TOKEN_LIMIT]
+    return title, headings[:20], " ".join(overview_terms), frontmatter_status
 
 
 def build_page_docs(config_path: Path) -> list[PageDoc]:
     docs: list[PageDoc] = []
+    policies = load_vault_policies(config_path)
     for vault, (root, purpose) in load_vault_config(config_path).items():
         if not root.is_dir():
             continue
@@ -92,13 +186,20 @@ def build_page_docs(config_path: Path) -> list[PageDoc]:
                 rel = path.resolve().relative_to(root).as_posix()
             except ValueError:
                 continue
-            title, headings, body = parse_page(path)
+            if not route_path_allowed(rel, policies.get(vault, {})):
+                continue
+            title, headings, overview, frontmatter_status = parse_page(path)
+            if default_route_exclusion_reason(rel, frontmatter_status) is not None:
+                continue
             weighted: Counter[str] = Counter()
             weighted.update({term: count * 5 for term, count in Counter(tokens(rel)).items()})
             weighted.update({term: count * 5 for term, count in Counter(tokens(title)).items()})
             weighted.update({term: count * 3 for term, count in Counter(tokens(" ".join(headings))).items()})
             weighted.update({term: count * 2 for term, count in Counter(tokens(purpose)).items()})
-            weighted.update(Counter(tokens(body)))
+            # A bounded, de-duplicated introductory synopsis can distinguish
+            # generic page names without allowing repeated body facts to
+            # dominate BM25 or create a self-reinforcing routing loop.
+            weighted.update(Counter(set(tokens(overview))))
             docs.append(
                 PageDoc(
                     vault=vault,
@@ -132,12 +233,18 @@ def domain_boost(query_text: str, doc: PageDoc) -> float:
         "manager",
     )
     query = query_text.casefold()
+    normalized_query = " ".join(tokens(query_text))
+
+    def contains_phrase(value: str) -> bool:
+        phrase = " ".join(tokens(value))
+        return bool(phrase) and f" {phrase} " in f" {normalized_query} "
+
     if any(term in query for term in person_terms) and "people" in doc.page.casefold():
         boost += 12.0
     stem = Path(doc.page).stem.casefold().replace("-", " ").replace("_", " ")
-    if stem and stem in query:
+    if contains_phrase(stem):
         boost += 14.0
-    if doc.title and doc.title.casefold() in query:
+    if doc.title and contains_phrase(doc.title):
         boost += 14.0
     return boost
 

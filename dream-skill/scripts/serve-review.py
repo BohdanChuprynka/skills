@@ -9,6 +9,7 @@ import os
 import secrets
 import threading
 import webbrowser
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +20,21 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_HOME = Path.home() / ".claude" / "dream-skill"
 MAX_BODY_BYTES = 1_000_000
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+REASONS = {
+    "approve": {"accepted"},
+    "defer": {"review_later", "needs_context"},
+    "reject": {
+        "not_durable",
+        "unsupported",
+        "duplicate",
+        "stale",
+        "wrong_target",
+        "bad_wording",
+        "other",
+        "unspecified",
+    },
+}
+DEFAULT_REASON = {"approve": "accepted", "defer": "review_later", "reject": "unspecified"}
 
 
 def load_json(path: Path, default: object) -> object:
@@ -48,6 +64,7 @@ def make_handler(
     decisions_path: Path,
     html_path: Path,
     token: str,
+    feedback_path: Path | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     decisions_lock = threading.Lock()
 
@@ -130,16 +147,22 @@ def make_handler(
                     return
                 decisions = load_json(decisions_path, {})
                 decisions = decisions if isinstance(decisions, dict) else {}
+                feedback = load_json(feedback_path, {}) if feedback_path else {}
+                feedback = feedback if isinstance(feedback, dict) else {}
                 entries = queue.get("entries", [])
                 if isinstance(entries, list):
                     for entry in entries:
                         if isinstance(entry, dict) and entry.get("id") in decisions:
                             entry["decided"] = True
                             entry["decision"] = decisions[entry["id"]]
+                            entry["feedback"] = feedback.get(entry["id"])
                 self.send_json(queue)
             elif path == "/api/decisions":
                 decisions = load_json(decisions_path, {})
                 self.send_json(decisions if isinstance(decisions, dict) else {})
+            elif path == "/api/feedback":
+                feedback = load_json(feedback_path, {}) if feedback_path else {}
+                self.send_json(feedback if isinstance(feedback, dict) else {})
             else:
                 self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -159,11 +182,33 @@ def make_handler(
                 if not isinstance(entry_id, str) or not entry_id or decision not in {"approve", "reject", "defer"}:
                     self.send_json({"error": "id and approve|reject|defer required"}, HTTPStatus.BAD_REQUEST)
                     return
-                with decisions_lock:
-                    decisions = load_json(decisions_path, {})
-                    decisions = decisions if isinstance(decisions, dict) else {}
-                    decisions[entry_id] = decision
-                    save_json(decisions_path, decisions)
+                reason = body.get("reason") or DEFAULT_REASON[decision]
+                if reason not in REASONS[decision]:
+                    self.send_json({"error": f"invalid reason for {decision}"}, HTTPStatus.BAD_REQUEST)
+                    return
+                try:
+                    with decisions_lock:
+                        decisions = load_json(decisions_path, {})
+                        decisions = decisions if isinstance(decisions, dict) else {}
+                        decisions[entry_id] = decision
+                        # Feedback is supplementary; write it before the authoritative
+                        # decisions file so a failure never falsely marks the card done.
+                        if feedback_path:
+                            feedback = load_json(feedback_path, {})
+                            feedback = feedback if isinstance(feedback, dict) else {}
+                            feedback[entry_id] = {
+                                "decision": decision,
+                                "reason": reason,
+                                "recorded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            }
+                            save_json(feedback_path, feedback)
+                        save_json(decisions_path, decisions)
+                except OSError:
+                    self.send_json(
+                        {"ok": False, "error": "review decision could not be persisted"},
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                    return
                 self.send_json({"ok": True, "saved": {entry_id: decision}, "total": len(decisions)})
             elif path == "/api/batch-decide":
                 incoming = body.get("decisions")
@@ -179,6 +224,18 @@ def make_handler(
                             decisions[entry_id] = decision
                             added += 1
                     save_json(decisions_path, decisions)
+                    if feedback_path:
+                        feedback = load_json(feedback_path, {})
+                        feedback = feedback if isinstance(feedback, dict) else {}
+                        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                        for entry_id, decision in incoming.items():
+                            if isinstance(entry_id, str) and decision in DEFAULT_REASON:
+                                feedback[entry_id] = {
+                                    "decision": decision,
+                                    "reason": DEFAULT_REASON[decision],
+                                    "recorded_at": now,
+                                }
+                        save_json(feedback_path, feedback)
                 self.send_json({"ok": True, "saved": added, "total": len(decisions)})
             elif path == "/api/shutdown":
                 self.send_json({"ok": True})
@@ -193,6 +250,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, default=DEFAULT_HOME / "queue/review-input.json")
     parser.add_argument("--decisions", type=Path, default=DEFAULT_HOME / "queue/review-decisions.json")
+    parser.add_argument("--feedback", type=Path, default=DEFAULT_HOME / "queue/review-feedback.json")
     parser.add_argument("--web", type=Path, default=SKILL_DIR / "web")
     parser.add_argument("--port", type=int, default=5174)
     parser.add_argument("--no-browser", action="store_true")
@@ -204,7 +262,7 @@ def main() -> int:
     token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer(
         ("127.0.0.1", args.port),
-        make_handler(args.queue, args.decisions, html_path, token),
+        make_handler(args.queue, args.decisions, html_path, token, args.feedback),
     )
     url = f"http://localhost:{args.port}/?token={token}"
     print(f"dream-skill review UI -> {url}", flush=True)

@@ -34,6 +34,11 @@ cat > "$TMP/professional/wiki/people/prep-notes.md" <<'MD'
 
 - **Jordan Draft** — prep-only note.
 MD
+cat > "$TMP/professional/wiki/Protege.md" <<'MD'
+# Protege
+
+## Features
+MD
 
 cat > "$TMP/config.toml" <<EOF
 [vaults.personal]
@@ -58,7 +63,11 @@ cat > "$TMP/candidates.json" <<'JSON'
   {"content":"Taylor Park mentioned a new project idea.","confidence":"high","source_chat":"chat-e","source_date":"2026-07-05","memory_tier":"stable"},
   {"content":"Implementing Example Platform connector for notes.","confidence":"high","source_chat":"chat-f","source_date":"2026-07-06","memory_tier":"stable"},
   {"content":"Riley Quinn's team uses a data warehouse.","confidence":"high","source_chat":"chat-g","source_date":"2026-07-07","memory_tier":"stable"},
-  {"content":"The user prefers concise written reports.","confidence":"high","source_chat":"chat-h","source_date":"2026-07-08","memory_tier":"stable"}
+  {"content":"The user prefers concise written reports.","confidence":"high","source_chat":"chat-h","source_date":"2026-07-08","memory_tier":"stable"},
+  {"content":"For Week 1, the user planned several goals.","confidence":"high","source_chat":"chat-i","source_date":"2026-07-08","memory_tier":"stable"},
+  {"content":"Protege File Walk should use the sidebar.","confidence":"high","source_chat":"chat-j","source_date":"2026-07-08","memory_tier":"stable"},
+  {"content":"By July, the user wants to finish the career plan.","confidence":"high","source_chat":"chat-k","source_date":"2026-07-08","memory_tier":"stable"},
+  {"content":"Credit Card setup is still in progress.","confidence":"high","source_chat":"chat-l","source_date":"2026-07-08","memory_tier":"stable"}
 ]
 JSON
 
@@ -85,23 +94,29 @@ N="Next project: Riley Quinn may assign a task."
 J="Jordan Draft leads the call prep."
 [ -z "$(pr_for "$J")" ]
 np_for "$J" | jq -e '.detected_names | index("Jordan Draft") != null' >/dev/null
+rm_for "$J" | jq -e '.person_review_only == true and .review_kind == "person_identity" and (.detected_names | index("Jordan Draft")) != null' >/dev/null
 
 # A genuine unknown person is retained for review.
 T="Taylor Park mentioned a new project idea."
 np_for "$T" | jq -e '.detected_names | index("Taylor Park") != null' >/dev/null
+rm_for "$T" | jq -e '.person_review_only == true and .review_kind == "person_identity"' >/dev/null
 
 # Gerunds, possessives, and ordinary preferences stay with normal routing.
 I="Implementing Example Platform connector for notes."
 P="Riley Quinn's team uses a data warehouse."
 U="The user prefers concise written reports."
-for value in "$I" "$P" "$U"; do
+F="For Week 1, the user planned several goals."
+PF="Protege File Walk should use the sidebar."
+B="By July, the user wants to finish the career plan."
+C="Credit Card setup is still in progress."
+for value in "$I" "$P" "$U" "$F" "$PF" "$B" "$C"; do
   [ -z "$(pr_for "$value")" ] && [ -z "$(np_for "$value")" ] && [ -n "$(rm_for "$value")" ]
 done
 
 [ "$(jq '.pre_routed | length' "$TMP/out.json")" = "2" ]
 [ "$(jq '.new_person | length' "$TMP/out.json")" = "2" ]
-[ "$(jq '.remaining | length' "$TMP/out.json")" = "4" ]
-grep -q '^route-entities: in=8 pre_routed=2 new_person=2 remaining=4$' "$TMP/report.txt"
+[ "$(jq '.remaining | length' "$TMP/out.json")" = "10" ]
+grep -q '^route-entities: in=12 pre_routed=2 new_person=2 remaining=10$' "$TMP/report.txt"
 
 # Pre-routed records remain compatible with reconciliation.
 pr_for "$R" | jq -s '.' > "$TMP/pre_routed_record.json"

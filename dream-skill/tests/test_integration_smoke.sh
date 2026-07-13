@@ -355,7 +355,7 @@ SUMMARY=$(jq -cn \
 RECEIPT_OUT=$(printf '%s' "$SUMMARY" | DREAM_RUNS_DIR="$RUNS_DIR" "$WRITE_RECEIPT" 2>&1)
 
 # Receipt file must exist
-RECEIPT_FILE="$RUNS_DIR/2026-06-04.md"
+RECEIPT_FILE="$RUNS_DIR/smoke-2026-06-04T00:00:00Z.md"
 [ -f "$RECEIPT_FILE" ] \
   || fail "RECEIPT: receipt file not created at $RECEIPT_FILE"
 

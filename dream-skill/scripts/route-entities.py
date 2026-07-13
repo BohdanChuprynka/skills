@@ -22,11 +22,11 @@ Output (stdout): a single JSON object:
                validate-route-batch.py output record — candidate_id/candidate/
                route — so it merges straight into the routed list downstream
                (build-reconcile-batches.py needs zero changes to consume it).
-  new_person = candidates with no known-name match but at least one detected
-               Title-Case name span not already accounted for. Never written
-               to a vault; queued to people-review-queue.json/.md for a human.
-  remaining  = everything else. Falls through to the existing LLM ROUTE stage
-               unchanged, exactly as before this pass existed.
+  new_person = audit records for candidates with no known-name match but at
+               least one detected Title-Case name span.
+  remaining  = everything else plus unknown-person candidates annotated
+               ``person_review_only``. They still receive a canonical ROUTE
+               destination but can only enter the standard review workflow.
 
 The known-name index is built once per run from the roster pages' raw markdown
 text (bulleted `- **Name** — ...` entries and `| **Name** | ... |` table rows).
@@ -43,7 +43,6 @@ substring containment.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -51,6 +50,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from candidate_identity import candidate_id
 from vault_search import build_page_docs, load_vault_config
 
 
@@ -70,6 +70,15 @@ VERB_STARTERS = {
     "created", "built", "used", "made", "started", "implemented",
 }
 
+# Sentence scaffolding that commonly precedes a product, time period, or
+# context phrase.  Treating these as given names creates high-volume false
+# positives such as "For Week", "In Protege", and "The Google Calendar".
+NON_PERSON_STARTERS = {
+    "a", "after", "an", "as", "at", "before", "by", "during", "for", "from",
+    "his", "in", "its", "on", "our", "that", "the", "their", "these",
+    "this", "those", "to", "when", "while", "with", "without", "your",
+}
+
 MONTHS = {
     "January", "February", "March", "April", "May", "June", "July",
     "August", "September", "October", "November", "December",
@@ -80,7 +89,7 @@ WEEKDAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 
 # optional `entity_routing.stop_terms` configuration, never in source.
 DEFAULT_STOP_TERMS = {
     "AI", "API", "AWS", "Azure", "Calendar", "ChatGPT", "Claude", "Codex",
-    "Cursor", "Data", "Docker", "GitHub", "GitLab", "Google", "Haiku", "IT",
+    "Credit Card", "Cursor", "Data", "Docker", "GitHub", "GitLab", "Google", "Haiku", "IT",
     "JavaScript", "Microsoft", "Notion", "Obsidian", "Python", "RAG", "Slack",
     "Sonnet", "SQL", "TypeScript",
 }
@@ -89,12 +98,6 @@ DEFAULT_STOP_TERMS = {
 def die(message: str) -> int:
     print(f"route-entities: {message}", file=sys.stderr)
     return 1
-
-
-def candidate_id(candidate: dict[str, Any]) -> str:
-    """Byte-identical to build-route-batches.py's candidate_id() — do not drift."""
-    canonical = json.dumps(candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return "c-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
 
 
 def load_entity_routing_config(config: Path) -> tuple[str | None, set[str]]:
@@ -238,7 +241,14 @@ def detect_new_person(
     first_token = span.split()[0].casefold()
     # Verb/gerund first token -> it's an action, not a name ("Implementing
     # Google Calendar", "Configured Power BI", "Next project", "Met Sarah").
-    if first_token.endswith("ing") or first_token in VERB_STARTERS:
+    if (
+        first_token.endswith("ing")
+        or first_token in VERB_STARTERS
+        or first_token in NON_PERSON_STARTERS
+        or first_token in stoplist_cf
+        or first_token in known_terms
+        or first_token in name_index
+    ):
         return []
     span_cf = " ".join(span.casefold().split())
     if span_cf in stoplist_cf or span_cf in known_terms or span_cf in name_index:
@@ -280,13 +290,18 @@ def process_candidates(
 
         detected = detect_new_person(content, name_index, known_terms, stoplist_cf)
         if detected:
+            review_candidate = dict(candidate)
+            review_candidate["person_review_only"] = True
+            review_candidate["review_kind"] = "person_identity"
+            review_candidate["detected_names"] = detected
             new_person.append(
                 {
-                    "candidate_id": candidate_id(candidate),
-                    "candidate": candidate,
+                    "candidate_id": candidate_id(review_candidate),
+                    "candidate": review_candidate,
                     "detected_names": detected,
                 }
             )
+            remaining.append(review_candidate)
             continue
 
         remaining.append(candidate)

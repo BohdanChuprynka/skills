@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vault_search import load_vault_config
+from vault_search import load_vault_config, load_vault_policies
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -24,7 +24,7 @@ SKILL_DIR = SCRIPT_DIR.parent
 
 ENGINES = ("codex", "claude")
 STAGE_MODEL_DEFAULTS = {
-    "codex": {"map": "gpt-5.6-luna", "route": "gpt-5.6-luna", "reconcile": "gpt-5.6-terra"},
+    "codex": {"map": "gpt-5.6-luna", "route": "gpt-5.6-luna", "reconcile": "gpt-5.6-luna"},
     "claude": {
         "map": "claude-haiku-4-5-20251001",
         "route": "claude-haiku-4-5-20251001",
@@ -125,10 +125,41 @@ def parse_batches(output: str) -> list[tuple[str, str, int, int, list[Path]]]:
     return batches
 
 
+def parse_prefilter_stats(stderr: str) -> dict[str, int]:
+    for line in stderr.splitlines():
+        if not line.startswith("prefilter_stats "):
+            continue
+        parsed: dict[str, int] = {}
+        for field in line.split()[1:]:
+            key, separator, raw = field.partition("=")
+            if separator and raw.isdigit():
+                parsed[key] = int(raw)
+        return parsed
+    return {}
+
+
 def stage_update(state: dict[str, Any], path: Path, stage: str, **values: Any) -> None:
     state.setdefault("stages", {})[stage] = {"updated_at": utc_now(), **values}
     state["updated_at"] = utc_now()
     atomic_json(path, state)
+
+
+def stage_validation_failed(state: dict[str, Any], path: Path, stage: str) -> None:
+    """Preserve stage counts while replacing status without duplicate kwargs."""
+    previous = state.get("stages", {}).get(stage, {})
+    carried = {
+        key: value
+        for key, value in previous.items()
+        if key not in {"updated_at", "status"}
+    }
+    stage_update(
+        state,
+        path,
+        stage,
+        status="failed",
+        **carried,
+        validation_failed=True,
+    )
 
 
 def validate_environment(args: argparse.Namespace) -> None:
@@ -171,8 +202,11 @@ def validate_environment(args: argparse.Namespace) -> None:
         "build-map-batches.py",
         "build-reconcile-batches.py",
         "build-route-batches.py",
+        "classify-candidate-policy.py",
         "collect-run-metrics.py",
         "find-chats.sh",
+        "gate-write-density.py",
+        "gate-cross-target-conflicts.py",
         "prefilter-transcript.py",
         "reduce-dedup.py",
         "route-entities.py",
@@ -229,9 +263,19 @@ def agent_stage(
         command.extend(["--effort", effort])
     if stage == "route":
         command.extend(["--routing-rules", str(SKILL_DIR / "ROUTING.md")])
+    if stage in {"route", "reconcile"}:
+        command.extend(["--config", str(args.config)])
     result = run(command, check=False)
     summary_path = workdir / f"{stage}-run-summary.json"
     summary = json.loads(summary_path.read_text()) if summary_path.is_file() else {}
+    results = summary.get("results") if isinstance(summary, dict) else []
+    if not isinstance(results, list):
+        results = []
+    semantic_failures = [
+        item
+        for item in results if isinstance(item, dict)
+        and item.get("status") == "semantic-validation-failed"
+    ]
     stage_update(
         state,
         state_path,
@@ -241,9 +285,19 @@ def agent_stage(
         completed=summary.get("completed"),
         failed=summary.get("failed"),
         prompt_sha256=summary.get("prompt_sha256"),
+        **({"validation_failed": True} if semantic_failures else {}),
     )
     if result.returncode != 0:
-        raise RunFailure(f"{stage} agents left unresolved batches; see {summary_path}")
+        detail = next(
+            (
+                str(item.get("validation_error"))
+                for item in semantic_failures
+                if item.get("validation_error")
+            ),
+            "",
+        )
+        suffix = f": {detail}" if detail else f"; see {summary_path}"
+        raise RunFailure(f"{stage} agents left unresolved batches{suffix}")
 
 
 def validate_map(workdir: Path) -> list[dict[str, Any]]:
@@ -293,6 +347,114 @@ def combine_route(workdir: Path, config: Path) -> list[dict[str, Any]]:
     return records
 
 
+def build_route_fallback_batches(
+    workdir: Path,
+    records: list[dict[str, Any]],
+) -> tuple[Path, int]:
+    """Create a second-pass ROUTE workdir containing only unresolved facts."""
+    unresolved = {
+        str(record.get("candidate_id"))
+        for record in records
+        if isinstance(record, dict) and route_status(record) in {"gap", "ambiguous"}
+    }
+    fallback_dir = workdir / "route-fallback"
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(fallback_dir, 0o700)
+    if not unresolved:
+        atomic_json(fallback_dir / "route-batches.json", [])
+        return fallback_dir, 0
+
+    original = load_json(workdir / "route-batches.json")
+    batches: list[dict[str, Any]] = []
+    for batch in original if isinstance(original, list) else []:
+        candidates = [
+            item
+            for item in batch.get("candidates", [])
+            if isinstance(item, dict) and str(item.get("candidate_id")) in unresolved
+        ]
+        if not candidates:
+            continue
+        batches.append(
+            {
+                "batch_id": f"route-fallback-{len(batches) + 1:04d}",
+                "candidates": candidates,
+                "page_catalog": batch.get("page_catalog", []),
+            }
+        )
+    atomic_json(fallback_dir / "route-batches.json", batches)
+    return fallback_dir, len(unresolved)
+
+
+def route_status(record: dict[str, Any]) -> str:
+    route = record.get("route") if isinstance(record, dict) else None
+    return str(route.get("status") or "") if isinstance(route, dict) else ""
+
+
+def run_route_fallback(
+    args: argparse.Namespace,
+    workdir: Path,
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    fallback_dir, unresolved_count = build_route_fallback_batches(workdir, records)
+    if not args.route_gap_retry or unresolved_count == 0:
+        return records, {"attempted": 0, "recovered": 0, "remaining": unresolved_count}
+
+    command = [
+        str(SCRIPT_DIR / "run-agent-batches.py"),
+        "--stage",
+        "route",
+        "--workdir",
+        str(fallback_dir),
+        "--instructions",
+        str(SKILL_DIR / "prompts/route.md"),
+        "--routing-rules",
+        str(SKILL_DIR / "ROUTING.md"),
+        "--cwd",
+        str(args.cwd),
+        "--engine",
+        args.engine,
+        "--codex-bin",
+        args.codex_bin,
+        "--claude-bin",
+        args.claude_bin,
+        "--concurrency",
+        str(min(args.route_concurrency, 2)),
+        "--timeout",
+        str(args.route_timeout),
+        "--retries",
+        str(args.agent_retries),
+        "--config",
+        str(args.config),
+    ]
+    if args.route_model:
+        command.extend(["--model", args.route_model])
+    if args.route_fallback_effort:
+        command.extend(["--effort", args.route_fallback_effort])
+    run(command)
+    fallback_records = combine_route(fallback_dir, args.config)
+    fallback_by_id = {
+        str(record.get("candidate_id")): record
+        for record in fallback_records
+        if isinstance(record, dict) and record.get("candidate_id")
+    }
+    merged: list[dict[str, Any]] = []
+    recovered = 0
+    for original in records:
+        cid = str(original.get("candidate_id") or "")
+        replacement = fallback_by_id.get(cid)
+        if replacement is None:
+            merged.append(original)
+            continue
+        enriched = dict(replacement)
+        enriched["route_attempts"] = 2
+        enriched["initial_route_status"] = route_status(original)
+        if route_status(original) != "routed" and route_status(replacement) == "routed":
+            recovered += 1
+        merged.append(enriched)
+    remaining = sum(route_status(record) != "routed" for record in merged)
+    return merged, {"attempted": unresolved_count, "recovered": recovered, "remaining": remaining}
+
+
 def combine_reconcile(workdir: Path) -> list[dict[str, Any]]:
     batches = json.loads((workdir / "reconcile-batches.json").read_text())
     decisions: list[dict[str, Any]] = []
@@ -313,7 +475,7 @@ def combine_reconcile(workdir: Path) -> list[dict[str, Any]]:
 
 def persist_routing_gaps(home: Path, run_id: str, workdir: Path, records: list[dict[str, Any]]) -> None:
     batches = load_json(workdir / "route-batches.json")
-    retrieval: dict[str, list[dict[str, str]]] = {}
+    retrieval: dict[str, list[dict[str, Any]]] = {}
     for batch in batches if isinstance(batches, list) else []:
         catalog = {
             item.get("page_id"): item
@@ -324,8 +486,12 @@ def persist_routing_gaps(home: Path, run_id: str, workdir: Path, records: list[d
             if not isinstance(item, dict) or not item.get("candidate_id"):
                 continue
             retrieval[str(item["candidate_id"])] = [
-                {"vault": str(catalog[page_id].get("vault")), "page": str(catalog[page_id].get("page"))}
-                for page_id in item.get("allowed_page_ids", [])[:5]
+                {
+                    "vault": str(catalog[page_id].get("vault")),
+                    "page": str(catalog[page_id].get("page")),
+                    "retrieval_score": catalog[page_id].get("retrieval_score"),
+                }
+                for page_id in item.get("allowed_page_ids", [])
                 if page_id in catalog
             ]
     gaps = []
@@ -339,6 +505,13 @@ def persist_routing_gaps(home: Path, run_id: str, workdir: Path, records: list[d
             {
                 "candidate_id": candidate_id,
                 "status": route.get("status"),
+                "reason": (
+                    "ambiguous_pages"
+                    if route.get("status") == "ambiguous"
+                    else "no_suitable_page"
+                    if retrieval.get(candidate_id)
+                    else "no_candidates"
+                ),
                 "content": candidate.get("content"),
                 "type": candidate.get("type"),
                 "suggested_section": candidate.get("suggested_section"),
@@ -358,20 +531,58 @@ def persist_people_review_queue(home: Path, new_person: list[dict[str, Any]]) ->
     path = home / "people-review-queue.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(path.parent, 0o700)
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    blocks: list[str] = []
+    for item in new_person:
+        candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+        candidate_id = str(item.get("candidate_id") or "")
+        content = str(candidate.get("content") or "")[:100]
+        names = ", ".join(str(name) for name in (item.get("detected_names") or []))
+        source = f"{candidate.get('source_chat')} @ {candidate.get('source_date')}"
+        confidence = str(candidate.get("confidence") or "")
+        legacy_block = (
+            f"### {content}\n"
+            f"**Detected names:** {names}\n"
+            f"**Source:** {source}\n"
+            f"**Confidence:** {confidence}\n\n---\n\n"
+        )
+        if (candidate_id and f"**Candidate ID:** {candidate_id}\n" in existing) or legacy_block in existing:
+            continue
+        blocks.append(
+            f"### {content}\n"
+            f"**Candidate ID:** {candidate_id}\n"
+            f"**Detected names:** {names}\n"
+            f"**Source:** {source}\n"
+            f"**Confidence:** {confidence}\n\n---\n\n"
+        )
+    if not blocks:
+        return
     is_new = not path.is_file()
     with path.open("a", encoding="utf-8") as handle:
         if is_new:
             handle.write("# People review queue\n\nDetected names with no known-page match. Not written to any vault.\n\n")
-        for item in new_person:
-            candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
-            content = str(candidate.get("content") or "")[:100]
-            names = ", ".join(str(name) for name in (item.get("detected_names") or []))
-            handle.write(f"### {content}\n")
-            handle.write(f"**Detected names:** {names}\n")
-            handle.write(f"**Source:** {candidate.get('source_chat')} @ {candidate.get('source_date')}\n")
-            handle.write(f"**Confidence:** {candidate.get('confidence')}\n")
-            handle.write("\n---\n\n")
+        handle.writelines(blocks)
     os.chmod(path, 0o600)
+
+
+def enforce_vault_policy(
+    decision: dict[str, Any],
+    vault_name: str,
+    policies: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Apply deterministic write gates after model reconciliation."""
+    enforced = dict(decision)
+    if (
+        policies.get(vault_name, {}).get("review_only") is True
+        and decision.get("action") != "duplicate"
+    ):
+        enforced["needs_review"] = True
+        enforced["vault_policy_review_only"] = True
+    if decision.get("policy_review_only") is True and decision.get("action") != "duplicate":
+        enforced["needs_review"] = True
+    if decision.get("person_review_only") is True and decision.get("action") != "duplicate":
+        enforced["needs_review"] = True
+    return enforced
 
 
 def process_batch(
@@ -384,6 +595,7 @@ def process_batch(
 ) -> dict[str, Any]:
     attempt_started_at = utc_now()
     run_id = f"dream-{args.source}-{start}-{end}-{end_epoch}"
+    undo_log = args.home / "undo" / f"{run_id}.jsonl"
     workdir = args.home / "runs" / run_id
     workdir.mkdir(parents=True, exist_ok=True)
     os.chmod(workdir, 0o700)
@@ -416,6 +628,7 @@ def process_batch(
     state.pop("error", None)
     state["stages"] = {}
     state["attempt_started_at"] = attempt_started_at
+    state["attempt_pid"] = os.getpid()
     atomic_json(state_path, state)
     runtime_env = os.environ.copy()
     runtime_env.update(
@@ -440,16 +653,24 @@ def process_batch(
             os.chmod(filtered, 0o600)
             if result.stdout.strip():
                 source_date = datetime.fromtimestamp(transcript.stat().st_mtime).date().isoformat()
+                stats = parse_prefilter_stats(result.stderr)
                 manifest.append(
-                    {"raw": str(transcript), "filtered": str(filtered), "source_date": source_date}
+                    {
+                        "raw": str(transcript),
+                        "filtered": str(filtered),
+                        "source_date": source_date,
+                        **stats,
+                    }
                 )
         atomic_json(workdir / "map-manifest.json", manifest)
         stage_update(state, state_path, "find", status="success", transcripts=len(transcripts), prefiltered=len(manifest))
+        new_person: list[dict[str, Any]] = []
 
         if not manifest:
             atomic_json(workdir / "map-units.json", [])
             atomic_json(workdir / "map-valid.json", [])
             atomic_json(workdir / "reduced.json", [])
+            atomic_json(workdir / "routable.json", [])
             atomic_json(workdir / "route-batches.json", [])
             atomic_json(workdir / "routed-records.json", [])
             atomic_json(args.home / "gaps" / f"{run_id}.json", {"run_id": run_id, "gaps": []})
@@ -474,11 +695,16 @@ def process_batch(
             try:
                 valid = validate_map(workdir)
             except Exception:
-                stage_update(state, state_path, "map", **state["stages"]["map"], status="failed", validation_failed=True)
+                stage_validation_failed(state, state_path, "map")
                 raise
             stage_update(state, state_path, "map", **state["stages"]["map"], valid_candidates=len(valid))
 
             result = run([str(SCRIPT_DIR / "reduce-dedup.py"), "--report"], stdin=json.dumps(valid))
+            reduced_raw = json.loads(result.stdout)
+            result = run(
+                [str(SCRIPT_DIR / "classify-candidate-policy.py"), "--report"],
+                stdin=json.dumps(reduced_raw),
+            )
             (workdir / "reduced.json").write_text(result.stdout, encoding="utf-8")
             os.chmod(workdir / "reduced.json", 0o600)
             reduced = json.loads(result.stdout)
@@ -486,6 +712,38 @@ def process_batch(
             result = run([str(SCRIPT_DIR / "split-memory-tiers.py"), "--report"], stdin=json.dumps(reduced))
             tiers = json.loads(result.stdout)
             routable, audit_candidates, dropped_count = tiers["routable"], tiers["audit"], tiers["dropped"]
+            result = run(
+                [
+                    str(SCRIPT_DIR / "gate-historical-current.py"),
+                    "--as-of",
+                    datetime.now(timezone.utc).date().isoformat(),
+                    "--review-after-days",
+                    str(args.historical_current_review_days),
+                    "--report",
+                ],
+                stdin=json.dumps(routable),
+            )
+            routable = json.loads(result.stdout)
+            historical_review = sum(
+                1 for candidate in routable if candidate.get("historical_review") is True
+            )
+            result = run(
+                [
+                    str(SCRIPT_DIR / "sample-quality-review.py"),
+                    "--percent",
+                    str(args.quality_review_sample_percent),
+                    "--report",
+                ],
+                stdin=json.dumps(routable),
+            )
+            routable = json.loads(result.stdout)
+            quality_review_sample = sum(
+                1 for candidate in routable if candidate.get("quality_review_sample") is True
+            )
+            policy_review = sum(
+                1 for candidate in routable if candidate.get("policy_review_only") is True
+            )
+            atomic_json(workdir / "routable.json", routable)
             atomic_json(workdir / "audit-candidates.json", audit_candidates)
             stage_update(
                 state,
@@ -497,6 +755,9 @@ def process_batch(
                 routable=len(routable),
                 audit=len(audit_candidates),
                 dropped=dropped_count,
+                historical_review=historical_review,
+                quality_review_sample=quality_review_sample,
+                policy_review=policy_review,
             )
 
             result = run(
@@ -510,8 +771,6 @@ def process_batch(
                 entity_split["remaining"],
             )
             atomic_json(workdir / "people-review-queue.json", new_person)
-            if not (args.dry_run or args.shadow):
-                persist_people_review_queue(args.home, new_person)
             stage_update(
                 state,
                 state_path,
@@ -535,14 +794,24 @@ def process_batch(
             os.chmod(workdir / "route-batches.json", 0o600)
             agent_stage("route", workdir, SKILL_DIR / "prompts/route.md", args, state, state_path)
             try:
-                routed = combine_route(workdir, args.config)
+                model_routed = combine_route(workdir, args.config)
+                model_routed, fallback_stats = run_route_fallback(args, workdir, model_routed)
+                routed = pre_routed + model_routed
+                atomic_json(workdir / "routed-records-canonical.json", routed)
                 persist_routing_gaps(args.home, run_id, workdir, routed)
-                routed = pre_routed + routed
             except Exception:
-                stage_update(state, state_path, "route", **state["stages"]["route"], status="failed", validation_failed=True)
+                stage_validation_failed(state, state_path, "route")
                 raise
             gaps = sum(1 for record in routed if record["route"]["status"] != "routed")
-            stage_update(state, state_path, "route", **state["stages"]["route"], records=len(routed), gaps=gaps)
+            stage_update(
+                state,
+                state_path,
+                "route",
+                **state["stages"]["route"],
+                records=len(routed),
+                gaps=gaps,
+                fallback=fallback_stats,
+            )
 
             result = run(
                 [
@@ -562,21 +831,60 @@ def process_batch(
                 try:
                     decisions = combine_reconcile(workdir)
                 except Exception:
-                    stage_update(
-                        state,
-                        state_path,
-                        "reconcile",
-                        **state["stages"]["reconcile"],
-                        status="failed",
-                        validation_failed=True,
-                    )
+                    stage_validation_failed(state, state_path, "reconcile")
                     raise
             else:
                 atomic_json(workdir / "reconcile-decisions.json", [])
                 decisions = []
                 stage_update(state, state_path, "reconcile", status="success", total=0, completed=0, failed=0)
 
+            cross_target_result = run(
+                [str(SCRIPT_DIR / "gate-cross-target-conflicts.py"), "--report"],
+                stdin=json.dumps(decisions),
+            )
+            decisions = json.loads(cross_target_result.stdout)
+            cross_target_review = sum(
+                1
+                for record in decisions
+                if isinstance(record, dict)
+                and isinstance(record.get("decision"), dict)
+                and record["decision"].get("cross_target_review") is True
+            )
+            density_result = run(
+                [
+                    str(SCRIPT_DIR / "gate-write-density.py"),
+                    "--config",
+                    str(args.config),
+                    "--page-limit",
+                    str(args.page_auto_write_limit),
+                    "--section-limit",
+                    str(args.section_auto_write_limit),
+                    "--page-line-threshold",
+                    str(args.page_line_review_threshold),
+                    "--report",
+                ],
+                stdin=json.dumps(decisions),
+            )
+            decisions = json.loads(density_result.stdout)
+            atomic_json(workdir / "reconcile-decisions-gated.json", decisions)
+            density_review = sum(
+                1
+                for record in decisions
+                if isinstance(record, dict)
+                and isinstance(record.get("decision"), dict)
+                and record["decision"].get("density_review") is True
+            )
+            stage_update(
+                state,
+                state_path,
+                "reconcile",
+                **state["stages"]["reconcile"],
+                density_review=density_review,
+                cross_target_review=cross_target_review,
+            )
+
             vaults = load_vault_config(args.config)
+            vault_policies = load_vault_policies(args.config)
             candidate_content = {
                 str(record.get("candidate_id")): str(
                     (record.get("candidate") or {}).get("content") or ""
@@ -584,16 +892,66 @@ def process_batch(
                 for record in routed
                 if record.get("candidate_id")
             }
+            candidate_metadata = {
+                str(record.get("candidate_id")): record.get("candidate") or {}
+                for record in routed
+                if record.get("candidate_id")
+            }
             fact_lines = []
             apply_errors = 0
+            enforced_decisions: list[dict[str, Any]] = []
             for record in decisions:
                 candidate_id = record["candidate_id"]
                 decision = record["decision"]
                 decision_path = workdir / f"decision-{candidate_id}.json"
-                atomic_json(decision_path, decision)
+                metadata = candidate_metadata.get(candidate_id, {})
+                enriched_decision = dict(decision)
+                enriched_decision["run_id"] = run_id
+                enriched_decision["run_window"] = {"start": start, "end": end}
+                enriched_decision["model_profile"] = {
+                    "engine": args.engine,
+                    "map": args.map_model,
+                    "route": args.route_model,
+                    "reconcile": args.reconcile_model,
+                    "efforts": {
+                        "map": args.map_effort,
+                        "route": args.route_effort,
+                        "reconcile": args.reconcile_effort,
+                    },
+                }
+                for source_key, decision_key in (
+                    ("type", "candidate_type"),
+                    ("memory_tier", "memory_tier"),
+                    ("source_role", "source_role"),
+                    ("source_date", "source_date"),
+                    ("source_chat", "source_chat"),
+                    ("source_event", "source_event"),
+                    ("evidence", "evidence"),
+                    ("historical_review", "historical_review"),
+                    ("historical_age_days", "historical_age_days"),
+                    ("quality_review_sample", "quality_review_sample"),
+                    ("quality_review_bucket", "quality_review_bucket"),
+                    ("fact_class", "fact_class"),
+                    ("policy_review_only", "policy_review_only"),
+                    ("policy_reasons", "policy_reasons"),
+                    ("person_review_only", "person_review_only"),
+                    ("detected_names", "detected_names"),
+                    ("review_kind", "review_kind"),
+                ):
+                    if source_key in metadata:
+                        enriched_decision[decision_key] = metadata[source_key]
                 vault_name = decision["target"]["vault"]
                 if vault_name not in vaults:
                     raise RunFailure(f"decision references unconfigured vault: {vault_name}")
+                enriched_decision = enforce_vault_policy(
+                    enriched_decision,
+                    vault_name,
+                    vault_policies,
+                )
+                enforced_decisions.append(
+                    {"candidate_id": candidate_id, "decision": enriched_decision}
+                )
+                atomic_json(decision_path, enriched_decision)
                 command = [
                     str(SCRIPT_DIR / "apply-decision.sh"),
                     "--vault",
@@ -601,7 +959,7 @@ def process_batch(
                     "--decision",
                     str(decision_path),
                     "--undo-log",
-                    str(args.home / "undo" / f"{end}.jsonl"),
+                    str(undo_log),
                     "--candidate-id",
                     candidate_id,
                 ]
@@ -620,6 +978,11 @@ def process_batch(
                         if value.get("action") == "duplicate" and not value.get("content"):
                             value["candidate_content"] = candidate_content.get(candidate_id, "")
                         fact_lines.append(value)
+            # Metrics and post-run audits must see the exact decisions handed to
+            # APPLY, including deterministic candidate, density, cross-target,
+            # people, and per-vault review gates.  The earlier reconcile files
+            # intentionally preserve pre-enforcement stage outputs.
+            atomic_json(workdir / "reconcile-decisions-enforced.json", enforced_decisions)
             stage_update(
                 state,
                 state_path,
@@ -649,6 +1012,13 @@ def process_batch(
             "window_start": start,
             "window_end": end,
             "chats_scanned": len(transcripts),
+            "routing": {
+                "records": len(routed),
+                "gaps": gaps,
+                "fallback": state.get("stages", {}).get("route", {}).get("fallback", {}),
+            },
+            "undo_log": str(undo_log),
+            "undo_home": str(args.home),
             "facts": fact_lines,
         }
         atomic_json(workdir / "run-summary.json", run_summary)
@@ -819,22 +1189,74 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--claude-bin", default=os.environ.get("CLAUDE_BIN", "claude"))
     parser.add_argument("--agent-retries", type=int, default=1)
     parser.add_argument("--route-top-k", type=int, default=32)
+    parser.add_argument(
+        "--historical-current-review-days",
+        type=int,
+        default=int(os.environ.get("DREAM_HISTORICAL_CURRENT_REVIEW_DAYS", "30")),
+        help="force current-tier facts this many days old into review; 0 reviews all current facts",
+    )
+    parser.add_argument(
+        "--quality-review-sample-percent",
+        type=int,
+        default=int(os.environ.get("DREAM_QUALITY_REVIEW_SAMPLE_PERCENT", "0")),
+        help="deterministically send this percent of high-confidence facts through review",
+    )
     parser.add_argument("--map-model", default=None)
     parser.add_argument("--map-effort", default=None)
     parser.add_argument("--map-concurrency", type=int, default=4)
     parser.add_argument("--map-timeout", type=int, default=900)
     parser.add_argument("--route-model", default=None)
     parser.add_argument("--route-effort", default=None)
+    parser.add_argument(
+        "--route-fallback-effort",
+        default=os.environ.get("DREAM_ROUTE_FALLBACK_EFFORT"),
+        help="reasoning effort for the targeted gap/ambiguous retry (Codex default: medium)",
+    )
+    parser.add_argument(
+        "--no-route-gap-retry",
+        dest="route_gap_retry",
+        action="store_false",
+        help="disable the targeted second ROUTE pass for gap/ambiguous outcomes",
+    )
+    parser.set_defaults(route_gap_retry=True)
     parser.add_argument("--route-concurrency", type=int, default=6)
     parser.add_argument("--route-timeout", type=int, default=900)
     parser.add_argument("--reconcile-model", default=None)
     parser.add_argument("--reconcile-effort", default=None)
     parser.add_argument("--reconcile-concurrency", type=int, default=6)
     parser.add_argument("--reconcile-timeout", type=int, default=1200)
+    parser.add_argument(
+        "--page-auto-write-limit",
+        type=int,
+        default=int(os.environ.get("DREAM_PAGE_AUTO_WRITE_LIMIT", "12")),
+        help="queue otherwise-safe writes after this many additions to one page per run; 0 disables",
+    )
+    parser.add_argument(
+        "--section-auto-write-limit",
+        type=int,
+        default=int(os.environ.get("DREAM_SECTION_AUTO_WRITE_LIMIT", "8")),
+        help="queue otherwise-safe writes after this many additions to one section per run; 0 disables",
+    )
+    parser.add_argument(
+        "--page-line-review-threshold",
+        type=int,
+        default=int(os.environ.get("DREAM_PAGE_LINE_REVIEW_THRESHOLD", "1000")),
+        help="queue additions to pages at or above this line count; 0 disables",
+    )
     args = parser.parse_args(argv)
 
     if args.engine not in ENGINES:
         parser.error(f"--engine/DREAM_ENGINE must be one of {ENGINES}, got: {args.engine!r}")
+    if args.historical_current_review_days < 0:
+        parser.error("--historical-current-review-days must be >= 0")
+    if not 0 <= args.quality_review_sample_percent <= 100:
+        parser.error("--quality-review-sample-percent must be between 0 and 100")
+    if min(
+        args.page_auto_write_limit,
+        args.section_auto_write_limit,
+        args.page_line_review_threshold,
+    ) < 0:
+        parser.error("write-density limits must be >= 0")
     if sum(bool(value) for value in (args.all, args.since, args.resume)) > 1:
         parser.error("--all, --since, and --resume are mutually exclusive")
     if args.promote_shadow and not args.resume:
@@ -843,6 +1265,8 @@ def main(argv: list[str] | None = None) -> int:
     args.config = args.config.expanduser().resolve()
     args.cwd = args.cwd.expanduser().resolve()
     resolve_stage_agent_defaults(args)
+    if args.route_fallback_effort is None and args.engine == "codex":
+        args.route_fallback_effort = "medium"
     try:
         validate_environment(args)
     except RunFailure as exc:

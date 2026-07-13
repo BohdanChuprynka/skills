@@ -23,6 +23,7 @@ PY
 
 python3 "$SKILL_DIR/scripts/serve-review.py" \
   --queue "$TMP/queue.json" --decisions "$TMP/decisions.json" \
+  --feedback "$TMP/feedback.json" \
   --port "$PORT" --no-browser > "$TMP/server.log" 2>&1 &
 SERVER_PID=$!
 
@@ -40,7 +41,25 @@ curl -fsS "$BASE/api/queue?token=$TOKEN" | jq -e '.entries[0].id == "c-test"' >/
 curl -fsS -X POST -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' \
   -d '{"id":"c-test","decision":"approve"}' "$BASE/api/decide" | jq -e '.ok' >/dev/null
 jq -e '."c-test" == "approve"' "$TMP/decisions.json" >/dev/null
+jq -e '."c-test".decision == "approve" and ."c-test".reason == "accepted"' "$TMP/feedback.json" >/dev/null
 [ "$(stat -f '%Lp' "$TMP/decisions.json" 2>/dev/null || stat -c '%a' "$TMP/decisions.json")" = "600" ]
+[ "$(stat -f '%Lp' "$TMP/feedback.json" 2>/dev/null || stat -c '%a' "$TMP/feedback.json")" = "600" ]
+curl -fsS -X POST -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"id":"c-reject","decision":"reject","reason":"not_durable"}' "$BASE/api/decide" | jq -e '.ok' >/dev/null
+jq -e '."c-reject".decision == "reject" and ."c-reject".reason == "not_durable"' "$TMP/feedback.json" >/dev/null
+[ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"id":"bad","decision":"reject","reason":"invented"}' "$BASE/api/decide")" = "400" ]
+
+# A persistence failure is an explicit 500 contract, and cannot mutate the
+# authoritative decisions file. The UI relies on this response to keep the card.
+rm "$TMP/feedback.json"
+mkdir "$TMP/feedback.json"
+FAIL_STATUS=$(curl -sS -o "$TMP/failure.json" -w '%{http_code}' -X POST \
+  -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"id":"c-persist-fail","decision":"approve","reason":"accepted"}' "$BASE/api/decide")
+[ "$FAIL_STATUS" = "500" ]
+jq -e '.ok == false and .error == "review decision could not be persisted"' "$TMP/failure.json" >/dev/null
+jq -e 'has("c-persist-fail") | not' "$TMP/decisions.json" >/dev/null
+
 curl -fsS -X POST -H "X-CSRF-Token: $TOKEN" -H 'Content-Type: application/json' \
   -d '{}' "$BASE/api/shutdown" | jq -e '.ok' >/dev/null
 wait "$SERVER_PID"

@@ -37,6 +37,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from vault_search import build_page_docs
+
 
 STATUSES = {"routed", "ambiguous", "gap"}
 CONFIDENCES = {"high", "medium", "low"}
@@ -123,8 +125,12 @@ def canonical_pages_for_vault(root: Path) -> set[str]:
     return pages
 
 
-def build_canonical_pages(roots: dict[str, Path]) -> dict[str, set[str]]:
-    return {vault: canonical_pages_for_vault(root) for vault, root in roots.items()}
+def build_canonical_pages(roots: dict[str, Path], config_path: Path) -> dict[str, set[str]]:
+    pages = {vault: set() for vault in roots}
+    for doc in build_page_docs(config_path):
+        if doc.vault in pages:
+            pages[doc.vault].add(doc.page)
+    return pages
 
 
 def safe_relative_page(page: str) -> str:
@@ -263,7 +269,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         canonical_pages = None
         if args.config:
-            canonical_pages = build_canonical_pages(parse_vault_roots(Path(args.config)))
+            config_path = Path(args.config)
+            canonical_pages = build_canonical_pages(parse_vault_roots(config_path), config_path)
         batch = load_json_file(args.batch)
         inputs = validate_batch(batch)
         output = read_json_stdin()

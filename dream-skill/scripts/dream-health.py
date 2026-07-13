@@ -84,6 +84,16 @@ def storage_bytes(root: Path) -> int:
     return total
 
 
+def pid_is_alive(raw_pid: Any) -> bool:
+    if not isinstance(raw_pid, int) or raw_pid <= 0:
+        return False
+    try:
+        os.kill(raw_pid, 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def insecure_paths(root: Path, fix: bool) -> list[str]:
     insecure: list[str] = []
     if not root.exists():
@@ -114,7 +124,9 @@ def collect(home: Path, fix_permissions: bool) -> dict[str, Any]:
     states = collect_states(home / "runs")
     latest = states[0] if states else None
     failed = [state for state in states if state.get("status") == "failed"]
-    active = [state for state in states if state.get("status") in {"running", "ready-to-advance"}]
+    unfinished = [state for state in states if state.get("status") in {"running", "ready-to-advance"}]
+    active = [state for state in unfinished if pid_is_alive(state.get("attempt_pid"))]
+    stale = [state for state in unfinished if not pid_is_alive(state.get("attempt_pid"))]
     permissions = insecure_paths(home, fix_permissions)
 
     alerts: list[str] = []
@@ -143,6 +155,8 @@ def collect(home: Path, fix_permissions: bool) -> dict[str, Any]:
         alerts.append(f"{len(failed)} failed run(s) retained")
     if active:
         alerts.append(f"{len(active)} run(s) not finalized")
+    if stale:
+        alerts.append(f"{len(stale)} stale run state(s) retained; no live process")
     if permissions:
         verb = "fixed" if fix_permissions else "found"
         alerts.append(f"{verb} {len(permissions)} paths with group/other permissions")
@@ -159,6 +173,7 @@ def collect(home: Path, fix_permissions: bool) -> dict[str, Any]:
             "known": len(states),
             "failed": len(failed),
             "active": len(active),
+            "stale": len(stale),
             "latest": {
                 key: latest.get(key)
                 for key in ("run_id", "status", "mode", "updated_at", "source", "window")
@@ -195,7 +210,7 @@ def human(result: dict[str, Any]) -> str:
     queue = result["queue"]
     lines = [
         f"Dream health: {len(result['alerts'])} alert(s)",
-        f"Runs: {runs['known']} known, {runs['failed']} failed, {runs['active']} active",
+        f"Runs: {runs['known']} known, {runs['failed']} failed, {runs['active']} active, {runs['stale']} stale",
         f"Queue: {queue['pending_entries']} pending, {queue['sidecars']} sidecars, {queue['orphan_pending']} orphan pending",
         f"Storage: {result['storage_bytes'] / 1_048_576:.1f} MiB",
     ]

@@ -10,12 +10,17 @@ LIVE_TESTS=(
   test_path_guard.sh
   test_queue.sh
   test_undo.sh
+  test_write_freshness.sh
   test_write_receipt.sh
+  test_write_density.sh
   test_private_state.sh
   test_private_guard.sh
   test_setup.sh
   test_agent_runner.sh
   test_candidate_validation.sh
+  test_candidate_policy.sh
+  test_cleanup_transaction.sh
+  test_cross_target_conflicts.sh
   test_dream_health.sh
   test_dream_run_e2e.sh
   test_engine_backends.sh
@@ -28,8 +33,11 @@ LIVE_TESTS=(
   test_reduce_provenance.sh
   test_repair_queue_state.sh
   test_review_server.sh
+  test_review_feedback.sh
+  test_review_queue_metadata.sh
   test_review_transaction.sh
   test_route_entities.sh
+  test_route_fallback.sh
   test_route_retrieval.sh
   test_stable_ids.sh
 )
