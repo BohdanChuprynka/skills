@@ -43,7 +43,7 @@ SUMMARY=$(cat <<'EOF'
   "chats_scanned": 4,
   "facts": [
     {
-      "content":       "Northwind Bank internship confirmed for Mar–May 2027",
+      "content":       "Northwind Bank contract confirmed for Mar–May 2027",
       "target":        "me/wiki/experience.md",
       "action":        "new",
       "review_status": "written",

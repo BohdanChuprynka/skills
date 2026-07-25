@@ -7,7 +7,7 @@
 
 ## Purpose
 
-Several Obsidian vaults written to by `dream-skill`, `sync-wiki`, `sync-phone`, and manual edits. Nothing trims. Result: wiki entropy — orphaned pages, broken `[[wikilinks]]`, index drift, superseded pages with no replacement link, stale frontmatter on ostensibly active items.
+Several Obsidian vaults written to by `dream-skill` and manual edits. Nothing trims. Result: wiki entropy — orphaned pages, broken `[[wikilinks]]`, index drift, superseded pages with no replacement link, stale frontmatter on ostensibly active items.
 
 `clean-wiki` is the trim layer. Runs monthly, manually. Never auto-deletes. Proposes changes via a Tinder-swipe local web UI; user approves per-card; apply step writes vault with rollback log.
 
@@ -41,7 +41,7 @@ Pure-rules signals that need no semantic judgment. Phase 1 covers 8:
 
 ### Source B — Sync-skill semantic flags (Phase 2, deferred)
 
-When `dream-skill` / `sync-wiki` / `sync-phone` writes to vault, they call a shared `flag_for_cleanup()` API to append a queue entry. Catches semantic staleness (e.g. "you updated X, related page Y has stale claim"). Out of scope for v1 — implement after Phase 1+3 ship and prove value.
+When `dream-skill` writes to a vault, they call a shared `flag_for_cleanup()` API to append a queue entry. Catches semantic staleness (e.g. "you updated X, related page Y has stale claim"). Out of scope for v1 — implement after Phase 1+3 ship and prove value.
 
 ## Pipeline (Phase 1 + 3)
 
@@ -425,7 +425,7 @@ User says `/clean-wiki` or "run wiki cleanup":
 
 ## Future phases (post-today)
 
-- **Phase 2:** Add `flag_for_cleanup()` shared lib + hooks into dream/sync-wiki/sync-phone
+- **Phase 2:** Add `flag_for_cleanup()` shared lib + hooks into dream-skill
 - **Phase 4:** Embedding-based semantic dedup with merge proposals
 - **Phase 5:** Touch swipe on mobile (PWA or Tauri)
 - **Phase 6:** Auto-run on schedule (monthly cron)

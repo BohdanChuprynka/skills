@@ -1,6 +1,6 @@
 ---
 name: session-retro
-description: Look back at a finished working session and find what should have been done faster or differently. Measures the transcript rather than recalling it, then proposes a ranked short list and logs it. Use for "/session-retro", "retro this session", "how could we have done this faster", "what should we automate", or at the end of a long working day.
+description: Look back at a finished working session and find what should have been done faster or differently. Measures the transcript rather than recalling it, then proposes a ranked short list and logs it. Use for "/session-retro", "retro this session", "how could we have done this faster", "what should we automate", or at the end of a working day.
 ---
 
 # session-retro
@@ -30,7 +30,7 @@ are facts. "It felt slow" is not.
 
 Six things worth finding, roughly in order of how much they cost:
 
-1. **A loop that wanted a script.** A long run of one tool with the same shape. Four browser
+1. **A loop that wanted a script.** A long run of one tool with the same shape. Four tool
    calls per item means 100 calls for 25 items. Write the tool instead.
 2. **Work redone because the input was wrong.** A stale link, a ledger that disagreed with the
    source, a number taken from a blog. The fix is checking the source earlier, not going faster.

@@ -107,7 +107,7 @@ transcribe-audio transcribe ~/Downloads/call.mp3
 ```bash
 transcribe-audio transcribe ~/Downloads/call.mp3 \
   --language uk \
-  --prompt "Розмова про knowledge graphs, ontology, Neo4j, GraphRAG. Учасники: Іван, Olena."
+  --prompt "Розмова про semantic search, embeddings, pgvector. Учасники: Олена, Іван."
 ```
 
 **Transcript + summary + Obsidian note:**

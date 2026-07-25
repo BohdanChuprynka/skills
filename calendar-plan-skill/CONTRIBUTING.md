@@ -89,8 +89,8 @@ To keep both runtimes in sync with minimal effort, install via symlinks:
 ```bash
 # Clone once
 git clone https://github.com/BohdanChuprynka/calendar-plan-skill.git \
-  ~/Documents/src/skills/calendar-plan-skill
-REPO=~/Documents/src/skills/calendar-plan-skill
+  ~/src/calendar-plan-skill
+REPO=~/src/calendar-plan-skill
 
 # Claude target: symlink the whole skill dir
 ln -s "$REPO/skills/calendar-plan" ~/.claude/skills/calendar-plan

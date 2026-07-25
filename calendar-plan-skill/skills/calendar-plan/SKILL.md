@@ -68,7 +68,7 @@ Four categories. Each routes to one calendar per `preferences.md`.
 |---|---|
 | Productive | Self-directed work, deep work, side projects, outreach, open-source contributions, any non-paid technical grind |
 | Job | Paid employer time (current paid role + any future paid work for someone else) |
-| School | School subjects, coursework, exams, anything academic |
+| School | Classes, coursework, exams, anything academic |
 | Personal | Gym, family, partner, drive, errands, recovery, social, meals when standalone |
 
 The Productive ↔ Job split is conceptual (paid vs self-directed); both may route to the same calendar per user config — see `preferences.md`. Differentiate via event titles, not separate calendars.

@@ -231,8 +231,6 @@ If you fork this and push, run `git status --ignored` from the monorepo root bef
 ## Related
 
 - [dream-skill](../dream-skill) — reconciles your wiki against external sources (Notion, Calendar, Gmail) via LLM proposals
-- [sync-phone](../sync-phone) — drains iPhone voice dictation into vaults
-- [calendar-plan-skill](../calendar-plan-skill) — drafts tomorrow's calendar from your vault + connected services
 
 `clean-wiki` pairs with these. They write content; this skill trims it.
 

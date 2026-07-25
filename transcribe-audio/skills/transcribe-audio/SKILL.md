@@ -58,7 +58,7 @@ This is the most under-used lever. The prompt biases Whisper toward correctly tr
 Pass it as a single sentence in the audio's dominant language. Example for a Ukrainian/English tech call:
 
 ```
---prompt "Розмова про knowledge graphs, ontology, GraphRAG, Neo4j. Учасники: Іван, Olena."
+--prompt "Розмова про semantic search, embeddings, pgvector. Учасники: Олена, Іван."
 ```
 
 Skip the prompt only if you have no context.
@@ -104,9 +104,9 @@ Your job after the run:
    - "Should I route this to a specific vault page instead of the inbox?"
    - "Want me to translate any sections to English?"
 
-### 6. Smart vault routing (optional, optional)
+### 6. Smart vault routing (optional)
 
-If `--obsidian` was used, the CLI drops the note in `{vault_path}/inbox/`. For users with the multi-vault setup described in their global CLAUDE.md (fitness, me, projects, learning, setup, notes), you can apply judgment:
+If `--obsidian` was used, the CLI drops the note in `{vault_path}/inbox/`. For users with the multi-vault setup described in their global CLAUDE.md (for example `me`, `projects`, `health`, `notes`), you can apply judgment:
 
 1. Read the just-written note
 2. Based on content, decide which vault it actually belongs in
@@ -137,7 +137,7 @@ You: [report] ~/transcripts/team-sync.txt — 23 min English meeting, 4 speakers
 
 **Full pipeline:**
 ```
-User: /transcribe-audio ~/Downloads/team-call.mp3 — це українська розмова про knowledge graphs
-You: [run] transcribe-audio transcribe ~/Downloads/team-call.mp3 --language uk --prompt "Розмова про knowledge graphs, ontology, Neo4j, GraphRAG" --summary --summary-style brief --obsidian
+User: /transcribe-audio ~/Downloads/team-call.mp3 — це українська розмова про semantic search
+You: [run] transcribe-audio transcribe ~/Downloads/team-call.mp3 --language uk --prompt "Розмова про semantic search, embeddings, pgvector" --summary --summary-style brief --obsidian
 You: [report] transcript + summary + Obsidian note paths. 1-sentence content recap.
 ```

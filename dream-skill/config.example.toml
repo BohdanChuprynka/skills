@@ -10,7 +10,7 @@ reports_dir = "/absolute/path/to/dream-reports"
 # cadence_grace_days = 1
 # current_page_stale_days = 7
 # current_pages = ["/absolute/path/to/personal-vault/wiki/Now.md"]
-# source_paths = ["/absolute/private/wispr/*.jsonl", "/absolute/private/meetily/*.jsonl"]
+# source_paths = ["/absolute/private/voice-notes/*.jsonl", "/absolute/private/meeting-notes/*.jsonl"]
 
 # Optional generic local context producer. The command runs once at the start
 # of each fresh Claude/all run; it must atomically maintain ordinary JSONL files

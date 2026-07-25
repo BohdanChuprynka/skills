@@ -56,7 +56,7 @@ Before first use:
 
 **Ukrainian call with tech vocab + summary + Obsidian note:**
 ```
-/transcribe-audio ~/Downloads/team-call.mp3 --language uk --prompt "knowledge graphs, ontology, Neo4j" --summary --obsidian
+/transcribe-audio ~/Downloads/team-call.mp3 --language uk --prompt "semantic search, embeddings, pgvector" --summary --obsidian
 ```
 
 **Action items only:**

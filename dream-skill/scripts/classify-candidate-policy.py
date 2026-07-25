@@ -87,7 +87,7 @@ QUALITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "event_narration",
         re.compile(
-            r"^(?:the user|user|bohdan|you then)\s+"
+            r"^(?:the user|user|you then)\s+"
             r"(?:asked|requested|confirmed|approved|told|decided)\s+(?:to|that)\b",
             re.I,
         ),

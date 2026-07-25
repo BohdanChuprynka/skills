@@ -17,12 +17,12 @@ Reject or rewrite these patterns before returning JSON:
   instruction, not memory.
 - Bad: “The implementation had to avoid a shared adapter.” Rewrite only if the
   owning project and durable constraint are explicit; otherwise drop it.
-- Bad: “Google Calendar was added on branch `feat/...`.” Preserve the connector
+- Bad: “Calendar sync was added on branch `feat/...`.” Preserve the connector
   decision, but drop branch, PR, worktree, and test-receipt details.
 - Good: “Acme uses connector-specific schemas for each provider.”
 - Good: “The user prefers the term `workspace` instead of `project space`.”
-- Good current fact: “An API 500 was traced to missing
-  `orders.discount_code` in the local PostgreSQL schema.”
+- Good current fact: “A checkout 500 error was traced to a missing
+  `orders.discount_code` column in the local PostgreSQL schema.”
 
 Do not emit facts whose only value is that someone asked, approved, implemented,
 tested, reviewed, started, stopped, or planned something. Do not emit generic

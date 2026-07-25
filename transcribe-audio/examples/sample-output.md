@@ -5,7 +5,7 @@ Below is the kind of output produced by:
 ```bash
 transcribe-audio transcribe ~/Downloads/sample-call.m4a \
   --language uk \
-  --prompt "Розмова про knowledge graphs, ontology, Neo4j" \
+  --prompt "Розмова про semantic search, embeddings, pgvector" \
   --summary --summary-style brief \
   --obsidian
 ```
@@ -23,7 +23,7 @@ Transcribed 87 segments
   /Users/me/transcripts/sample-call.srt
   /Users/me/transcripts/sample-call.summary.md  (summary: brief)
 
-✓ Obsidian note: /Users/me/Documents/Obsidian/personal/inbox/2026-05-25-sample-call.md
+✓ Obsidian note: /Users/me/Documents/Obsidian/personal/inbox/2026-03-10-sample-call.md
 
 Detected language: uk
 ```
@@ -31,8 +31,8 @@ Detected language: uk
 ## sample-call.txt
 
 ```
-Привіт, як справи. Я дивлюся в твою презентацію по knowledge graphs.
-Що саме ви робите з ontology? Чи це більше LLM extraction поверх pgvector?
+Привіт, як справи. Я дивлюся в твою презентацію по semantic search.
+Що саме ви робите з embeddings? Чи це більше hybrid search поверх pgvector?
 ...
 ```
 
@@ -45,33 +45,33 @@ Detected language: uk
 
 2
 00:00:03,200 --> 00:00:08,500
-Я дивлюся в твою презентацію по knowledge graphs.
+Я дивлюся в твою презентацію по semantic search.
 ...
 ```
 
 ## sample-call.summary.md
 
 ```markdown
-**Topic:** обговорення архітектури knowledge graph системи на базі ontology.
+**Topic:** обговорення архітектури semantic search для каталогу продуктів.
 
 **Key points:**
 - Олена описує продукт Acme Analytics
-- Користувач розглядає entity resolution як основний challenge
-- Технічний стек: Neo4j + LLM extraction поверх pgvector ontology
+- Користувач розглядає якість embeddings як основний challenge
+- Технічний стек: PostgreSQL + pgvector + hybrid search
 - Дедлайн на березень 2027
 
 **Decisions:**
 - Узгоджено продовжити розмову на технічному рівні з Іваном наступного тижня
 
 **Open questions:**
-- Який формат співпраці (contract / project-based) — не визначено
+- Який формат пілоту (безкоштовний / платний) — не визначено
 ```
 
-## Obsidian note: 2026-05-25-sample-call.md
+## Obsidian note: 2026-03-10-sample-call.md
 
 ```markdown
 ---
-created: 2026-05-25T13:42:18
+created: 2026-03-10T13:42:18
 type: transcript
 source: /Users/me/Downloads/sample-call.m4a
 duration_seconds: 685.1
@@ -86,13 +86,13 @@ status: unreviewed
 
 ## Summary
 
-**Topic:** обговорення архітектури knowledge graph системи на базі ontology.
+**Topic:** обговорення архітектури semantic search для каталогу продуктів.
 ...
 
 ---
 
 ## Transcript
 
-Привіт, як справи. Я дивлюся в твою презентацію по knowledge graphs.
+Привіт, як справи. Я дивлюся в твою презентацію по semantic search.
 ...
 ```

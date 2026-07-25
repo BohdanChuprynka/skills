@@ -20,7 +20,7 @@ from typing import Any
 
 WORD_RE = re.compile(r"[a-z0-9]+", re.I)
 STOP = {
-    "a", "an", "and", "are", "as", "at", "be", "bohdan", "by", "for",
+    "a", "an", "and", "are", "as", "at", "be", "by", "for",
     "from", "has", "he", "in", "is", "it", "of", "on", "or", "that",
     "the", "this", "to", "user", "was", "were", "will", "with", "wants",
 }

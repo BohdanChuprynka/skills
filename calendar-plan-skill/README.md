@@ -70,38 +70,36 @@ Both runtime targets share the same `prompts/cron-prompt.md` body. Edit once, bo
 
 ## Example output
 
-An illustrative auto-mode run (synthetic):
+A synthetic auto-mode run looks like this:
 
 ```
-target_date: 2026-05-19 (Mon)
+target_date: 2026-03-16 (Mon)
 mode: auto
 connectors: google-calendar ok, notion ok, gmail ok, filesystem ok
 
 Fixed events read:
   Job         09:00-17:00  Workday
-  Personal    19:00-20:00  Run with friend (location: park)
+  Personal    19:00-20:00  Run with a friend (location: park)
 
-Notion task sequence (12-Week Planner):
-  1. Statistics problem set
-  2. ML lecture 4
-  3. Outreach: 3 founders
-  4. Github commit
+Notion task sequence (Weekly Planner):
+  1. Finish Q1 report draft
+  2. Online course module 4
+  3. Reply to 3 client emails
 
 Calendar Context modifiers:
   - low-energy week, prefer one deep block over many small
 
 Email-derived obligations:
-  - Reply to advisor about thesis topic (received 2026-05-18, expects answer by Mon)
+  - Reply to landlord about lease renewal (received 2026-03-15, expects answer by Mon)
 
 Wrote (auto):
-  Personal    16:00-16:30  Landing buffer
-  Personal    16:30-17:30  Outreach: 3 founders            (Notion seq #3)
-  School      17:45-19:00  Statistics problem set             (Notion seq #1)
-  Personal    20:15-21:30  Dinner + reset
-  Work        21:30-23:00  ML lecture 4 + commit           (Notion seq #2,#4 merged: low-energy modifier)
+  Personal    17:15-17:45  Landing buffer
+  Productive  17:45-18:45  Reply to 3 client emails          (Notion seq #3)
+  Personal    20:15-21:00  Dinner + reset
+  Productive  21:00-22:30  Q1 report draft + course module 4 (Notion seq #1,#2 merged: low-energy modifier)
 
 Paused (no write):
-  - Thesis advisor reply: ambiguous priority; surfaced for user decision.
+  - Lease renewal reply: ambiguous priority; surfaced for user decision.
 
 Re-query post-write: no overlaps, no stale duplicates.
 ```
@@ -188,7 +186,7 @@ The Claude target reads one config file and a handful of env vars:
 
 ```bash
 # Required
-CALENDAR_CONTEXT="$HOME/Documents/Obsidian/me/wiki/Calendar Context.md"
+CALENDAR_CONTEXT="$HOME/Documents/Obsidian/<vault>/Calendar Context.md"
 
 # Sensible defaults
 MODEL="claude-sonnet-4-6"

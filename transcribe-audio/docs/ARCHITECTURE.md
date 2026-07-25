@@ -80,7 +80,7 @@ How it works:
 - Proper nouns, technical terms, and language cues in the prompt make the model far more likely to correctly transcribe matching content in the audio.
 - The prompt does not have to be a real previous transcript. A free-form sentence listing expected vocabulary works fine.
 
-Example impact on a Ukrainian-English call about knowledge graphs:
+Example impact on a Ukrainian-English call about search infrastructure:
 
 ```
 without prompt: "Ми обговорювали семантик серч і вектор дата бейсис."

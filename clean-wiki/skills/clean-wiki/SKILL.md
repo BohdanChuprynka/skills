@@ -237,7 +237,7 @@ Use $clean-wiki --undo             # Codex undo flow
 ## Scope
 
 This skill does not:
-- Create new content; use sync-phone, sync-wiki, or dream-skill.
+- Create new content; use dream-skill.
 - Modify content without explicit user approval per finding.
 - Push to GitHub.
 - Run unattended on a schedule.

@@ -10,7 +10,7 @@ printf '%s\n' '2026-07-19' > "$TMP/last-run"
 printf '%s\n' '2026-07-19' > "$TMP/last-run-codex"
 printf '%s\n' '{"run_id":"run-old","status":"completed","mode":"real","updated_at":"2026-07-19T12:00:00Z"}' > "$TMP/runs/run-old.json"
 printf '%s\n' '## As of 2026-07-03' > "$TMP/Now.md"
-printf '%s\n' 'fresh source' > "$TMP/raw/wispr.jsonl"
+printf '%s\n' 'fresh source' > "$TMP/raw/voice-notes.jsonl"
 cat > "$TMP/config.toml" <<TOML
 [health]
 expected_cadence_days = 7

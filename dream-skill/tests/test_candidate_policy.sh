@@ -9,15 +9,15 @@ rg -q 'Make every project or work fact self-contained' "$SKILL_DIR/prompts/map.m
 
 cat > "$TMP/input.json" <<'JSON'
 [
-  {"content":"the user prefers one connector per worktree as a standing workflow.","type":"workflow preference","memory_tier":"stable"},
-  {"content":"the user is currently testing the connector through a local development server.","type":"active work","memory_tier":"current"},
-  {"content":"PR #86 must remain unmerged until review finishes.","type":"project status","memory_tier":"current"},
+  {"content":"The user prefers one connector per worktree as a standing workflow.","type":"workflow preference","memory_tier":"stable"},
+  {"content":"The user is currently testing the connector through a local development server.","type":"active work","memory_tier":"current"},
+  {"content":"PR #12 must remain unmerged until review finishes.","type":"project status","memory_tier":"current"},
   {"content":"The security architecture verifies webhook signatures before processing.","type":"architecture decision","memory_tier":"stable"},
   {"content":"The user has a meeting at 3 PM on March 4.","type":"schedule","memory_tier":"current"},
   {"content":"The test suite passed 6/6 checks.","type":"test receipt","memory_tier":"stable"},
   {"content":"The user asked to implement the approved plan now.","type":"execution plan","memory_tier":"current"},
   {"content":"The implementation had to avoid introducing a shared adapter.","type":"architecture","memory_tier":"stable"},
-  {"content":"Google Calendar was added on branch feat/google-calendar-live-connector.","type":"project decision","memory_tier":"stable"},
+  {"content":"Calendar sync was added on branch feat/calendar-sync.","type":"project decision","memory_tier":"stable"},
   {"content":"Acme uses connector-specific schemas for each provider.","type":"architecture","memory_tier":"stable"},
   {"content":"The latest source state has a finished plan with execution intended to start at Task 0.","type":"project state","memory_tier":"current"},
   {"content":"The browser test set had five scenarios detected but not run because no target was configured.","type":"testing","memory_tier":"current"},

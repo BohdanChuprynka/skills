@@ -9,7 +9,7 @@ cat > "$TMP/input.json" <<'JSON'
 [
   {"candidate_id":"a","decision":{"action":"new","needs_review":false,"target":{"vault":"ops","page":"wiki/classifier.md","section":"Work"},"content":"The Northwind Bank invoice parser needs structured and unstructured validation."}},
   {"candidate_id":"b","decision":{"action":"new","needs_review":false,"target":{"vault":"me","page":"wiki/manual.md","section":"Work"},"content":"invoice parser validation at Northwind Bank covers structured and unstructured data."}},
-  {"candidate_id":"c","decision":{"action":"new","needs_review":false,"target":{"vault":"ops","page":"wiki/classifier.md","section":"Work"},"content":"The Northwind Bank classifier also needs a synthetic fixture."}},
+  {"candidate_id":"c","decision":{"action":"new","needs_review":false,"target":{"vault":"ops","page":"wiki/classifier.md","section":"Work"},"content":"The Northwind Bank parser also needs a synthetic fixture."}},
   {"candidate_id":"d","decision":{"action":"duplicate","needs_review":false,"target":{"vault":"me","page":"wiki/manual.md","section":"Work"},"content":"invoice parser validation at Northwind Bank covers structured and unstructured data."}}
 ]
 JSON
