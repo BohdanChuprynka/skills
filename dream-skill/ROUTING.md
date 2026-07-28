@@ -7,9 +7,11 @@ When the catalog does not settle the destination, return `status: gap` or
 
 ## Routing priorities
 
-Use the configured vault descriptions, page titles, headings, and the fact's
-durability together. Prefer the narrowest existing page that directly owns the
-fact.
+Use the configured vault descriptions, source working context, page titles,
+specific headings, and the fact's durability together. For technical/project
+facts, the source working directory is a strong prior; explicit personal or
+health content overrides it. Prefer the narrowest existing page that directly
+owns the fact.
 
 | Fact type | Usual destination |
 |---|---|
@@ -63,8 +65,10 @@ review. Low-confidence candidates are capped at medium routing confidence.
 - The canonical retrieval surface excludes archive, raw, and log paths plus
   pages whose frontmatter status is `archived` or `completed`. Per-vault
   `route_include` and `route_exclude` policy further bounds that surface.
-- Retrieval uses stable path, title, heading, vault-purpose, and bounded
-  introductory-synopsis signals. Existing fact bodies are not routing evidence.
+- Retrieval uses stable path, title, specific heading, vault-purpose,
+  source-context, and bounded introductory-synopsis signals. Generic headings
+  such as "Testing Strategy" are not routing evidence, and existing fact bodies
+  are not routing evidence.
 - Do not create pages, directories, or aliases.
 - Route a fact with no durable persona, project, or operating value to `gap`.
 - Preserve uncertainty: `gap` is safer than a plausible but wrong destination.

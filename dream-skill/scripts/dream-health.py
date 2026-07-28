@@ -4,13 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import re
 import stat
+import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback is not supported at runtime
+    tomllib = None
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+import current_page_lint
 
 
 PENDING_ID_RE = re.compile(r"^\*\*ID:\*\*\s*(\S+)\s*$", re.MULTILINE)
@@ -94,6 +107,56 @@ def pid_is_alive(raw_pid: Any) -> bool:
     return True
 
 
+def load_health_config(path: Path) -> dict[str, Any]:
+    if tomllib is None or not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as handle:
+            value = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    health = value.get("health", {})
+    return health if isinstance(health, dict) else {}
+
+
+def parse_timestamp(raw: Any) -> datetime | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def latest_real_run(states: list[dict[str, Any]]) -> dict[str, Any] | None:
+    real = [
+        state
+        for state in states
+        if state.get("status") == "completed" and state.get("mode") not in {"shadow", "dry-run"}
+    ]
+    return max(real, key=lambda item: str(item.get("updated_at", "")), default=None)
+
+
+def source_backlogs(source_paths: list[str], latest_real: dict[str, Any] | None, cadence_days: int) -> list[dict[str, Any]]:
+    if not latest_real:
+        return []
+    completed_at = parse_timestamp(latest_real.get("updated_at"))
+    if completed_at is None:
+        return []
+    threshold = completed_at.timestamp() + cadence_days * 86_400
+    backlogs: list[dict[str, Any]] = []
+    for pattern in source_paths:
+        matches = [Path(value) for value in glob.glob(pattern)]
+        files = [path for path in matches if path.is_file()]
+        if not files:
+            continue
+        newest = max(files, key=lambda path: path.stat().st_mtime)
+        if newest.stat().st_mtime > threshold:
+            backlogs.append({"pattern": pattern, "newest_path": str(newest), "newest_mtime": datetime.fromtimestamp(newest.stat().st_mtime, timezone.utc).isoformat().replace("+00:00", "Z")})
+    return backlogs
+
+
 def insecure_paths(root: Path, fix: bool) -> list[str]:
     insecure: list[str] = []
     if not root.exists():
@@ -113,7 +176,7 @@ def insecure_paths(root: Path, fix: bool) -> list[str]:
     return insecure
 
 
-def collect(home: Path, fix_permissions: bool) -> dict[str, Any]:
+def collect(home: Path, fix_permissions: bool, config_path: Path | None = None) -> dict[str, Any]:
     queue_dir = home / "queue"
     pending_path = queue_dir / "pending.md"
     pending_text = pending_path.read_text(encoding="utf-8", errors="ignore") if pending_path.is_file() else ""
@@ -123,6 +186,24 @@ def collect(home: Path, fix_permissions: bool) -> dict[str, Any]:
     decision_ids = set(decisions) if isinstance(decisions, dict) else set()
     states = collect_states(home / "runs")
     latest = states[0] if states else None
+    health_config = load_health_config(config_path or (home / "config.toml"))
+    cadence_days = int(health_config.get("expected_cadence_days", 7))
+    cadence_grace_days = int(health_config.get("cadence_grace_days", 1))
+    current_page_days = int(health_config.get("current_page_stale_days", cadence_days))
+    latest_real = latest_real_run(states)
+    latest_real_timestamp = parse_timestamp(latest_real.get("updated_at")) if latest_real else None
+    latest_real_age_days = (
+        (datetime.now(timezone.utc) - latest_real_timestamp).total_seconds() / 86_400
+        if latest_real_timestamp
+        else None
+    )
+    stale_production_run = latest_real is None or (
+        latest_real_age_days is not None and latest_real_age_days > cadence_days + cadence_grace_days
+    )
+    current_page_paths = [Path(path).expanduser() for path in health_config.get("current_pages", []) if isinstance(path, str)]
+    current_page_findings = current_page_lint.lint_paths(current_page_paths, stale_after_days=current_page_days)
+    configured_source_paths = [path for path in health_config.get("source_paths", []) if isinstance(path, str)]
+    backlog_files = source_backlogs(configured_source_paths, latest_real, cadence_days)
     failed = [state for state in states if state.get("status") == "failed"]
     unfinished = [state for state in states if state.get("status") in {"running", "ready-to-advance"}]
     active = [state for state in unfinished if pid_is_alive(state.get("attempt_pid"))]
@@ -160,6 +241,17 @@ def collect(home: Path, fix_permissions: bool) -> dict[str, Any]:
     if permissions:
         verb = "fixed" if fix_permissions else "found"
         alerts.append(f"{verb} {len(permissions)} paths with group/other permissions")
+    if stale_production_run:
+        if latest_real is None:
+            alerts.append("no completed production Dream run found")
+        else:
+            alerts.append(
+                f"stale production cadence: latest real run is {latest_real_age_days:.1f} days old; expected every {cadence_days} days"
+            )
+    if backlog_files:
+        alerts.append(f"{len(backlog_files)} source feed(s) are more than one cadence newer than the latest real run")
+    if current_page_findings:
+        alerts.append(f"{len(current_page_findings)} current-page freshness finding(s)")
 
     routing_gaps = home / "routing-gaps.log"
     errors = home / "error.log"
@@ -179,6 +271,22 @@ def collect(home: Path, fix_permissions: bool) -> dict[str, Any]:
                 for key in ("run_id", "status", "mode", "updated_at", "source", "window")
                 if latest and key in latest
             } if latest else None,
+        },
+        "cadence": {
+            "expected_days": cadence_days,
+            "grace_days": cadence_grace_days,
+            "latest_real_run": {
+                key: latest_real.get(key)
+                for key in ("run_id", "status", "mode", "updated_at", "source", "window")
+                if latest_real and key in latest_real
+            } if latest_real else None,
+            "latest_real_age_days": latest_real_age_days,
+            "stale_production_run": stale_production_run,
+            "source_backlogs": backlog_files,
+        },
+        "current_pages": {
+            "configured": [str(path) for path in current_page_paths],
+            "findings": current_page_findings,
         },
         "queue": {
             "pending_entries": len(pending_ids),
@@ -217,6 +325,16 @@ def human(result: dict[str, Any]) -> str:
     latest = runs.get("latest")
     if latest:
         lines.append(f"Latest: {latest.get('run_id')} [{latest.get('status')}]")
+    cadence = result.get("cadence", {})
+    if cadence.get("latest_real_run"):
+        lines.append(
+            f"Latest real: {cadence['latest_real_run'].get('run_id')} ({cadence.get('latest_real_age_days', 0):.1f} days old)"
+        )
+    current_pages = result.get("current_pages", {})
+    if current_pages.get("findings"):
+        lines.append(f"Current pages: {len(current_pages['findings'])} finding(s)")
+    if cadence.get("source_backlogs"):
+        lines.append(f"Source backlogs: {len(cadence['source_backlogs'])}")
     lines.extend(f"ALERT: {alert}" for alert in result["alerts"])
     return "\n".join(lines)
 
@@ -224,11 +342,12 @@ def human(result: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", type=Path, default=Path.home() / ".claude/dream-skill")
+    parser.add_argument("--config", type=Path, help="health configuration TOML; defaults to <home>/config.toml")
     parser.add_argument("--human", action="store_true")
     parser.add_argument("--fix-permissions", action="store_true")
     parser.add_argument("--strict", action="store_true", help="exit 1 when alerts remain")
     args = parser.parse_args()
-    result = collect(args.home.expanduser().resolve(), args.fix_permissions)
+    result = collect(args.home.expanduser().resolve(), args.fix_permissions, args.config.expanduser().resolve() if args.config else None)
     print(human(result) if args.human else json.dumps(result, indent=2, ensure_ascii=False))
     return 1 if args.strict and result["alerts"] else 0
 

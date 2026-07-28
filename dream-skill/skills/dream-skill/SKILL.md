@@ -79,7 +79,7 @@ If it contains `--unignore`, do not run Dream. Confirm that the latest marker re
 1. **FIND** selects non-subagent transcripts in a source-specific marker window and excludes private chats.
 2. **MAP** prefilters transcripts, keeps role/event provenance, extracts compact candidate facts, and validates exact evidence spans.
 3. **REDUCE** removes duplicates and gives each candidate a content-derived stable ID.
-4. **ROUTE** retrieves a bounded canonical BM25 page set and lets an agent choose only within that allow-list. Archived, completed, raw, archive, and log surfaces are excluded. Gap/ambiguous results receive one targeted higher-effort retry; unresolved targets remain gaps.
+4. **ROUTE** preserves each source transcript's working-directory context, uses configured project scopes to build a small page allow-list, and lets an agent choose only within that allow-list. Archived, completed, raw, archive, and log surfaces are excluded. Gap/ambiguous results receive one targeted higher-effort retry; unresolved targets remain gaps.
 5. **RECONCILE** gives an agent a bounded target-section snapshot and exact mutable lines. It classifies new, duplicate, supersede, or contradict.
 6. **APPLY** writes safe facts or creates review sidecars. Every real mutation goes through `apply-decision.sh` and `vault-writer.sh`.
 7. **RECEIPT/METRICS** records a human receipt plus content-free stage metrics.
@@ -104,6 +104,7 @@ Read those only when changing or debugging the corresponding stage. Do not paste
 - New pages are not created automatically. Missing or ambiguous routes become gaps.
 - Any `needs_review: true` decision is staged without mutating the vault.
 - Obvious PR/branch/worktree/test telemetry, unknown-person facts, cross-target semantic conflicts, and page-density overflow are review-only; these gates never drop content.
+- MAP quality checks also mark event narration, vague owners, assistant summaries, and transient execution detail as review-only; durable underlying propositions remain eligible after the model rewrites them.
 - Supersede and contradict operate on an exact existing Markdown line and require review.
 - Candidate and replacement content must be one line. The writer normalizes bullet prefixes.
 - Stable IDs prevent review decisions from attaching to another run's candidate.
@@ -197,6 +198,18 @@ For a content-free operational check, run:
 
 ```bash
 python3 "$SKILL_DIR/scripts/dream-health.py" --human
+```
+
+When `config.toml` contains a `[health]` section, the same check also watches
+the expected production cadence, configured source-feed backlog, and
+report-only freshness findings for configured current pages such as `Now.md`.
+Use `--strict` in a monitor when any alert should fail the check. The health
+check never edits vaults, queue state, or source files.
+
+To lint a current page directly:
+
+```bash
+python3 "$SKILL_DIR/scripts/current_page_lint.py" /absolute/path/to/Now.md
 ```
 
 Use `--fix-permissions` only to harden runtime-state modes. `repair-queue-state.py` is a migration tool for legacy queue/sidecar mismatches; preview it first and use `--apply` only after preserving its archive.

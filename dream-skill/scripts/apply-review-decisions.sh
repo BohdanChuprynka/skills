@@ -18,6 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 QUEUE_SH="$SCRIPT_DIR/queue.sh"
 APPLY_SH="$SCRIPT_DIR/apply-decision.sh"
+. "$SCRIPT_DIR/path-guard.sh"
 
 DECISIONS=""
 REVIEW_INPUT=""
@@ -78,6 +79,28 @@ while IFS= read -r line; do
       fi
       [ -n "$vault_root" ] || { echo "apply-review-decisions: sidecar $cid missing vault_root" >&2; ERRORS=$((ERRORS+1)); continue; }
       [ -d "$vault_root" ] || { echo "apply-review-decisions: vault_root not found: $vault_root" >&2; ERRORS=$((ERRORS+1)); continue; }
+      target_page=$(jq -r '.target.page // empty' "$sidecar")
+      [ -n "$target_page" ] || { echo "apply-review-decisions: sidecar $cid missing target.page" >&2; ERRORS=$((ERRORS+1)); continue; }
+      if ! assert_within_vault "$vault_root" "$target_page" >/dev/null 2>&1; then
+        echo "apply-review-decisions: target outside vault for $cid; sidecar retained" >&2
+        ERRORS=$((ERRORS + 1)); continue
+      fi
+      target_path="$vault_root/$target_page"
+      if [ ! -f "$target_path" ]; then
+        echo "apply-review-decisions: target page no longer exists for $cid; sidecar retained" >&2
+        ERRORS=$((ERRORS + 1)); continue
+      fi
+      target_status=$(awk '
+        NR == 1 && $0 == "---" { in_fm=1; next }
+        in_fm && $0 == "---" { exit }
+        in_fm && /^status:[[:space:]]*/ { value=$0; sub(/^status:[[:space:]]*/, "", value); print value; exit }
+      ' "$target_path" | tr -d " '\"[]" | tr '[:upper:]' '[:lower:]')
+      case "$target_status" in
+        archived|completed)
+          echo "apply-review-decisions: target page is $target_status for $cid; sidecar retained" >&2
+          ERRORS=$((ERRORS + 1)); continue
+          ;;
+      esac
 
       # Write patched decision (needs_review=false so apply-decision writes to vault)
       PATCHED=$(mktemp)

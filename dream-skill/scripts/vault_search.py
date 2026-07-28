@@ -17,10 +17,28 @@ EXCLUDED_NAMES = {"AGENTS.md", "CLAUDE.md", "index.md"}
 NONCANONICAL_PATH_TERMS = {"archive", "archives", "raw", "log", "logs"}
 NONCANONICAL_STATUSES = {"archived", "completed"}
 OVERVIEW_TOKEN_LIMIT = 96
+GENERIC_HEADING_NAMES = {
+    "architecture", "architecture decisions", "build phases", "current goals",
+    "data model", "decisions", "features", "implementation status", "next steps",
+    "notes", "open questions", "overview", "scope boundaries", "status", "testing",
+    "testing strategy",
+}
+PROJECT_SIGNAL_TERMS = {
+    "agent", "api", "architecture", "ask", "browser", "branch", "build", "calendar",
+    "code", "column", "connector", "database", "gmail", "implementation", "integration",
+    "limit", "local", "merge", "message", "migration", "model", "openai", "paid", "plan",
+    "playwright", "port", "pr", "query", "repo", "repository", "retrieve", "retrieval",
+    "classifier", "github", "regex", "scanning", "schema", "scenario", "source", "task",
+    "test", "testing", "technical", "tool", "tokens", "workflow", "worktree",
+}
 
 
 def tokens(text: str) -> list[str]:
     return [token.casefold() for token in TOKEN_RE.findall(text) if len(token) > 1]
+
+
+def normalized_heading(value: str) -> str:
+    return " ".join(tokens(value))
 
 
 @dataclass
@@ -194,7 +212,11 @@ def build_page_docs(config_path: Path) -> list[PageDoc]:
             weighted: Counter[str] = Counter()
             weighted.update({term: count * 5 for term, count in Counter(tokens(rel)).items()})
             weighted.update({term: count * 5 for term, count in Counter(tokens(title)).items()})
-            weighted.update({term: count * 3 for term, count in Counter(tokens(" ".join(headings))).items()})
+            specific_headings = [
+                heading for heading in headings
+                if normalized_heading(heading) not in GENERIC_HEADING_NAMES
+            ]
+            weighted.update({term: count * 3 for term, count in Counter(tokens(" ".join(specific_headings))).items()})
             weighted.update({term: count * 2 for term, count in Counter(tokens(purpose)).items()})
             # A bounded, de-duplicated introductory synopsis can distinguish
             # generic page names without allowing repeated body facts to
@@ -257,14 +279,41 @@ class PageSearch:
         for doc in docs:
             self.df.update(doc.weighted_tf.keys())
 
-    def search(self, query_text: str, limit: int = 8) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query_text: str,
+        limit: int = 8,
+        routing_context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         query_terms = Counter(tokens(query_text))
+        context = routing_context or {}
+        context_aliases = set(tokens(" ".join(str(alias) for alias in context.get("aliases", []))))
+        normalized_query = query_text.casefold().strip()
+        personal_override = normalized_query.startswith("the user prefers") or any(
+            marker in normalized_query
+            for marker in ("skin", "acne", "workout", "nutrition", "symptom", "family relationship")
+        )
+        context_project_intent = context.get("project_intent")
+        if isinstance(context_project_intent, bool):
+            project_intent = (context_project_intent or bool(set(query_terms) & PROJECT_SIGNAL_TERMS)) and not personal_override
+        else:
+            project_intent = not personal_override and bool(set(query_terms) & PROJECT_SIGNAL_TERMS)
+        preferred_vault = str(context.get("preferred_vault") or "")
         n_docs = len(self.docs)
         scored: list[tuple[float, PageDoc]] = []
         k1 = 1.2
         b = 0.75
         for doc in self.docs:
             score = domain_boost(query_text, doc)
+            if project_intent and preferred_vault and doc.vault == preferred_vault:
+                score += 4.0
+            doc_identity = set(tokens(f"{doc.page} {doc.title}"))
+            if project_intent and context_aliases and context_aliases & doc_identity:
+                # Once the source is a technical/project conversation, keep
+                # the matching project family ahead of generic cross-vault
+                # pages whose headings happen to share words like testing or
+                # plan. Explicit personal/health queries bypass this boost.
+                score += 100.0
             for term, query_count in query_terms.items():
                 tf = float(doc.weighted_tf.get(term, 0))
                 if not tf:

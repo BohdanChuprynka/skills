@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-supported-D97757)](https://docs.anthropic.com/en/docs/claude-code)
 [![Codex](https://img.shields.io/badge/Codex-supported-111111)](https://developers.openai.com/codex/)
-[![Tests](https://img.shields.io/badge/tests-36_passing-brightgreen)](#development)
+[![Tests](https://img.shields.io/badge/tests-41_passing-brightgreen)](#development)
 
 [Why](#the-problem) · [How it works](#how-it-works) · [Install](#install) · [Run](#run) · [Review](#review-uncertain-changes) · [Safety](#safety-model)
 
@@ -249,6 +249,18 @@ python3 scripts/dream-health.py --human
 ```
 
 The health report covers source-marker age, failed runs, queue/sidecar integrity, routing gaps, storage, and unsafe permissions. Failed runs remain resumable under `~/.claude/dream-skill/runs/`; routing misses remain private under `~/.claude/dream-skill/gaps/`.
+
+When the local config includes a `[health]` section, the same report also
+checks the expected production cadence, configured source-feed backlog, and
+report-only freshness findings for current pages such as `Now.md`. Use
+`--strict` in a scheduled monitor when any alert should fail the check. To lint
+one current page directly:
+
+```bash
+python3 scripts/current_page_lint.py /absolute/path/to/Now.md
+```
+
+These checks never edit the vault, queue, or source feeds.
 
 Rollback a modern run:
 
