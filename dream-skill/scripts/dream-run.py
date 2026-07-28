@@ -11,6 +11,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import tomllib
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +41,158 @@ STAGE_EFFORT_DEFAULTS = {
 
 class RunFailure(RuntimeError):
     pass
+
+
+SAFE_REFRESH_ENV_KEYS = (
+    "HOME",
+    "PATH",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+)
+
+
+def load_external_context(config: Path) -> tuple[Path, tuple[str, ...]] | None:
+    """Load the optional generic external-JSONL refresh hook."""
+    with config.open("rb") as handle:
+        parsed = tomllib.load(handle)
+    section = parsed.get("external_context")
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise ValueError("[external_context] must be a table")
+    raw_root = section.get("jsonl_root")
+    raw_command = section.get("refresh_command")
+    if not isinstance(raw_root, str) or not raw_root.strip():
+        raise ValueError("external_context.jsonl_root must be an absolute path")
+    configured_root = Path(raw_root).expanduser()
+    if not configured_root.is_absolute():
+        raise ValueError("external_context.jsonl_root must be an absolute path")
+    if (
+        not isinstance(raw_command, list)
+        or not raw_command
+        or not all(isinstance(value, str) and value for value in raw_command)
+    ):
+        raise ValueError("external_context.refresh_command must be a non-empty string array")
+    executable = Path(raw_command[0]).expanduser()
+    if not executable.is_absolute():
+        raise ValueError("external_context.refresh_command executable must be an absolute path")
+    command = (str(executable), *(str(value) for value in raw_command[1:]))
+    return configured_root.resolve(), command
+
+
+def paths_overlap(left: Path, right: Path) -> bool:
+    return left == right or left.is_relative_to(right) or right.is_relative_to(left)
+
+
+def validate_external_root(
+    root: Path,
+    home: Path,
+    vaults: dict[str, tuple[Path, str]],
+) -> None:
+    """Keep private context staging separate from Dream state and every vault."""
+    if paths_overlap(root, home):
+        raise RunFailure("external_context.jsonl_root must not overlap Dream home")
+    overlaps = [name for name, (vault_root, _) in vaults.items() if paths_overlap(root, vault_root)]
+    if overlaps:
+        raise RunFailure(
+            "external_context.jsonl_root must not overlap configured vaults: "
+            + ", ".join(sorted(overlaps))
+        )
+
+
+def sanitized_refresh_env() -> dict[str, str]:
+    """Return the small ambient environment allowed into an external hook."""
+    env = {key: os.environ[key] for key in SAFE_REFRESH_ENV_KEYS if key in os.environ}
+    env.setdefault("HOME", str(Path.home()))
+    env.setdefault("PATH", "/usr/bin:/bin")
+    return env
+
+
+def wait_for_external_mtime_boundary(root: Path) -> None:
+    """Ensure freshly written integer-second mtimes fit find's [start,end) window."""
+    latest_second: int | None = None
+    try:
+        for path in root.rglob("*.jsonl"):
+            if not path.is_file() or path.is_symlink():
+                continue
+            modified = int(path.stat().st_mtime)
+            latest_second = modified if latest_second is None else max(latest_second, modified)
+    except OSError as exc:
+        raise RunFailure(f"cannot inspect external context root: {exc}") from exc
+    if latest_second is None:
+        return
+    delay = latest_second + 1 - time.time()
+    if delay > 5:
+        raise RunFailure("external context contains a future-dated JSONL file")
+    if delay > 0:
+        time.sleep(delay + 0.01)
+
+
+def refresh_external_context(
+    root: Path,
+    command: tuple[str, ...],
+    home: Path,
+    vaults: dict[str, tuple[Path, str]],
+) -> Path:
+    """Run one configured producer without exposing the caller's environment."""
+    try:
+        result = subprocess.run(
+            list(command),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=sanitized_refresh_env(),
+            check=False,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RunFailure("external context refresh timed out") from exc
+    except OSError as exc:
+        raise RunFailure(f"external context refresh could not start: {exc}") from exc
+    if result.returncode != 0:
+        raise RunFailure(f"external context refresh failed with exit {result.returncode}")
+
+    canonical_root = root.resolve()
+    validate_external_root(canonical_root, home, vaults)
+    if not canonical_root.is_dir():
+        raise RunFailure("external context refresh did not produce jsonl_root")
+    wait_for_external_mtime_boundary(canonical_root)
+    return canonical_root
+
+
+def force_external_review(
+    candidates: list[dict[str, Any]],
+    root: Path | None,
+) -> list[dict[str, Any]]:
+    """Deterministically downgrade and review-gate facts from an external root."""
+    if root is None:
+        return candidates
+    gated: list[dict[str, Any]] = []
+    for candidate in candidates:
+        enriched = dict(candidate)
+        source_chat = enriched.get("source_chat")
+        is_external = False
+        if isinstance(source_chat, str) and source_chat:
+            try:
+                Path(source_chat).expanduser().resolve().relative_to(root)
+                is_external = True
+            except (OSError, ValueError):
+                pass
+        if is_external:
+            if enriched.get("confidence") == "high":
+                enriched.setdefault("original_confidence", "high")
+                enriched["confidence"] = "medium"
+            enriched["policy_review_only"] = True
+            reasons = enriched.get("policy_reasons")
+            normalized_reasons = list(reasons) if isinstance(reasons, list) else []
+            if "external_context" not in normalized_reasons:
+                normalized_reasons.append("external_context")
+            enriched["policy_reasons"] = normalized_reasons
+        gated.append(enriched)
+    return gated
 
 
 def resolve_stage_agent_defaults(args: argparse.Namespace) -> None:
@@ -173,6 +327,7 @@ def validate_environment(args: argparse.Namespace) -> None:
         raise RunFailure(f"working directory not found: {args.cwd}")
     try:
         vaults = load_vault_config(args.config)
+        external_context = load_external_context(args.config)
     except (OSError, ValueError) as exc:
         raise RunFailure(f"invalid config: {exc}") from exc
     if not vaults:
@@ -180,6 +335,20 @@ def validate_environment(args: argparse.Namespace) -> None:
     missing_roots = [f"{name}={root}" for name, (root, _) in vaults.items() if not root.is_dir()]
     if missing_roots:
         raise RunFailure("configured vault roots not found: " + ", ".join(missing_roots))
+    args.external_jsonl_root = None
+    args.external_refresh_command = None
+    if external_context is not None:
+        external_root, refresh_command = external_context
+        validate_external_root(external_root, args.home, vaults)
+        executable = Path(refresh_command[0])
+        if (
+            not args.resume
+            and args.source in {"claude", "all"}
+            and (not executable.is_file() or not os.access(executable, os.X_OK))
+        ):
+            raise RunFailure(f"external context refresh executable not found: {executable}")
+        args.external_jsonl_root = external_root
+        args.external_refresh_command = refresh_command
     if shutil.which("jq") is None:
         raise RunFailure("jq is required")
     if args.engine == "codex":
@@ -625,6 +794,10 @@ def process_batch(
             state["status"] = "running"
             state["mode"] = "shadow" if args.shadow else ("dry-run" if args.dry_run else "real")
             state["marker_allowed"] = False
+    if args.external_jsonl_root is not None:
+        state["external_jsonl_root"] = str(args.external_jsonl_root)
+    else:
+        state.pop("external_jsonl_root", None)
     state.pop("error", None)
     state["stages"] = {}
     state["attempt_started_at"] = attempt_started_at
@@ -697,6 +870,8 @@ def process_batch(
             except Exception:
                 stage_validation_failed(state, state_path, "map")
                 raise
+            valid = force_external_review(valid, args.external_jsonl_root)
+            atomic_json(workdir / "map-valid.json", valid)
             stage_update(state, state_path, "map", **state["stages"]["map"], valid_candidates=len(valid))
 
             result = run([str(SCRIPT_DIR / "reduce-dedup.py"), "--report"], stdin=json.dumps(valid))
@@ -705,9 +880,8 @@ def process_batch(
                 [str(SCRIPT_DIR / "classify-candidate-policy.py"), "--report"],
                 stdin=json.dumps(reduced_raw),
             )
-            (workdir / "reduced.json").write_text(result.stdout, encoding="utf-8")
-            os.chmod(workdir / "reduced.json", 0o600)
-            reduced = json.loads(result.stdout)
+            reduced = force_external_review(json.loads(result.stdout), args.external_jsonl_root)
+            atomic_json(workdir / "reduced.json", reduced)
 
             result = run([str(SCRIPT_DIR / "split-memory-tiers.py"), "--report"], stdin=json.dumps(reduced))
             tiers = json.loads(result.stdout)
@@ -1313,6 +1487,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"dream-run: retained run has no resumable window: {args.resume}", file=sys.stderr)
                 return 1
             args.source = str(resume_state.get("source") or args.source)
+            stored_external_root = resume_state.get("external_jsonl_root")
+            if isinstance(stored_external_root, str) and stored_external_root:
+                retained_root = Path(stored_external_root).expanduser().resolve()
+                try:
+                    validate_external_root(
+                        retained_root,
+                        args.home,
+                        load_vault_config(args.config),
+                    )
+                except (OSError, ValueError, RunFailure) as exc:
+                    print(f"dream-run: retained external context is invalid: {exc}", file=sys.stderr)
+                    return 1
+                args.external_jsonl_root = retained_root
+            else:
+                args.external_jsonl_root = None
             find_transcripts_path = resume_dir / "find-transcripts.json"
             transcript_values = load_json(find_transcripts_path) if find_transcripts_path.is_file() else None
             if not isinstance(transcript_values, list):
@@ -1330,6 +1519,23 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"runs": [result]}, indent=2, ensure_ascii=False))
             return 0
 
+        if args.source in {"claude", "all"} and args.external_jsonl_root is not None:
+            if args.external_refresh_command is None:
+                print("dream-run: external context refresh command is unavailable", file=sys.stderr)
+                return 1
+            try:
+                args.external_jsonl_root = refresh_external_context(
+                    args.external_jsonl_root,
+                    args.external_refresh_command,
+                    args.home,
+                    load_vault_config(args.config),
+                )
+            except (OSError, ValueError, RunFailure) as exc:
+                print(f"dream-run: {exc}", file=sys.stderr)
+                return 1
+        elif args.source == "codex":
+            args.external_jsonl_root = None
+
         find_command = [str(SCRIPT_DIR / "find-chats.sh"), "--source", args.source]
         if args.all:
             find_command.append("--all")
@@ -1337,7 +1543,12 @@ def main(argv: list[str] | None = None) -> int:
             find_command.extend(["--since", args.since])
         env = os.environ.copy()
         marker_dir = args.home / "shadow-markers" if args.shadow else args.home
-        env.update(DREAM_HOME=str(args.home), DREAM_MARKER_DIR=str(marker_dir), DREAM_CONFIG=str(args.config))
+        env.update(
+            DREAM_HOME=str(args.home),
+            DREAM_MARKER_DIR=str(marker_dir),
+            DREAM_CONFIG=str(args.config),
+            DREAM_EXTERNAL_JSONL_ROOT=str(args.external_jsonl_root or ""),
+        )
         found = run(find_command, env=env)
         batches = parse_batches(found.stdout)
         if not batches:

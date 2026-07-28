@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 from candidate_identity import candidate_id
-from vault_search import PageSearch, build_page_docs
+from source_context import context_for_source
+from vault_search import PageSearch, build_page_docs, tokens
 
 
 REQUIRED_CANDIDATE_FIELDS = {"content", "confidence", "source_chat", "source_date", "memory_tier"}
@@ -62,27 +63,56 @@ def build_batches(
     size: int,
     search: PageSearch | None = None,
     top_k: int = 32,
+    config_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    annotated = [
-        {
+    annotated = []
+    for candidate in candidates:
+        source_context = (
+            context_for_source(candidate.get("source_chat", ""), config_path)
+            if config_path is not None
+            else {"cwd": None}
+        )
+        candidate_type = str(candidate.get("type") or "").replace("_", " ").casefold().strip()
+        if source_context.get("project"):
+            personal_types = {"preference", "relationship", "identity", "health", "career", "education"}
+            source_context["project_intent"] = candidate_type not in personal_types
+        item = {
             "candidate_id": candidate_id(candidate),
             "candidate": candidate,
-            **(
-                {
-                    "page_candidates": search.search(
-                        " ".join(
-                            str(candidate.get(key) or "")
-                            for key in ("content", "suggested_section", "type")
-                        ),
-                        limit=top_k,
-                    )
-                }
-                if search is not None
-                else {}
-            ),
+            "source_context": source_context,
         }
-        for candidate in candidates
-    ]
+        if search is not None:
+            retrieval_query = " ".join(
+                str(candidate.get(key) or "").replace("_", " ")
+                for key in ("content", "type")
+            )
+            page_candidates = search.search(
+                retrieval_query,
+                limit=top_k,
+                routing_context=source_context,
+            )
+            # A section hint is a fallback for otherwise unindexed generic
+            # facts (for example a preference whose page is titled Reports),
+            # never the primary signal that can hijack a project route.
+            if not page_candidates and candidate.get("suggested_section"):
+                page_candidates = search.search(
+                    f"{retrieval_query} {candidate['suggested_section']}",
+                    limit=top_k,
+                    routing_context=source_context,
+                )
+            if source_context.get("project_intent"):
+                aliases = set(tokens(" ".join(source_context.get("aliases", []))))
+                scoped = [
+                    row for row in page_candidates
+                    if aliases & set(tokens(f"{row['page']} {row['title']}"))
+                ]
+                # A configured project scope is a retrieval boundary when it
+                # has canonical pages. If it has none, preserve the lexical
+                # fallback so the model can return gap/ambiguous safely.
+                if scoped:
+                    page_candidates = scoped
+            item["page_candidates"] = page_candidates
+        annotated.append(item)
     ids = [item["candidate_id"] for item in annotated]
     duplicate_ids = sorted(candidate_id for candidate_id, count in Counter(ids).items() if count > 1)
     if duplicate_ids:
@@ -155,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         for index, candidate in enumerate(payload):
             validate_candidate(candidate, index)
         search = PageSearch(build_page_docs(args.config)) if args.config else None
-        batches = build_batches(payload, size, search=search, top_k=top_k)
+        batches = build_batches(payload, size, search=search, top_k=top_k, config_path=args.config)
     except ValueError as exc:
         return die(str(exc))
 

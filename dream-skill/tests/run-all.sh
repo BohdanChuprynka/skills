@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 LIVE_TESTS=(
   test_check_pending.sh
   test_find_chats.sh
+  test_external_context.sh
   test_build_map_batches.sh
   test_path_guard.sh
   test_queue.sh
@@ -22,6 +23,8 @@ LIVE_TESTS=(
   test_cleanup_transaction.sh
   test_cross_target_conflicts.sh
   test_dream_health.sh
+  test_current_page_lint.sh
+  test_health_cadence.sh
   test_dream_run_e2e.sh
   test_engine_backends.sh
   test_marker_gate.sh
@@ -39,6 +42,8 @@ LIVE_TESTS=(
   test_route_entities.sh
   test_route_fallback.sh
   test_route_retrieval.sh
+  test_route_context.sh
+  test_review_archived_target.sh
   test_stable_ids.sh
 )
 

@@ -75,15 +75,70 @@ EXECUTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("pull_request_state", re.compile(r"\b(?:pr|pull request)\s*#?\d+\b|\bunmerged\b|\bmerge[- ]blocked\b", re.I)),
     ("branch_state", re.compile(r"\b(?:branch|worktree)\b.*\b(?:feat/|fix/|chore/|dedicated|isolated|current)\b|\b(?:feat|fix|chore)/[\w.-]+", re.I)),
     ("commit_state", re.compile(r"\bcommit\s+[0-9a-f]{7,40}\b|\b[0-9a-f]{7,40}\s+commit\b", re.I)),
-    ("test_receipt", re.compile(r"\b(?:tests?|suite)\b.{0,48}\b(?:passed|failed|green|red|exit code|\d+\s*/\s*\d+)\b", re.I)),
+    ("test_receipt", re.compile(r"\b(?:tests?|suite|scenarios?)\b.{0,80}\b(?:passed|failed|green|red|skipped|not run|detected|exit code|\d+\s*/\s*\d+)\b", re.I)),
     ("temporary_implementation", re.compile(r"\b(?:currently|actively)\s+(?:testing|implementing|debugging|building)\b|\blocal development server\b", re.I)),
     ("handoff_state", re.compile(r"\b(?:do not|no)\s+(?:push|merge|open (?:a )?pr)\b|\btask-by-task implementation\b", re.I)),
+)
+
+# MAP should emit normalized propositions, not a transcript of what someone
+# asked the agent to do. These checks are deliberately review-only: the exact
+# source is preserved for human correction instead of being silently dropped.
+QUALITY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "event_narration",
+        re.compile(
+            r"^(?:the user|user|bohdan|you then)\s+"
+            r"(?:asked|requested|confirmed|approved|told|decided)\s+(?:to|that)\b",
+            re.I,
+        ),
+    ),
+    (
+        "generic_owner",
+        re.compile(
+            r"^(?:the|a)\s+(?:implementation|design|plan|latest source state|"
+            r"work|task|migration)\b",
+            re.I,
+        ),
+    ),
+    (
+        "execution_detail",
+        re.compile(
+            r"\b(?:branch\s+[a-z0-9_./+:-]+|worktree|PR\s*#?\d+|"
+            r"commit\s+[0-9a-f]{7,40}|localhost:\d+)\b",
+            re.I,
+        ),
+    ),
+    (
+        "assistant_narration",
+        re.compile(r"^(?:the assistant|assistant|you described)\b", re.I),
+    ),
+    (
+        "transient_context",
+        re.compile(
+            r"\b(?:after OpenAI (?:billing|becomes paid)|latest source state|"
+            r"later checkpoint|exactly \d+ (?:tasks?|commits?)|"
+            r"no implementation changes|remained plan/editing only)\b",
+            re.I,
+        ),
+    ),
 )
 
 
 def policy_reasons(candidate: dict[str, Any], category: str) -> list[str]:
     content = str(candidate.get("content") or "")
     reasons = [name for name, pattern in EXECUTION_PATTERNS if pattern.search(content)]
+    for name, pattern in QUALITY_PATTERNS:
+        if not pattern.search(content):
+            continue
+        # A stable, explicitly standing workflow preference may mention a
+        # worktree or branch without being one-run narration.
+        if (
+            name == "execution_detail"
+            and candidate.get("memory_tier") == "stable"
+            and re.search(r"\bstanding\b", content, re.I)
+        ):
+            continue
+        reasons.append(name)
     if category == "audit_telemetry" and "audit_telemetry" not in reasons:
         reasons.append("audit_telemetry")
     # Stable standing workflow preferences can mention worktrees or testing in

@@ -29,6 +29,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WRITER="$SCRIPT_DIR/vault-writer.sh"
 QUEUE_SH="$SCRIPT_DIR/queue.sh"
+. "$SCRIPT_DIR/path-guard.sh"
 
 VAULT=""
 DECISION=""
@@ -73,6 +74,21 @@ source_evidence=$(jq -r '.evidence // ""'        "$DECISION")
 [ -n "$action" ]  || die "decision missing .action"
 [ -n "$page" ]    || die "decision missing .target.page"
 [ -n "$section" ] || die "decision missing .target.section"
+
+# A route can become stale between ROUTE/RECONCILE and APPLY. Never mutate a
+# page that was archived or completed after the decision was generated.
+assert_within_vault "$VAULT" "$page" >/dev/null
+target_path="$VAULT/$page"
+if [ -f "$target_path" ]; then
+  target_status=$(awk '
+    NR == 1 && $0 == "---" { in_fm=1; next }
+    in_fm && $0 == "---" { exit }
+    in_fm && /^status:[[:space:]]*/ { value=$0; sub(/^status:[[:space:]]*/, "", value); print value; exit }
+  ' "$target_path" | tr -d " '\"[]" | tr '[:upper:]' '[:lower:]')
+  case "$target_status" in
+    archived|completed) die "target page is $target_status: $page" ;;
+  esac
+fi
 
 if [ -n "$source_evidence" ]; then
   case "$source_evidence" in

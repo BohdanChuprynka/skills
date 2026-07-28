@@ -10,6 +10,7 @@
 #   DREAM_PROJECTS_ROOT        — legacy alias for DREAM_CLAUDE_PROJECTS_ROOT
 #   DREAM_CLAUDE_PROJECTS_ROOT — replaces ~/.claude/projects
 #   DREAM_CODEX_SESSIONS_ROOT  — replaces ~/.codex/sessions
+#   DREAM_EXTERNAL_JSONL_ROOT  — optional ordinary JSONL root, treated as Claude
 #   DREAM_TRANSCRIPT_SOURCE    — source override: claude | codex | all (default: all)
 #   DREAM_MARKER_DIR           — dir holding the `last-run` marker file
 #   DREAM_SKILL_HOME           — plugin root (for scripts/private-state.sh)
@@ -31,6 +32,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_PROJECTS_ROOT="${DREAM_CLAUDE_PROJECTS_ROOT:-${DREAM_PROJECTS_ROOT:-$HOME/.claude/projects}}"
 CODEX_SESSIONS_ROOT="${DREAM_CODEX_SESSIONS_ROOT:-$HOME/.codex/sessions}"
+EXTERNAL_JSONL_ROOT="${DREAM_EXTERNAL_JSONL_ROOT:-}"
 MARKER_DIR="${DREAM_MARKER_DIR:-$HOME/.claude/dream-skill}"
 SKILL_HOME="${DREAM_SKILL_HOME:-$(dirname "$SCRIPT_DIR")}"
 PRIVATE_STATE="$SKILL_HOME/scripts/private-state.sh"
@@ -62,6 +64,11 @@ find_claude_files() {
   find "$CLAUDE_PROJECTS_ROOT" -name "*.jsonl" -not -path '*/subagents/*' -print0 2>/dev/null
 }
 
+find_external_files() {
+  [ -n "$EXTERNAL_JSONL_ROOT" ] && [ -d "$EXTERNAL_JSONL_ROOT" ] || return 0
+  find "$EXTERNAL_JSONL_ROOT" -type f -name "*.jsonl" -print0 2>/dev/null
+}
+
 is_codex_subagent_file() {
   local f="$1"
   # Codex sessions are path-based by date, not by thread kind. The session_meta
@@ -80,10 +87,14 @@ find_codex_files() {
 
 find_source_files() {
   case "$SOURCE" in
-    claude) find_claude_files ;;
+    claude)
+      find_claude_files
+      find_external_files
+      ;;
     codex) find_codex_files ;;
     all)
       find_claude_files
+      find_external_files
       find_codex_files
       ;;
   esac
@@ -142,9 +153,22 @@ default_marker_window_start() {
 
 file_source() {
   local f="$1"
+  if [ -n "$EXTERNAL_JSONL_ROOT" ]; then
+    case "$f" in
+      "$EXTERNAL_JSONL_ROOT"/*) echo "claude"; return 0 ;;
+    esac
+  fi
   case "$f" in
     "$CLAUDE_PROJECTS_ROOT"/*) echo "claude" ;;
     "$CODEX_SESSIONS_ROOT"/*) echo "codex" ;;
+    *) return 1 ;;
+  esac
+}
+
+is_external_file() {
+  [ -n "$EXTERNAL_JSONL_ROOT" ] || return 1
+  case "$1" in
+    "$EXTERNAL_JSONL_ROOT"/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -218,20 +242,23 @@ emit_batch() {
         source_window_start=$(default_window_start_for_file "$f" 2>/dev/null || echo "$batch_start")
         [ "$fmtime" -lt "$source_window_start" ] && continue
       fi
-      # skip --ignore'd chats
-      if [ -x "$PRIVATE_STATE" ]; then
-        state=$("$PRIVATE_STATE" "$f" 2>/dev/null || echo "record")
-      else
-        state="record"
+      # External producer files are not Claude/Codex sessions and therefore do
+      # not participate in transcript-sidecar private-state handling.
+      if ! is_external_file "$f"; then
+        if [ -x "$PRIVATE_STATE" ]; then
+          state=$("$PRIVATE_STATE" "$f" 2>/dev/null || echo "record")
+        else
+          state="record"
+        fi
+        [ "$state" = "ignore" ] && continue
       fi
-      [ "$state" = "ignore" ] && continue
       echo "$f"
     fi
   # Exclude subagent + workflow transcripts: the human never speaks in them (the
   # "user" turn is a synthetic dispatch prompt), so they carry no persona signal —
   # they are work-output telemetry, explicitly out of scope. Workflows nest under
   # subagents/, so one glob covers both. This is ~73% of all transcripts.
-  done < <(find_source_files | sort -z)
+  done < <(find_source_files | sort -zu)
 }
 
 if [ "$WINDOW_DAYS" -le "$BATCH_SIZE" ]; then

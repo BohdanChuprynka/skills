@@ -3,6 +3,22 @@
 
 reports_dir = "/absolute/path/to/dream-reports"
 
+# Optional read-only health monitoring. Configure current pages and source
+# feeds to alert on missed Dream cadence or stale operational pages.
+# [health]
+# expected_cadence_days = 7
+# cadence_grace_days = 1
+# current_page_stale_days = 7
+# current_pages = ["/absolute/path/to/personal-vault/wiki/Now.md"]
+# source_paths = ["/absolute/private/wispr/*.jsonl", "/absolute/private/meetily/*.jsonl"]
+
+# Optional generic local context producer. The command runs once at the start
+# of each fresh Claude/all run; it must atomically maintain ordinary JSONL files
+# under this private root. Keep the root outside Dream home and every vault.
+# [external_context]
+# jsonl_root = "/absolute/private/output/root"
+# refresh_command = ["/absolute/executable", "--quiet"]
+
 [vaults.personal]
 root = "/absolute/path/to/personal-vault"
 description = "Identity, preferences, goals, relationships, and long-lived context."
