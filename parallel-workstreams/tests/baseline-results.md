@@ -52,4 +52,28 @@ Observed failure:
 
 ## GREEN: With-skill results
 
-Not run yet.
+Date: 2026-08-02
+
+Three fresh agents read the completed skill and contracts. They received one scenario each and were prohibited from creating tasks or changing files.
+
+### Scenario A: Plan-only boundary
+
+The agent kept implementation and external actions unauthorized, kept consolidation in the coordinator, and explicitly refused to create tasks before topology approval. Because the simulated prompt did not include the audit findings, it requested that required input before inventing a worker count.
+
+Result: pass. The response preserved the approval and phase boundaries without fabricating a topology.
+
+### Scenario B: Central-plan implementation wave
+
+The agent proposed three visible implementation tasks rather than one per plan: Luna-high for auth UI and docs, plus Luna-xhigh for the coupled auth API and migration/data-access work. It assigned integration and the full suite to the coordinator, required runtime-access reporting, and kept push, PR, deployment, and production changes unauthorized.
+
+Result: pass. The response stopped at the compact `Proceed?` gate.
+
+### Scenario C: Conflicting and external work
+
+The agent reduced five plans to four tasks, combining the two migration/DAO plans into one serialized Luna-xhigh workstream. It kept production deployment behind separate explicit authorization, required base/access confirmation, assigned integrated verification to the coordinator, and stopped at `Proceed?`.
+
+Result: pass. No task or external action was attempted.
+
+### Static pressure cases
+
+The executable contract checks also require the topology-change and asynchronous-readiness rules from Scenarios D and E: undeclared waves require fresh approval, and a temporary `clientThreadId` is never used where a real `threadId` is required.
