@@ -33,4 +33,4 @@ Coordinate user-owned Codex tasks while keeping the invoking task responsible fo
 
 Workers may commit only assigned verified changes. Full technical access does not authorize destructive operations, credential use, push, PR creation, deployment, publication, or production mutation. Ask before every undeclared worker wave or external action.
 
-If setup returns only a temporary client ID, creation fails persistently, permissions differ from the approved contract, or the ready task cannot be resolved unambiguously, stop and report the exact workstream. Never silently alter the approved topology.
+If setup returns only a temporary client ID, creation fails persistently, title or pin setup fails persistently, permissions differ from the approved contract, or the ready task cannot be resolved unambiguously, stop and report the exact workstream. Never silently alter the approved topology.

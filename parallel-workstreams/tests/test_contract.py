@@ -68,6 +68,7 @@ class SkillContractTests(unittest.TestCase):
             "gpt-5.6-sol",
             "gpt-5.6-luna",
             "Do not push",
+            "title or pin failure persists",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, contracts)
@@ -105,6 +106,7 @@ class SkillContractTests(unittest.TestCase):
             "Scenario C: Conflicting and external work",
             "Scenario D: Topology change",
             "Scenario E: Asynchronous worktree readiness",
+            "Scenario F: Two-wave planning and implementation",
         ):
             with self.subTest(heading=heading):
                 self.assertIn(heading, scenarios)
