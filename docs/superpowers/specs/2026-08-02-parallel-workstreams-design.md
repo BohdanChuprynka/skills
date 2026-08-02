@@ -89,7 +89,9 @@ Full technical access does not expand task authority. Workers still must not pus
 
 ## Task Creation and Visibility
 
-For a local Git project, create each implementation task in an isolated Codex worktree from the frozen approved base. Record the branch, base SHA, and pre-existing dirty state before dispatch.
+For a local Git project, create each implementation task in an isolated Codex worktree from the frozen approved base. Record the branch, base SHA, and pre-existing dirty state before dispatch. Select an explicit existing branch as the worktree starting state; use a working-tree snapshot only when the user explicitly wants uncommitted state included. Require every worker to confirm its initial HEAD and stop on a base mismatch.
+
+Task creation is asynchronous. If creation returns only a temporary client task ID, never pass it to controls that require a real task ID. Wait until the app exposes one unambiguous ready task for the approved project and scope, then title and pin it. Stop and report the setup failure if readiness cannot be resolved safely.
 
 Immediately after creation:
 
