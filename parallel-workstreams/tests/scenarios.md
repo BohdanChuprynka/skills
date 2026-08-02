@@ -59,3 +59,17 @@ Expected decisions:
 - Never pass `clientThreadId` to task controls that require a real `threadId`.
 - Resolve one unambiguous ready task before titling, pinning, messaging, or waiting on it.
 - Stop and report the setup failure if readiness cannot be resolved safely.
+
+## Scenario F: Two-wave planning and implementation
+
+The user asks:
+
+> Use separate visible Codex chats to plan four audit findings in parallel, consolidate the plans here, then launch fresh visible chats to implement the reconciled plans and finish integration and full tests here.
+
+Expected decisions:
+
+- Propose one Sol planning wave followed by one fresh Luna implementation wave.
+- Treat both waves as covered by one compact confirmation, without adding an unrequested approval between them.
+- Keep consolidation, regrouping, integration, and full verification in the coordinator.
+- State that material regrouping after plan consolidation requires a revised confirmation.
+- Create no tasks before approval.

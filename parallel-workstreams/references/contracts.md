@@ -78,6 +78,8 @@ For every ready task:
 3. Update the registry before dispatching another dependent action.
 4. Never unpin or archive worker tasks automatically.
 
+Retry a failed title or pin operation once. If the title or pin failure persists, stop that workstream and report it; do not accept degraded visibility or dispatch dependent work.
+
 ## 5. Worker briefs
 
 ### Planner
