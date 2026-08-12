@@ -511,6 +511,16 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
 
     run_summary_path = args.run_summary or first_existing(workdir, ("run-summary.json",))
     run_summary = load_json(run_summary_path, {})
+    routing_summary = run_summary.get("routing", {}) if isinstance(run_summary, dict) else {}
+    fallback_summary = (
+        routing_summary.get("fallback", {}) if isinstance(routing_summary, dict) else {}
+    )
+    route_fallback = {
+        key: int(fallback_summary.get(key, 0))
+        for key in ("attempted", "recovered", "remaining")
+        if isinstance(fallback_summary, dict)
+        and isinstance(fallback_summary.get(key, 0), int)
+    }
     facts = run_summary.get("facts", []) if isinstance(run_summary, dict) else []
     if not isinstance(facts, list):
         facts = []
@@ -640,12 +650,25 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
                 "target_vaults": vaults,
                 "top_target_pages": dict(page_counts.most_common(20)),
                 "invalid_batches": invalid_route,
+                "fallback": route_fallback,
             },
             "reconcile": {
                 "batches": reconcile_batch_count,
                 "decisions": len(decisions),
                 "actions": reconcile_actions,
                 "needs_review": needs_review,
+                "review_gates": {
+                    "cross_target": sum(
+                        decision_value(record, "cross_target_review") is True
+                        for record in decisions
+                        if isinstance(record, dict)
+                    ),
+                    "density": sum(
+                        decision_value(record, "density_review") is True
+                        for record in decisions
+                        if isinstance(record, dict)
+                    ),
+                },
             },
             "review": review_metrics,
             "apply": {
