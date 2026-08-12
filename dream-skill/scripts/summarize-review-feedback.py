@@ -100,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     by_type: dict[str, Counter[str]] = defaultdict(Counter)
     historical: Counter[str] = Counter()
     quality_sample: Counter[str] = Counter()
+    quality_sample_individual: Counter[str] = Counter()
+    decision_origins: Counter[str] = Counter()
+    quality_outcomes: Counter[str] = Counter()
+    quality_reasons: Counter[str] = Counter()
     by_run: dict[str, Counter[str]] = defaultdict(Counter)
     by_fact_class: dict[str, Counter[str]] = defaultdict(Counter)
     by_memory_tier: dict[str, Counter[str]] = defaultdict(Counter)
@@ -141,10 +145,23 @@ def main(argv: list[str] | None = None) -> int:
         if entry.get("quality_review_sample"):
             quality_sample[str(decision)] += 1
         item_feedback = feedback.get(candidate_id)
+        decision_origin = (
+            dimension_key(item_feedback.get("decision_origin"), "unknown")
+            if isinstance(item_feedback, dict)
+            else "unknown"
+        )
+        decision_origins[decision_origin] += 1
+        is_quality_evidence = decision_origin == "individual"
+        if is_quality_evidence:
+            quality_outcomes[str(decision)] += 1
+            if entry.get("quality_review_sample"):
+                quality_sample_individual[str(decision)] += 1
         if isinstance(item_feedback, dict) and decision == "reject":
             reason = item_feedback.get("reason")
             if isinstance(reason, str) and reason:
                 reasons[reason] += 1
+                if is_quality_evidence:
+                    quality_reasons[reason] += 1
                 dimension_values = {
                     "fact_class": fact_class,
                     "memory_tier": memory_tier,
@@ -158,12 +175,18 @@ def main(argv: list[str] | None = None) -> int:
 
     reviewed = sum(outcomes.values())
     rejected = outcomes.get("reject", 0)
+    quality_reviewed = sum(quality_outcomes.values())
+    quality_rejected = quality_outcomes.get("reject", 0)
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
         "recorded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "reviewed": reviewed,
         "outcomes": sorted_counter(outcomes),
         "rejection_reasons": sorted_counter(reasons),
+        "decision_origins": sorted_counter(decision_origins),
+        "quality_reviewed": quality_reviewed,
+        "quality_outcomes": sorted_counter(quality_outcomes),
+        "quality_rejection_reasons": sorted_counter(quality_reasons),
         "outcomes_by_vault": {
             key: sorted_counter(value) for key, value in sorted(by_vault.items())
         },
@@ -204,13 +227,23 @@ def main(argv: list[str] | None = None) -> int:
             "reject_rate": round(rejected / reviewed, 4) if reviewed else None,
             "reject_reason_coverage": round(sum(reasons.values()) / rejected, 4) if rejected else None,
             "quality_sample_reject_rate": (
-                round(quality_sample.get("reject", 0) / sum(quality_sample.values()), 4)
-                if quality_sample else None
+                round(
+                    quality_sample_individual.get("reject", 0)
+                    / sum(quality_sample_individual.values()),
+                    4,
+                )
+                if quality_sample_individual else None
+            ),
+            "quality_reject_rate": (
+                round(quality_rejected / quality_reviewed, 4) if quality_reviewed else None
+            ),
+            "quality_decision_coverage": (
+                round(quality_reviewed / reviewed, 4) if reviewed else None
             ),
         },
         "improvement_signals": [
             {"reason": reason, "count": count, "recommendation": RECOMMENDATIONS[reason]}
-            for reason, count in reasons.most_common()
+            for reason, count in quality_reasons.most_common()
             if reason in RECOMMENDATIONS and count > 0
         ],
     }
