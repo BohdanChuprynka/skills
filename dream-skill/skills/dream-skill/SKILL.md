@@ -46,6 +46,8 @@ RUNNER="$SKILL_DIR/scripts/dream-run.py"
 | `--source claude|codex|all` | pass through unchanged |
 | `--historical-current-review-days N` | current-tier facts N+ days old become review-only; default 30, use 0 to review every current-tier fact |
 | `--quality-review-sample-percent N` | deterministically send N% of otherwise high-confidence facts through review; default 0 |
+| `--agent-retries N` | Dream-level retries after an agent process fails; default 2 (3 total attempts) |
+| `--agent-retry-backoff N` | shared delay after transport/time-out failures before another agent launch; default 15 seconds |
 | `--route-fallback-effort E` | effort for the targeted retry of gap/ambiguous routes; Codex default `medium` |
 | `--no-route-gap-retry` | disable the targeted second ROUTE pass; use only for controlled evaluation |
 | `--page-auto-write-limit N` | queue additions beyond N writes to one page in a run; default 12, 0 disables |
@@ -93,6 +95,8 @@ The model-facing contracts live in:
 - `ROUTING.md`
 
 Read those only when changing or debugging the corresponding stage. Do not paste them into parent-session prompts.
+
+Codex stage workers load only the explicit Dream model and effort settings; they ignore unrelated user configuration and MCP startup. A quota, authentication, or model-configuration error opens a stage-wide circuit so queued batches stop without discarding valid completed outputs. Transport and time-out failures receive three total process attempts by default with a shared exponential delay (15 seconds, then 30 seconds). The circuit opens only after that retry budget is exhausted; each process already performs its own internal transport retries.
 
 ## Safety Invariants
 
@@ -154,6 +158,8 @@ python3 "$SKILL_DIR/scripts/summarize-review-feedback.py" \
 
 Use its rejection reasons to attribute improvements to MAP precision/factuality/wording, REDUCE/RECONCILE duplication, ROUTE destination choice, or historical staleness. Review sidecars include the weekly run ID, window, and model profile, so the aggregate can separate backfill weeks from legacy queue entries. The aggregate report must remain content-free.
 
+Feedback records distinguish `individual`, `bulk_confidence`, and `bulk_filter` decisions. Operational totals include every decision, but quality rates and improvement recommendations use only individually reviewed evidence. Never interpret bulk policy outcomes as MAP precision.
+
 The review UI sorts quality samples first and filters by cohort, historical/sample status, vault, page, memory tier, and normalized fact class. New-person candidates route normally but are always review-only and appear as `person identity` cards.
 
 After the user finishes review, apply only decisions from that exact review snapshot:
@@ -203,6 +209,9 @@ python3 "$SKILL_DIR/scripts/dream-health.py" --human
 When `config.toml` contains a `[health]` section, the same check also watches
 the expected production cadence, configured source-feed backlog, and
 report-only freshness findings for configured current pages such as `Now.md`.
+It compares `review-input.json` with live review sidecars and reports stale
+snapshots. For the latest failed run it also reports the failed stage, reusable
+batch count, unresolved batch count, and content-free error-class counts.
 Use `--strict` in a monitor when any alert should fail the check. The health
 check never edits vaults, queue state, or source files.
 

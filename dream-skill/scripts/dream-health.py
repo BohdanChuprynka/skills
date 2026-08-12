@@ -70,6 +70,76 @@ def collect_states(runs_dir: Path) -> list[dict[str, Any]]:
     return sorted(by_id.values(), key=lambda item: str(item.get("updated_at", "")), reverse=True)
 
 
+def failed_run_recovery(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Return content-free reuse guidance for a retained failed run."""
+    stages = state.get("stages")
+    if not isinstance(stages, dict):
+        return None
+    failed_stages = [
+        (name, value)
+        for name, value in stages.items()
+        if isinstance(value, dict) and value.get("status") == "failed"
+    ]
+    if not failed_stages:
+        return None
+    failed_stage, stage = max(
+        failed_stages,
+        key=lambda item: str(item[1].get("updated_at", "")),
+    )
+    state_path = Path(str(state.get("state_path") or ""))
+    summary_path = state_path.parent / f"{failed_stage}-run-summary.json"
+    summary = load_json(summary_path, {})
+    summary = summary if isinstance(summary, dict) else {}
+
+    def count(name: str, default: int = 0) -> int:
+        raw = stage.get(name)
+        if not isinstance(raw, int) or raw < 0:
+            raw = summary.get(name, default)
+        return raw if isinstance(raw, int) and raw >= 0 else default
+
+    total = count("total", count("tasks"))
+    completed = count("completed")
+    unresolved = count("failed", max(total - completed, 0))
+    raw_classes = summary.get("error_classes", {})
+    if not isinstance(raw_classes, dict):
+        raw_classes = {}
+    error_classes = {
+        str(name): value
+        for name, value in raw_classes.items()
+        if isinstance(name, str)
+        and isinstance(value, int)
+        and value > 0
+    }
+    return {
+        "failed_stage": str(failed_stage),
+        "reusable_batches": completed,
+        "unresolved_batches": unresolved,
+        "error_classes": dict(sorted(error_classes.items())),
+    }
+
+
+def review_snapshot_health(queue_dir: Path, sidecar_ids: set[str]) -> dict[str, Any]:
+    """Compare the retained review snapshot with the live sidecar queue."""
+    snapshot_path = queue_dir / "review-input.json"
+    snapshot = load_json(snapshot_path)
+    valid = isinstance(snapshot, dict) and isinstance(snapshot.get("entries"), list)
+    snapshot_ids = {
+        str(entry.get("id"))
+        for entry in snapshot.get("entries", [])
+        if valid and isinstance(entry, dict) and entry.get("id")
+    } if valid else set()
+    present = snapshot_path.is_file()
+    return {
+        "present": present,
+        "valid": valid,
+        "entries": len(snapshot_ids),
+        "overlap": len(snapshot_ids & sidecar_ids),
+        "stale_entries": len(snapshot_ids - sidecar_ids),
+        "missing_live_entries": len(sidecar_ids - snapshot_ids),
+        "exact_match": (valid and snapshot_ids == sidecar_ids) or (not present and not sidecar_ids),
+    }
+
+
 def latest_metric(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -184,6 +254,7 @@ def collect(home: Path, fix_permissions: bool, config_path: Path | None = None) 
     sidecar_ids = {path.stem for path in (queue_dir / "sidecars").glob("*.json")}
     decisions = load_json(queue_dir / "review-decisions.json", {})
     decision_ids = set(decisions) if isinstance(decisions, dict) else set()
+    review_snapshot = review_snapshot_health(queue_dir, sidecar_ids)
     states = collect_states(home / "runs")
     latest = states[0] if states else None
     health_config = load_health_config(config_path or (home / "config.toml"))
@@ -232,6 +303,16 @@ def collect(home: Path, fix_permissions: bool, config_path: Path | None = None) 
         alerts.append(f"{len(orphan_pending)} pending entries lack sidecars")
     if orphan_sidecars:
         alerts.append(f"{len(orphan_sidecars)} sidecars lack pending entries")
+    if not review_snapshot["present"] and sidecar_ids:
+        alerts.append("review snapshot missing while live sidecars are queued")
+    elif review_snapshot["present"] and not review_snapshot["valid"]:
+        alerts.append("review snapshot is invalid")
+    elif not review_snapshot["exact_match"]:
+        alerts.append(
+            "review snapshot is stale: "
+            f"{review_snapshot['stale_entries']} snapshot-only, "
+            f"{review_snapshot['missing_live_entries']} live-only"
+        )
     if failed:
         alerts.append(f"{len(failed)} failed run(s) retained")
     if active:
@@ -256,6 +337,20 @@ def collect(home: Path, fix_permissions: bool, config_path: Path | None = None) 
     routing_gaps = home / "routing-gaps.log"
     errors = home / "error.log"
     failures = home / "metrics/failures.jsonl"
+    latest_view = (
+        {
+            key: latest.get(key)
+            for key in ("run_id", "status", "mode", "updated_at", "source", "window")
+            if key in latest
+        }
+        if latest
+        else None
+    )
+    if latest_view is not None and latest.get("status") == "failed":
+        recovery = failed_run_recovery(latest)
+        if recovery:
+            latest_view["recovery"] = recovery
+
     result = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "home": str(home),
@@ -266,11 +361,7 @@ def collect(home: Path, fix_permissions: bool, config_path: Path | None = None) 
             "failed": len(failed),
             "active": len(active),
             "stale": len(stale),
-            "latest": {
-                key: latest.get(key)
-                for key in ("run_id", "status", "mode", "updated_at", "source", "window")
-                if latest and key in latest
-            } if latest else None,
+            "latest": latest_view,
         },
         "cadence": {
             "expected_days": cadence_days,
@@ -294,6 +385,7 @@ def collect(home: Path, fix_permissions: bool, config_path: Path | None = None) 
             "review_decisions": len(decision_ids),
             "orphan_pending": len(orphan_pending),
             "orphan_sidecars": len(orphan_sidecars),
+            "review_snapshot": review_snapshot,
         },
         "logs": {
             "routing_gap_lines": sum(1 for _ in routing_gaps.open(errors="ignore")) if routing_gaps.is_file() else 0,
@@ -325,6 +417,17 @@ def human(result: dict[str, Any]) -> str:
     latest = runs.get("latest")
     if latest:
         lines.append(f"Latest: {latest.get('run_id')} [{latest.get('status')}]")
+        recovery = latest.get("recovery")
+        if recovery:
+            classes = ", ".join(
+                f"{name}: {count}"
+                for name, count in recovery.get("error_classes", {}).items()
+            ) or "unclassified"
+            lines.append(
+                f"Recovery: {recovery.get('failed_stage')}, "
+                f"{recovery.get('reusable_batches')} reusable, "
+                f"{recovery.get('unresolved_batches')} unresolved ({classes})"
+            )
     cadence = result.get("cadence", {})
     if cadence.get("latest_real_run"):
         lines.append(

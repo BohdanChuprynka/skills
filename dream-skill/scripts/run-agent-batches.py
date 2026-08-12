@@ -11,7 +11,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,20 +21,73 @@ from typing import Any
 
 STAGES = {"map", "route", "reconcile"}
 ENGINES = {"codex", "claude"}
-NON_RETRYABLE_LOG_FRAGMENTS = (
+CIRCUIT_BREAKING_ERROR_CLASSES = {"quota", "authentication", "configuration"}
+ERROR_CLASS_FRAGMENTS = {
+    "quota": (
+        "you've hit your usage limit",
+        "usage limit",
+        "rate limit",
+        "rate_limit_error",
+        "credit balance is too low",
+        "insufficient_quota",
+        "too many requests",
+    ),
+    "authentication": (
+        "authentication failed",
+        "invalid api key",
+        "invalid x-api-key",
+        "authentication_error",
+        "unauthorized",
+    ),
+    "configuration": (
+        "model not found",
+        "unsupported model",
+        "unknown model",
+        "invalid model",
+    ),
+    "transport": (
+        "stream disconnected",
+        "network connection",
+        "connection reset",
+        "connection refused",
+        "connection closed",
+        "service unavailable",
+        "gateway timeout",
+        "bad gateway",
+        "dns error",
+        "tls error",
+    ),
+}
+OPERATIONAL_ERROR_WORD_RE = re.compile(
+    r"(?:^|[^a-z])(error|fatal|failed|failure)(?:$|[^a-z])",
+    flags=re.IGNORECASE,
+)
+DIRECT_OPERATIONAL_PREFIXES = (
     "you've hit your usage limit",
-    "usage limit",
-    "authentication failed",
-    "invalid api key",
-    "model not found",
-    "unsupported model",
     "usage limit reached",
     "rate limit",
     "rate_limit_error",
     "credit balance is too low",
     "insufficient_quota",
+    "authentication failed",
+    "invalid api key",
     "invalid x-api-key",
     "authentication_error",
+    "unauthorized",
+    "model not found",
+    "unsupported model",
+    "unknown model",
+    "invalid model",
+    "stream disconnected",
+    "network connection",
+    "connection reset",
+    "connection refused",
+    "connection closed",
+    "service unavailable",
+    "gateway timeout",
+    "bad gateway",
+    "dns error",
+    "tls error",
 )
 
 
@@ -56,6 +111,25 @@ def create_private_file(path: Path) -> None:
     descriptor = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
     os.close(descriptor)
     os.chmod(path, 0o600)
+
+
+def classify_agent_failure(log_text: str) -> str:
+    """Classify operational agent failures without scanning arbitrary prose.
+
+    Codex logs may include status text from several layers.  Restrict matching
+    to lines that look operational so candidate/transcript wording cannot turn
+    an ordinary model failure into a false account-wide circuit break.
+    """
+    operational = "\n".join(
+        line.casefold()
+        for line in log_text.splitlines()
+        if OPERATIONAL_ERROR_WORD_RE.search(line)
+        or line.strip().casefold().startswith(DIRECT_OPERATIONAL_PREFIXES)
+    )
+    for error_class, fragments in ERROR_CLASS_FRAGMENTS.items():
+        if any(fragment in operational for fragment in fragments):
+            return error_class
+    return "agent"
 
 
 def expected_ids(stage: str, task: dict[str, Any]) -> set[str] | None:
@@ -249,6 +323,7 @@ def codex_command(args: argparse.Namespace, output_path: Path) -> list[str]:
     command.extend(
         [
             "exec",
+            "--ignore-user-config",
             "--ephemeral",
             "--skip-git-repo-check",
             "--sandbox",
@@ -318,12 +393,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--concurrency", default="4")
     parser.add_argument("--timeout", default="900")
     parser.add_argument("--retries", default="1")
+    parser.add_argument(
+        "--retry-backoff",
+        default="0",
+        help="shared seconds to wait after transport/time-out failures before another agent launch",
+    )
     args = parser.parse_args(argv)
 
     try:
         concurrency = parse_positive(args.concurrency, "--concurrency")
         timeout = parse_positive(args.timeout, "--timeout")
         retries = parse_positive(args.retries, "--retries", allow_zero=True)
+        retry_backoff = parse_positive(args.retry_backoff, "--retry-backoff", allow_zero=True)
         args.workdir.mkdir(parents=True, exist_ok=True)
         os.chmod(args.workdir, 0o700)
         if not args.instructions.is_file():
@@ -350,6 +431,37 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(result, dict) and result.get("batch_id") and result.get("fingerprint")
     } if isinstance(previous_summary, dict) else {}
 
+    circuit_lock = threading.Lock()
+    circuit: dict[str, str] = {}
+    backoff_lock = threading.Lock()
+    next_agent_launch = 0.0
+
+    def circuit_error_class() -> str | None:
+        with circuit_lock:
+            return circuit.get("error_class")
+
+    def open_circuit(error_class: str, batch_id: str) -> None:
+        with circuit_lock:
+            if not circuit:
+                circuit.update({"error_class": error_class, "batch_id": batch_id})
+
+    def schedule_backoff(failed_attempt: int) -> int:
+        nonlocal next_agent_launch
+        delay = retry_backoff * (2 ** max(failed_attempt - 1, 0))
+        if delay <= 0:
+            return 0
+        with backoff_lock:
+            next_agent_launch = max(next_agent_launch, time.monotonic() + delay)
+        return delay
+
+    def wait_for_backoff() -> None:
+        while True:
+            with backoff_lock:
+                remaining = next_agent_launch - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(remaining)
+
     def run_one(task: dict[str, Any]) -> dict[str, Any]:
         batch_id = str(task.get("batch_id") or "")
         if not batch_id:
@@ -371,6 +483,18 @@ def main(argv: list[str] | None = None) -> int:
                 "attempts": 0,
                 "fingerprint": fingerprint,
             }
+        open_error = circuit_error_class()
+        if open_error:
+            return {
+                "batch_id": batch_id,
+                "status": "stage-circuit-open",
+                "error_class": open_error,
+                "attempts": 0,
+                "attempt_logs": [],
+                "retry_backoff_seconds": [],
+                "seconds": 0.0,
+                "fingerprint": fingerprint,
+            }
         prompt_path = args.workdir / f"{args.stage}-prompt-{batch_id}.txt"
         prompt_path.write_text(
             task_prompt(args.stage, args.instructions, task, input_path, output_path, args.routing_rules),
@@ -380,6 +504,9 @@ def main(argv: list[str] | None = None) -> int:
         started = time.monotonic()
         last_status = "failed"
         last_validation_error = ""
+        last_error_class = "agent"
+        retry_error_classes: list[str] = []
+        retry_backoff_seconds: list[int] = []
         attempts_done = 0
         attempt_logs: list[str] = []
         previous_numbers: list[int] = []
@@ -389,6 +516,33 @@ def main(argv: list[str] | None = None) -> int:
                 previous_numbers.append(int(match.group(1)))
         first_attempt_number = max(previous_numbers, default=0) + 1
         for local_attempt in range(1, retries + 2):
+            open_error = circuit_error_class()
+            if open_error:
+                return {
+                    "batch_id": batch_id,
+                    "status": "stage-circuit-open",
+                    "error_class": open_error,
+                    "attempts": attempts_done,
+                    "attempt_logs": attempt_logs,
+                    "retry_error_classes": retry_error_classes,
+                    "retry_backoff_seconds": retry_backoff_seconds,
+                    "seconds": round(time.monotonic() - started, 3),
+                    "fingerprint": fingerprint,
+                }
+            wait_for_backoff()
+            open_error = circuit_error_class()
+            if open_error:
+                return {
+                    "batch_id": batch_id,
+                    "status": "stage-circuit-open",
+                    "error_class": open_error,
+                    "attempts": attempts_done,
+                    "attempt_logs": attempt_logs,
+                    "retry_error_classes": retry_error_classes,
+                    "retry_backoff_seconds": retry_backoff_seconds,
+                    "seconds": round(time.monotonic() - started, 3),
+                    "fingerprint": fingerprint,
+                }
             attempts_done = local_attempt
             attempt_number = first_attempt_number + local_attempt - 1
             log = args.workdir / f"{args.stage}-log-{batch_id}-attempt-{attempt_number:02d}.txt"
@@ -422,15 +576,34 @@ def main(argv: list[str] | None = None) -> int:
                 os.chmod(log, 0o600)
                 if proc.returncode != 0:
                     last_status = f"agent-exit-{proc.returncode}"
-                    log_text = log.read_text(encoding="utf-8", errors="ignore").casefold()
-                    if any(fragment in log_text for fragment in NON_RETRYABLE_LOG_FRAGMENTS):
+                    last_error_class = classify_agent_failure(
+                        log.read_text(encoding="utf-8", errors="ignore")
+                    )
+                    retry_error_classes.append(last_error_class)
+                    if last_error_class in CIRCUIT_BREAKING_ERROR_CLASSES:
                         last_status = "non-retryable-agent-error"
+                        open_circuit(last_error_class, batch_id)
                         break
+                    if last_error_class == "transport":
+                        if local_attempt <= retries:
+                            retry_backoff_seconds.append(schedule_backoff(local_attempt))
+                        else:
+                            last_status = "transient-retries-exhausted"
+                            open_circuit(last_error_class, batch_id)
+                            break
                     continue
                 if args.engine == "claude":
                     normalize_claude_json_array(output_path)
             except subprocess.TimeoutExpired:
                 last_status = "timeout"
+                last_error_class = "timeout"
+                retry_error_classes.append(last_error_class)
+                if local_attempt <= retries:
+                    retry_backoff_seconds.append(schedule_backoff(local_attempt))
+                else:
+                    last_status = "transient-retries-exhausted"
+                    open_circuit(last_error_class, batch_id)
+                    break
                 continue
             valid, count = valid_output(output_path, expected)
             if valid:
@@ -444,6 +617,8 @@ def main(argv: list[str] | None = None) -> int:
                     with log.open("a", encoding="utf-8") as handle:
                         handle.write(f"\nsemantic validation failed: {semantic_error}\n")
                     last_status = "semantic-validation-failed"
+                    last_error_class = "semantic_validation"
+                    retry_error_classes.append(last_error_class)
                     last_validation_error = semantic_error
                     feedback = semantic_error[:1000]
                     prompt_path.write_text(
@@ -472,8 +647,12 @@ def main(argv: list[str] | None = None) -> int:
                     "attempt_logs": attempt_logs,
                     "seconds": round(time.monotonic() - started, 3),
                     "fingerprint": fingerprint,
+                    "retry_error_classes": retry_error_classes,
+                    "retry_backoff_seconds": retry_backoff_seconds,
                 }
             last_status = "invalid-or-missing-output"
+            last_error_class = "invalid_output"
+            retry_error_classes.append(last_error_class)
         failure = {
             "batch_id": batch_id,
             "status": last_status,
@@ -481,6 +660,9 @@ def main(argv: list[str] | None = None) -> int:
             "attempt_logs": attempt_logs,
             "seconds": round(time.monotonic() - started, 3),
             "fingerprint": fingerprint,
+            "error_class": last_error_class,
+            "retry_error_classes": retry_error_classes,
+            "retry_backoff_seconds": retry_backoff_seconds,
         }
         if last_validation_error:
             failure["validation_error"] = last_validation_error[:2000]
@@ -496,12 +678,31 @@ def main(argv: list[str] | None = None) -> int:
 
     results.sort(key=lambda result: str(result.get("batch_id")))
     failures = [result for result in results if result["status"] not in {"ok", "skipped-existing"}]
+    error_classes = Counter(
+        str(result.get("error_class"))
+        for result in failures
+        if result.get("error_class")
+    )
+    retry_error_classes = Counter(
+        str(error_class)
+        for result in results
+        for error_class in result.get("retry_error_classes", [])
+        if error_class
+    )
     summary = {
         "stage": args.stage,
         "prompt_sha256": prompt_hash,
         "tasks": len(tasks),
         "completed": len(tasks) - len(failures),
         "failed": len(failures),
+        "retry_policy": {
+            "retries": retries,
+            "max_attempts": retries + 1,
+            "backoff": "exponential",
+            "base_backoff_seconds": retry_backoff,
+        },
+        "error_classes": dict(sorted(error_classes.items())),
+        "retry_error_classes": dict(sorted(retry_error_classes.items())),
         "results": results,
     }
     summary_path = args.workdir / f"{args.stage}-run-summary.json"
