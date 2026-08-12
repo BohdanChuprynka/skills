@@ -36,6 +36,8 @@ REASONS = {
     },
 }
 DEFAULT_REASON = {"approve": "accepted", "defer": "review_later", "reject": "unspecified"}
+INDIVIDUAL_DECISION_ORIGIN = "individual"
+BULK_DECISION_ORIGINS = {"bulk_confidence", "bulk_filter"}
 
 
 class LoopbackThreadingHTTPServer(ThreadingHTTPServer):
@@ -216,6 +218,7 @@ def make_handler(
                             feedback[entry_id] = {
                                 "decision": decision,
                                 "reason": reason,
+                                "decision_origin": INDIVIDUAL_DECISION_ORIGIN,
                                 "recorded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                             }
                             save_json(feedback_path, feedback)
@@ -232,27 +235,46 @@ def make_handler(
                 if not isinstance(incoming, dict):
                     self.send_json({"error": "decisions object required"}, HTTPStatus.BAD_REQUEST)
                     return
-                with decisions_lock:
-                    decisions = load_json(decisions_path, {})
-                    decisions = decisions if isinstance(decisions, dict) else {}
-                    added = 0
-                    for entry_id, decision in incoming.items():
-                        if isinstance(entry_id, str) and decision in {"approve", "reject", "defer"}:
-                            decisions[entry_id] = decision
-                            added += 1
-                    save_json(decisions_path, decisions)
-                    if feedback_path:
-                        feedback = load_json(feedback_path, {})
-                        feedback = feedback if isinstance(feedback, dict) else {}
-                        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                        for entry_id, decision in incoming.items():
-                            if isinstance(entry_id, str) and decision in DEFAULT_REASON:
+                decision_origin = body.get("decision_origin")
+                if not isinstance(decision_origin, str) or decision_origin not in BULK_DECISION_ORIGINS:
+                    self.send_json(
+                        {"error": "decision_origin must be bulk_confidence or bulk_filter"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                try:
+                    with decisions_lock:
+                        decisions = load_json(decisions_path, {})
+                        decisions = decisions if isinstance(decisions, dict) else {}
+                        accepted = {
+                            entry_id: decision
+                            for entry_id, decision in incoming.items()
+                            if isinstance(entry_id, str)
+                            and decision in {"approve", "reject", "defer"}
+                        }
+                        if feedback_path:
+                            feedback = load_json(feedback_path, {})
+                            feedback = feedback if isinstance(feedback, dict) else {}
+                            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                            for entry_id, decision in accepted.items():
                                 feedback[entry_id] = {
                                     "decision": decision,
                                     "reason": DEFAULT_REASON[decision],
+                                    "decision_origin": decision_origin,
                                     "recorded_at": now,
                                 }
-                        save_json(feedback_path, feedback)
+                            # Provenance is supplementary but required for trustworthy
+                            # metrics, so persist it before marking cards authoritative.
+                            save_json(feedback_path, feedback)
+                        decisions.update(accepted)
+                        save_json(decisions_path, decisions)
+                        added = len(accepted)
+                except OSError:
+                    self.send_json(
+                        {"ok": False, "error": "batch review decisions could not be persisted"},
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
+                    return
                 self.send_json({"ok": True, "saved": added, "total": len(decisions)})
             elif path == "/api/shutdown":
                 self.send_json({"ok": True})

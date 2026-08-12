@@ -423,6 +423,8 @@ def agent_stage(
         str(getattr(args, f"{stage}_timeout")),
         "--retries",
         str(args.agent_retries),
+        "--retry-backoff",
+        str(getattr(args, "agent_retry_backoff", 0)),
     ]
     model = getattr(args, f"{stage}_model")
     effort = getattr(args, f"{stage}_effort")
@@ -592,6 +594,8 @@ def run_route_fallback(
         str(args.route_timeout),
         "--retries",
         str(args.agent_retries),
+        "--retry-backoff",
+        str(getattr(args, "agent_retry_backoff", 0)),
         "--config",
         str(args.config),
     ]
@@ -1361,7 +1365,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--codex-bin", default=os.environ.get("CODEX_BIN", "codex"))
     parser.add_argument("--claude-bin", default=os.environ.get("CLAUDE_BIN", "claude"))
-    parser.add_argument("--agent-retries", type=int, default=1)
+    parser.add_argument(
+        "--agent-retries",
+        type=int,
+        default=int(os.environ.get("DREAM_AGENT_RETRIES", "2")),
+        help="Dream-level retries after an agent process fails; default 2 (3 total attempts)",
+    )
+    parser.add_argument(
+        "--agent-retry-backoff",
+        type=int,
+        default=int(os.environ.get("DREAM_AGENT_RETRY_BACKOFF_SECONDS", "15")),
+        help="shared delay after transport/time-out failures before another agent launch",
+    )
     parser.add_argument("--route-top-k", type=int, default=32)
     parser.add_argument(
         "--historical-current-review-days",
@@ -1423,6 +1438,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--engine/DREAM_ENGINE must be one of {ENGINES}, got: {args.engine!r}")
     if args.historical_current_review_days < 0:
         parser.error("--historical-current-review-days must be >= 0")
+    if args.agent_retries < 0 or args.agent_retry_backoff < 0:
+        parser.error("--agent-retries and --agent-retry-backoff must be >= 0")
     if not 0 <= args.quality_review_sample_percent <= 100:
         parser.error("--quality-review-sample-percent must be between 0 and 100")
     if min(

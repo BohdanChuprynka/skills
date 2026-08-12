@@ -50,6 +50,8 @@ class ReviewServerHelpersTest(unittest.TestCase):
         self.assertIn("not_durable", serve.REASONS["reject"])
         self.assertIn("wrong_target", serve.REASONS["reject"])
         self.assertEqual(serve.REASONS["approve"], {"accepted"})
+        self.assertEqual(serve.INDIVIDUAL_DECISION_ORIGIN, "individual")
+        self.assertEqual(serve.BULK_DECISION_ORIGINS, {"bulk_confidence", "bulk_filter"})
 
     def test_save_json_is_private_and_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

@@ -107,9 +107,13 @@ jq -e 'length == 1 and .[0].detected_names == ["Taylor Park"]' \
 [ ! -e "$TMP/state/people-review-queue.md" ]
 
 WORKDIR="$TMP/state/runs/$RUN_ID"
+jq -e '.retry_policy == {"backoff":"exponential","base_backoff_seconds":15,"max_attempts":3,"retries":2}' \
+  "$WORKDIR/map-run-summary.json" >/dev/null
 jq -e '[.[] | select(.decision.policy_review_only == true)] | length == 1 and .[0].decision.needs_review == true' \
   "$WORKDIR/reconcile-decisions-enforced.json" >/dev/null
 jq -e '.counts.reduce.gate_dispositions.policy_review.selected == 1 and .counts.reduce.gate_dispositions.policy_review.dispositions.queued == 1' \
+  "$TMP/state/metrics/runs/$RUN_ID.json" >/dev/null
+jq -e '.counts.route.fallback == {"attempted":0,"recovered":0,"remaining":0} and .counts.reconcile.review_gates == {"cross_target":0,"density":0}' \
   "$TMP/state/metrics/runs/$RUN_ID.json" >/dev/null
 jq -e '[.[] | select(.content == "The user is currently testing concise reporting workflows.")] | length == 1 and .[0].historical_review == true and .[0].confidence == "medium" and .[0].original_confidence == "high"' "$WORKDIR/routable.json" >/dev/null
 jq '.error = "stale failure from an earlier attempt"' "$STATE" > "$WORKDIR/state.tmp"
