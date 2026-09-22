@@ -17,9 +17,9 @@ cat > "$TMP/decisions.json" <<'JSON'
 JSON
 cat > "$TMP/feedback.json" <<'JSON'
 {
-  "a":{"decision":"reject","reason":"not_durable","recorded_at":"2026-07-12T00:00:00Z"},
-  "b":{"decision":"approve","reason":"accepted","recorded_at":"2026-07-12T00:00:00Z"},
-  "c":{"decision":"reject","reason":"wrong_target","recorded_at":"2026-07-12T00:00:00Z"}
+  "a":{"decision":"reject","reason":"not_durable","decision_origin":"bulk_confidence","recorded_at":"2026-07-12T00:00:00Z"},
+  "b":{"decision":"approve","reason":"accepted","decision_origin":"individual","recorded_at":"2026-07-12T00:00:00Z"},
+  "c":{"decision":"reject","reason":"wrong_target","decision_origin":"individual","recorded_at":"2026-07-12T00:00:00Z"}
 }
 JSON
 
@@ -30,13 +30,15 @@ JSON
 jq -e '.reviewed == 3 and .outcomes.approve == 1 and .outcomes.reject == 2' "$TMP/summary.json" >/dev/null
 jq -e '.rejection_reasons.not_durable == 1 and .rejection_reasons.wrong_target == 1' "$TMP/summary.json" >/dev/null
 jq -e '.historical_review_outcomes.reject == 1 and .derived.reject_reason_coverage == 1' "$TMP/summary.json" >/dev/null
-jq -e '.quality_review_sample_outcomes.reject == 1 and .derived.quality_sample_reject_rate == 1' "$TMP/summary.json" >/dev/null
+jq -e '.quality_review_sample_outcomes.reject == 1 and .derived.quality_sample_reject_rate == null' "$TMP/summary.json" >/dev/null
+jq -e '.decision_origins.individual == 2 and .decision_origins.bulk_confidence == 1 and .quality_reviewed == 2 and .quality_outcomes.approve == 1 and .quality_outcomes.reject == 1' "$TMP/summary.json" >/dev/null
+jq -e '.quality_rejection_reasons == {"wrong_target":1} and .derived.quality_reject_rate == 0.5 and .derived.quality_decision_coverage == 0.6667' "$TMP/summary.json" >/dev/null
 jq -e '.outcomes_by_run_id."run-week-1".approve == 1 and .outcomes_by_run_id."run-week-1".reject == 1 and .outcomes_by_run_id."run-week-2".reject == 1' "$TMP/summary.json" >/dev/null
-jq -e '.schema_version == 2 and .outcomes_by_fact_class.active_state.reject == 1 and .outcomes_by_memory_tier.stable.approve == 1' "$TMP/summary.json" >/dev/null
+jq -e '.schema_version == 3 and .outcomes_by_fact_class.active_state.reject == 1 and .outcomes_by_memory_tier.stable.approve == 1' "$TMP/summary.json" >/dev/null
 jq -e '.groups.fact_class.active_state.reviewed == 1 and .groups.fact_class.active_state.rejection_reasons.not_durable == 1 and .groups.fact_class.active_state.reject_rate == 1' "$TMP/summary.json" >/dev/null
 jq -e '.groups.memory_tier.current.outcomes.reject == 1 and .groups.quality_review_sample.sample.outcomes.reject == 1 and .groups.quality_review_sample.not_sample.reviewed == 2' "$TMP/summary.json" >/dev/null
 jq -e '.groups.historical_review.historical.rejection_reasons.not_durable == 1 and .groups.vault.projects.rejection_reasons.wrong_target == 1 and .groups.run_id."run-week-1".reviewed == 2' "$TMP/summary.json" >/dev/null
-jq -e '.improvement_signals | length == 2' "$TMP/summary.json" >/dev/null
+jq -e '.improvement_signals == [{"reason":"wrong_target","count":1,"recommendation":"ROUTE: improve retrieval candidates or destination selection."}]' "$TMP/summary.json" >/dev/null
 ! rg -q 'private candidate text|another private fact|third private fact|"a"|"b"|"c"' "$TMP/summary.json"
 [ "$(stat -c '%a' "$TMP/summary.json" 2>/dev/null || stat -f '%Lp' "$TMP/summary.json")" = "600" ]
 
