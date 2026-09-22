@@ -91,10 +91,30 @@ def main():
         assert GAP_ALERT_S < GAP_BREAK_S
         # A --session that matches nothing must fail loudly. Silently analysing a
         # different session gives you a confident retrospective of the wrong day.
-        import subprocess
-        r = subprocess.run([sys.executable, __file__, "--session", "zzz-no-such-session"],
-                           capture_output=True, text=True)
-        assert r.returncode != 0 and "no transcript matching" in r.stderr, r.stderr
+        # Build a throwaway project so the check does not depend on this machine
+        # having any transcripts, which is exactly the state of a fresh install.
+        import subprocess, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_cwd = os.path.join(tmp, "proj")
+            os.makedirs(fake_cwd)
+            proj = project_dir(fake_cwd)
+            os.makedirs(proj, exist_ok=True)
+            try:
+                with open(os.path.join(proj, "aaaa1111.jsonl"), "w") as fh:
+                    fh.write('{"type":"user","timestamp":"2026-01-01T00:00:00Z",'
+                             '"message":{"content":"hi"}}\n')
+                bad = subprocess.run([sys.executable, __file__, "--cwd", fake_cwd,
+                                      "--session", "zzz-no-such-session"],
+                                     capture_output=True, text=True)
+                assert bad.returncode != 0, "a bogus --session must not succeed"
+                assert "no transcript matching" in bad.stderr, bad.stderr
+                good = subprocess.run([sys.executable, __file__, "--cwd", fake_cwd,
+                                       "--session", "aaaa1111"],
+                                      capture_output=True, text=True)
+                assert good.returncode == 0 and "aaaa1111" in good.stdout, good.stderr
+            finally:
+                import shutil
+                shutil.rmtree(proj, ignore_errors=True)
         print("selftest ok")
         return
 
