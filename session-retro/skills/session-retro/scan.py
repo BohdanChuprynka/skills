@@ -89,6 +89,12 @@ def main():
         assert summarise({}) == ""
         assert ts({"timestamp": "bad"}) is None
         assert GAP_ALERT_S < GAP_BREAK_S
+        # A --session that matches nothing must fail loudly. Silently analysing a
+        # different session gives you a confident retrospective of the wrong day.
+        import subprocess
+        r = subprocess.run([sys.executable, __file__, "--session", "zzz-no-such-session"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0 and "no transcript matching" in r.stderr, r.stderr
         print("selftest ok")
         return
 
@@ -102,7 +108,17 @@ def main():
             print(f"{os.path.basename(f)[:-6]}  {m:%Y-%m-%d %H:%M}  {os.path.getsize(f)/1e6:.1f} MB")
         return
 
-    path = next((f for f in files if a.session and a.session in f), files[0])
+    if a.session:
+        match = [f for f in files if a.session in os.path.basename(f)]
+        if not match:
+            sys.exit(f"no transcript matching {a.session!r} under {d}\n"
+                     f"run with --list to see what is there")
+        if len(match) > 1:
+            sys.exit(f"{a.session!r} matches {len(match)} transcripts; be more specific:\n  "
+                     + "\n  ".join(os.path.basename(m)[:-6] for m in match))
+        path = match[0]
+    else:
+        path = files[0]
     recs = load(path)
 
     calls, results, gaps, breaks, user_turns = [], {}, [], [], 0
