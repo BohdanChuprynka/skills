@@ -12,7 +12,7 @@
 
 - Preserve all unrelated dirty `voice-check/**` changes and the untracked `meetily-context/` directory.
 - Keep the invoking coordinator's existing model; use Sol high/xhigh only for planning workers and Luna high/xhigh only for implementation workers.
-- Create no peer task before Bohdan approves the compact topology confirmation.
+- Create no peer task before the user approves the compact topology confirmation.
 - Pin every ready peer task and never unpin or archive it automatically.
 - Do not impose a hard six-worker ceiling; choose from real independence and host capacity.
 - Full access changes technical capability, not push, PR, deployment, destructive, credential, publication, or production authority.

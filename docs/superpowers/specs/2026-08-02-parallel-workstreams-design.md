@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create a personal Codex skill that lets one user-started coordinator task organize independent work through separate, user-visible Codex tasks. The workflow must improve throughput without replacing Bohdan's control over which phases run in parallel, when worker tasks launch, or what external actions are authorized.
+Create a personal Codex skill that lets one user-started coordinator task organize independent work through separate, user-visible Codex tasks. The workflow must improve throughput without replacing the user's control over which phases run in parallel, when worker tasks launch, or what external actions are authorized.
 
 ## Scope
 
@@ -99,7 +99,7 @@ Immediately after creation:
 2. Pin the task so it stays visible in the sidebar.
 3. Record its task ID, host ID, phase, scope, model, worktree, dependencies, and status in the coordinator's task registry.
 
-Keep tasks pinned after completion. Never unpin or archive them automatically; Bohdan owns cleanup.
+Keep tasks pinned after completion. Never unpin or archive them automatically; the user owns cleanup.
 
 Reuse the same task for corrections and follow-ups within one phase. Use fresh implementation tasks after a parallel planning phase by default because ownership and grouping may change and implementation should receive only the reconciled plan.
 
@@ -144,7 +144,7 @@ Focused worker tests do not substitute for the coordinator's integrated verifica
 
 ## Steering and Failure Handling
 
-The coordinator remains the main control surface. Bohdan may inspect or message any pinned worker directly; the coordinator must reread each task before integration so direct corrections are included.
+The coordinator remains the main control surface. The user may inspect or message any pinned worker directly; the coordinator must reread each task before integration so direct corrections are included.
 
 A message sent to a running peer task may queue instead of interrupting immediately. Disclose that limitation, stop launching later phases, and use explicit phase boundaries in worker prompts to prevent unauthorized continuation.
 
