@@ -17,7 +17,7 @@
 - Do not impose a hard six-worker ceiling; choose from real independence and host capacity.
 - Full access changes technical capability, not push, PR, deployment, destructive, credential, publication, or production authority.
 - Workers commit only their assigned verified changes; the coordinator integrates and runs full verification.
-- Install from source at `/Users/bohdan/Documents/IT-Work/Projects/IT/skills/parallel-workstreams` into `/Users/bohdan/.codex/skills/parallel-workstreams`.
+- Install from source at `$SKILLS_REPO/parallel-workstreams` into `$HOME/.codex/skills/parallel-workstreams`.
 
 ---
 
@@ -31,8 +31,7 @@
 - `parallel-workstreams/tests/test_setup.py`: isolated installer behavior and collision protection.
 - `parallel-workstreams/tests/scenarios.md`: reusable behavioral evaluation prompts and expected decisions.
 - `parallel-workstreams/tests/baseline-results.md`: verbatim RED-phase observations from fresh agents without the skill.
-- `/Users/bohdan/.codex/config.toml`: approved global `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`.
-- `/Users/bohdan/.codex/skills/parallel-workstreams`: symlink to the source-controlled package.
+- `$HOME/.codex/skills/parallel-workstreams`: symlink to the source-controlled package.
 
 ### Task 1: Establish RED behavioral baselines
 
@@ -147,7 +146,7 @@ After the RED tests fail, run the required system initializer in a temporary sta
 
 ```bash
 skill_stage="$(mktemp -d)"
-python3 /Users/bohdan/.codex/skills/.system/skill-creator/scripts/init_skill.py \
+python3 $HOME/.codex/skills/.system/skill-creator/scripts/init_skill.py \
   parallel-workstreams \
   --path "$skill_stage" \
   --resources references \
@@ -256,8 +255,8 @@ git commit -m "feat: install parallel workstreams skill"
 ### Task 5: Apply approved global permissions and install
 
 **Files:**
-- Modify: `/Users/bohdan/.codex/config.toml`
-- Create: `/Users/bohdan/.codex/skills/parallel-workstreams` symlink
+- Modify: `$HOME/.codex/config.toml`
+- Create: `$HOME/.codex/skills/parallel-workstreams` symlink
 
 **Interfaces:**
 - Consumes: Explicit user approval for global unrestricted Codex tasks.
@@ -284,14 +283,13 @@ Preserve every other configuration value.
 - [ ] **Step 2: Install the source package**
 
 ```bash
-bash /Users/bohdan/Documents/IT-Work/Projects/IT/skills/parallel-workstreams/setup.sh
+bash $SKILLS_REPO/parallel-workstreams/setup.sh
 ```
 
 - [ ] **Step 3: Verify live configuration and install identity**
 
 ```bash
-rg -n '^(approval_policy|sandbox_mode)' /Users/bohdan/.codex/config.toml
-test "$(readlink /Users/bohdan/.codex/skills/parallel-workstreams)" = "/Users/bohdan/Documents/IT-Work/Projects/IT/skills/parallel-workstreams"
+test "$(readlink $HOME/.codex/skills/parallel-workstreams)" = "$SKILLS_REPO/parallel-workstreams"
 ```
 
 Expected: `never`, `danger-full-access`, and the exact source symlink.
@@ -310,8 +308,8 @@ Expected: `never`, `danger-full-access`, and the exact source symlink.
 - [ ] **Step 1: Run deterministic validation**
 
 ```bash
-python3 /Users/bohdan/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
-  /Users/bohdan/Documents/IT-Work/Projects/IT/skills/parallel-workstreams
+python3 $HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
+  $SKILLS_REPO/parallel-workstreams
 python3 -m unittest discover -s parallel-workstreams/tests -p 'test_*.py' -v
 ```
 
@@ -322,7 +320,7 @@ Expected: validator success and all tests passing.
 Prompt each fresh agent with:
 
 ```text
-Use $parallel-workstreams at /Users/bohdan/Documents/IT-Work/Projects/IT/skills/parallel-workstreams to handle the following request. Do not approve the proposed topology and do not execute side effects: <scenario>
+Use $parallel-workstreams at $SKILLS_REPO/parallel-workstreams to handle the following request. Do not approve the proposed topology and do not execute side effects: <scenario>
 ```
 
 Verify that each agent stops at a compact confirmation and does not create tasks, invent implementation authority, use Terra, omit pinning, or infer deployment authority.

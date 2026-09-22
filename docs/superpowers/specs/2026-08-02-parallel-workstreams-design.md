@@ -158,11 +158,11 @@ A message sent to a running peer task may queue instead of interrupting immediat
 
 Create the source-controlled skill at:
 
-`/Users/bohdan/Documents/IT-Work/Projects/IT/skills/parallel-workstreams`
+`$SKILLS_REPO/parallel-workstreams`
 
 Install it globally through:
 
-`/Users/bohdan/.codex/skills/parallel-workstreams`
+`$HOME/.codex/skills/parallel-workstreams`
 
 The installed path will be a symlink to the source-controlled directory. The package will contain the required `SKILL.md`, matching `agents/openai.yaml`, and only those supporting references or evaluation fixtures that materially improve reliability.
 
