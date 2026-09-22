@@ -1,0 +1,4 @@
+interface:
+  display_name: "Parallel Workstreams"
+  short_description: "Coordinate visible Codex tasks in parallel"
+  default_prompt: "Use $parallel-workstreams to coordinate this work through visible Codex tasks."
