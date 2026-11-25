@@ -22,11 +22,11 @@ The look and the renderer are fixed and shared by Codex and Claude Code. Each ma
 ## The standard
 
 - Header: only "<Name> Architecture" and the date. No PR, branch or commit details in the header.
-- Under the title, a separate "Suspected bottleneck" key. Its one-sentence `bottleneckKey` is written for this system.
+- Under the title, a Legend button that opens beside the map. On the right, a "Suspected bottleneck" icon button next to "Walk through". Its one-sentence `bottleneckKey` is written for this system.
 - No box codes (A2, B4). Titles are 1–4 words.
 - Zones flow left to right in the order of the flow. The last box of a zone sits about level with the first box of the next zone. Side zones (tools, data stores, models, measurement) go below. Leave space: zoom handles size.
 - Every box is connected by arrows, except reference boxes marked `free`.
-- A click gives the depth: the real text, not a summary (full prompt, real config, real schema), with its size. It also gives numbers, limits, flags, and absolute code paths.
+- A click gives the depth: the real text, not a summary (full prompt, real config, real schema), with its size. It also gives numbers, limits and flags. Never put local file paths in the page, because maps get shared.
 - Every claim about quality or speed carries its evidence level: measured, partly, or not measured. Never invent a number. A number without a source is "not measured".
 - Suspected bottlenecks: up to 9 cards, only where the code or a run gives a reason. Each card says what we know and what we don't know, and names the one next step that would show where the real bottleneck is.
 - Where an eval, a test run or a benchmark has per-case results, a click on a box shows those cases: passed, partial or failed, down to one case.
@@ -36,7 +36,7 @@ The look and the renderer are fixed and shared by Codex and Claude Code. Each ma
 
 1. **Scope.** Name the part of the system, where it starts, and where it ends. The finish line is that the reader can follow one real request end to end and see where to look first. Infer the scope from the request and the code. Ask the user only when two different maps are equally likely.
 
-2. **Read the code end to end.** Trace one real request or job through every file it touches. Write down each fact with its file path, each limit with its value, and each flag with its default. This step is read-only: do not change the project.
+2. **Read the code end to end.** Trace one real request or job through every file it touches. Write down each fact with its file path (for your notes, not for the page), each limit with its value, and each flag with its default. This step is read-only: do not change the project.
    - For a large system, split the reading by zone. Run parallel read-only agents (Explore in Claude Code) with narrow briefs: "list every step, limit, flag and data store in <files>, with paths and values". You own the data file and the final check.
    - Look for existing evidence: evals, test results, benchmarks, logs, docs with measured numbers. Note the run and the commit of each one.
    - Use evidence that already exists. Do not run evals, benchmarks, or code that needs an API key, a database or the network just for the map: they cost money or change state. Name such a run as the next step instead.
@@ -44,9 +44,9 @@ The look and the renderer are fixed and shared by Codex and Claude Code. Each ma
 3. **Start the folder** outside the project, one folder for each map: your scratchpad in Claude Code, a new folder under `$TMPDIR` in Codex. Copy `<skill>/examples/minimal` there and delete its `shots/`, `sources.json` and built `.html` files. The folder is temporary; the published page holds all the data.
 
 4. **Write `blueprint.js`** (see `references/data-format.md`).
-   - Set `ROOT` to the project's absolute path. Use 4–8 zones on the main row. Put at most about 8 boxes in a zone, with one idea in each box.
+   - Use 4–8 zones on the main row. Put at most about 8 boxes in a zone, with one idea in each box.
    - Mark the main path with `main: true` and optional paths with `cond: true`.
-   - Write `d` for each box: what it does, key numbers, limits, flags, then `code(...)` with the files.
+   - Write `d` for each box: what it does, key numbers, limits and flags. Name code by module or function, not by file path.
    - Write the bottlenecks from what you read and measured. Pin them on the boxes (`issues`), and write `next` and `bottleneckKey`.
    - Write the tour: 5–10 steps for one concrete request. Make the last step point at the bottlenecks.
 

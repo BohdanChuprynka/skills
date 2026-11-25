@@ -9,8 +9,8 @@ A map is one folder:
 | `eval.json` | no | Per-case results of two runs (before / after) that boxes link to |
 
 `blueprint.js` runs as a plain browser script after these globals exist:
-`SOURCES`, `EVAL` (or `null`), `M`, `P`, `N` (evidence badges as HTML), and
-`codeAt(root)`, which returns `code(...relPaths)` that prints a "Code" block of absolute paths.
+`SOURCES`, `EVAL` (or `null`), and `M`, `P`, `N` (evidence badges as HTML).
+The page shows no local file paths, because maps get shared. (`codeAt()` still exists for old data files and prints nothing.)
 Chart functions you define run later, so they may use the renderer's helpers:
 `CASES`, `hist()`, `sbar()`, `count()`, `vchip()`, `esc()`, `icon()`.
 
@@ -19,8 +19,6 @@ Text fields marked *text* are escaped. Fields marked *html* are inserted as HTML
 ## BLUEPRINT
 
 ```js
-const ROOT = "/abs/path/to/repo/";      // absolute, so every path in the map can be opened as is
-const code = codeAt(ROOT);
 const BLUEPRINT = {
   title: "Search Architecture",            // "<Name> Architecture". Nothing else in the header.
   date: "2026-11-25",
@@ -47,7 +45,7 @@ const BLUEPRINT = {
 - `icon`: a [Lucide](https://lucide.dev/icons/) name (0.460.0).
 - `color`: the zone tint. Pick from the palette below, and give each zone a different color.
 - `free: true`: boxes in this zone may have no arrows (reference zones such as Models or Measurement).
-- If `issues` exist and no zone has the id `issues`, the renderer adds a Bottlenecks zone after the last zone. It always adds a Legend zone unless you declare one. Declare `issues` and `legend` yourself to place them.
+- If `issues` exist and no zone has the id `issues`, the renderer adds a Bottlenecks zone after the last zone. Declare `issues` yourself to place it. The legend is not a zone: it opens from the Legend button under the title, and shows `legend.main`, the line and badge meanings, the box kinds, and `legend.d`.
 
 Palette (dark background, high contrast): `#8aa4ff` blue, `#b896f5` violet, `#4fd1e8` cyan,
 `#f08aa8` pink, `#7ee0a1` green, `#d9b97a` sand, `#6fd6c4` teal, `#c3cad6` gray,
@@ -61,7 +59,7 @@ Palette (dark background, high contrast): `#8aa4ff` blue, `#b896f5` violet, `#4f
   chips: ["top 50 → 10", "120 ms p50"], main: true, cond: false, free: false,
   w: 300, span: 1, issues: ["2"], src: ["rerank_config"],
   eval: { all: true, chart: "flips" },
-  html: "", d: `<p>…</p>${code("src/search/rerank.ts")}` }
+  html: "", d: `<p>…</p>` }
 ```
 
 | Field | Type | Meaning |
@@ -83,7 +81,7 @@ Palette (dark background, high contrast): `#8aa4ff` blue, `#b896f5` violet, `#4f
 | `src` | string[] | Keys in `sources.json`. The panel shows each text in full, with its size. The first one is open. |
 | `eval` | object | Links eval cases (below). |
 | `html` | html | Extra content inside the box (for example a small table). |
-| `d` | html | The click panel: the depth. What it does, numbers, limits, flags, then `code(...)`. Use `${M}`, `${P}`, `${N}` before a claim to show its evidence level. |
+| `d` | html | The click panel: the depth. What it does, numbers, limits and flags. Name code by module or function, not by file path. Use `${M}`, `${P}`, `${N}` before a claim to show its evidence level. |
 
 `eval` filters, one of:
 - `{ all: true }`: every case.

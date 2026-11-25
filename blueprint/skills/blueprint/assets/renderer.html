@@ -51,7 +51,7 @@ svg.lucide { width: 1em; height: 1em; stroke-width: 2; vertical-align: -0.125em;
 #edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 
 /* Title card: name, date, and the bottleneck key (a button that shows all bottlenecks) */
-.top { position: fixed; z-index: 5; top: calc(12px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); display: flex; align-items: flex-start; gap: 10px; pointer-events: none; }
+.top { position: fixed; z-index: 7; top: calc(12px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); display: flex; align-items: flex-start; gap: 10px; pointer-events: none; }
 .top > * { pointer-events: auto; }
 .cards { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
 .title, .keybox { background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--border); border-radius: 10px; }
@@ -59,12 +59,23 @@ svg.lucide { width: 1em; height: 1em; stroke-width: 2; vertical-align: -0.125em;
 .title h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.005em; }
 .title time { font: 12px var(--mono); color: var(--text-3); }
 /* Bottleneck key: a button that shows every bottleneck and opens a short explanation under it. */
-.keybox { padding: 6px; max-width: min(290px, calc(100vw - 32px)); box-sizing: border-box; }
-.key { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px 6px 9px; font: 600 12.5px var(--font); background: var(--issue); color: #1d1206; border: 1px solid var(--issue); border-radius: 7px; }
+.keybox { padding: 6px; max-width: min(300px, calc(100vw - 32px)); box-sizing: border-box; }
+.lgbtn { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px 6px 9px; font: 600 12.5px var(--font); }
+.lgbtn .chev, .key .chev { transition: transform .15s; }
+.lgbtn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.lgx { padding: 10px 4px 4px; max-height: calc(100vh - 200px); overflow: auto; }
+.lgx[hidden] { display: none; }
+.lgx .legend-row { grid-template-columns: max-content 1fr; gap: 6px 10px; font-size: 12.5px; margin-top: 0; }
+.lgx .legend-row.kinds { grid-template-columns: 24px 1fr 24px 1fr; margin-top: 12px; }
+.lgx .legend-row .ic { width: 20px; height: 20px; font-size: 12px; }
+.lgx .src { margin-top: 12px; font-size: 12px; line-height: 1.45; color: var(--text-3); }
+.lgx .src p { margin: 0 0 6px; }
+.right { display: flex; align-items: flex-start; gap: 8px; }
+.bnwrap { position: relative; }
+.key { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 32px; padding: 0 9px; font-size: 15px; background: var(--issue); color: #1d1206; border: 1px solid var(--issue); border-radius: 7px; }
 .key:hover { background: color-mix(in srgb, var(--issue) 85%, white); border-color: var(--issue); }
-.key .chev { transition: transform .15s; }
-.key[aria-expanded="true"] .chev { transform: rotate(180deg); }
-.keyx { padding: 8px 4px 2px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.key[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--issue); }
+.keyx { position: absolute; top: calc(100% + 8px); right: 0; width: min(280px, calc(100vw - 32px)); box-sizing: border-box; padding: 10px 12px 8px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); background: var(--surface); border: 1px solid var(--border-2); border-radius: 10px; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
 .keyx[hidden] { display: none; }
 .keyx p { margin: 0 0 8px; }
 .keyx b { color: var(--text); font-weight: 600; }
@@ -238,12 +249,18 @@ code { font-family: var(--mono); font-size: .9em; color: #9fd8ff; }
   <div class="cards">
     <div class="title"><h1 id="bp-title"></h1><time id="bp-date"></time></div>
     <div class="keybox">
-      <button class="key" id="bn" aria-pressed="false" aria-expanded="false" aria-controls="bnx"><i data-lucide="triangle-alert"></i>Suspected bottleneck<i class="chev" data-lucide="chevron-down"></i></button>
-      <div class="keyx" id="bnx" hidden></div>
+      <button class="lgbtn" id="lg" aria-expanded="false" aria-controls="lgx"><i data-lucide="map"></i>Legend<i class="chev" data-lucide="chevron-down"></i></button>
+      <div class="lgx" id="lgx" hidden></div>
     </div>
   </div>
   <div class="spacer"></div>
-  <button id="play">Walk through ▸</button>
+  <div class="right">
+    <div class="bnwrap">
+      <button class="key" id="bn" aria-pressed="false" aria-expanded="false" aria-controls="bnx" aria-label="Suspected bottleneck" title="Suspected bottleneck"><i data-lucide="triangle-alert"></i></button>
+      <div class="keyx" id="bnx" hidden></div>
+    </div>
+    <button id="play">Walk through ▸</button>
+  </div>
 </div>
 
 <div id="view"><div id="world"><svg id="edges"><defs></defs></svg></div></div>
@@ -272,7 +289,8 @@ code { font-family: var(--mono); font-size: .9em; color: #9fd8ff; }
 const SOURCES = __SOURCES__;
 const EVAL = __EVAL__;
 const M = '<span class="ev m">MEASURED</span>', P = '<span class="ev p">PARTLY</span>', N = '<span class="ev n">NOT MEASURED</span>';
-const codeAt = (root) => (...ps) => `<h4>Code</h4>${ps.map((p) => `<div class="path">${root}${p}</div>`).join("")}`;
+// Pages get shared, so they show no local file paths: code() is kept for old data files and prints nothing.
+const codeAt = () => () => "";
 </script>
 <script>
 __BLUEPRINT__
@@ -292,10 +310,9 @@ BP.kinds = { ...KINDS, ...(BP.kinds ?? {}) };
 BP.issues ??= []; BP.edges ??= []; BP.nodes ??= [];
 if (BP.issues.length && !BP.zones.some((z) => z.id === "issues"))
   BP.zones.push({ id: "issues", name: "Bottlenecks", icon: "triangle-alert", color: "#ff9b54", place: { after: BP.zones.at(-1).id }, sub: "Where problems most likely start. Each card says how strong its evidence is." });
-if (!BP.zones.some((z) => z.id === "legend"))
-  BP.zones.push({ id: "legend", name: "Legend", icon: "map", color: "#7d889a", place: { below: BP.zones.at(-1).id }, sub: "" });
+BP.zones = BP.zones.filter((z) => z.id !== "legend");
 if (!BP.tour) document.getElementById("play").hidden = true;
-if (!BP.issues.length) document.querySelector(".keybox").hidden = true;
+if (!BP.issues.length) document.querySelector(".bnwrap").hidden = true;
 const world = document.getElementById("world"), view = document.getElementById("view"), svg = document.getElementById("edges");
 document.getElementById("bp-title").textContent = BP.title;
 document.getElementById("bp-date").textContent = BP.date;
@@ -315,17 +332,6 @@ const issueNodes = BP.issues.map((b, i) => ({ id: "i_" + b.id, zone: "issues", c
   d: `<p>${EV[b.ev]}</p>${b.d}<h4>Where in the map</h4><div class="links">${b.on.map((o) => linkBtn(o)).join("")}</div>` }));
 const NODES = [...BP.nodes, ...issueNodes];
 if (BP.next) NODES.push({ id: "i_next", zone: "issues", col: 0, row: Math.ceil(BP.issues.length / 3), span: Math.min(3, Math.max(1, BP.issues.length)), kind: "next", free: true, title: BP.next.title, sub: BP.next.sub, d: BP.next.d });
-NODES.push({ id: "l_legend", zone: "legend", col: 0, row: 0, w: 440, kind: "note", icon: "map", free: true, title: "How to read this map", sub: "",
-  html: `<div class="legend-row">
-<span><svg width="84" height="12"><line x1="0" y1="6" x2="74" y2="6" stroke="#e6ecf3" stroke-width="2.2"/><path d="M74,1 L84,6 L74,11z" fill="#e6ecf3"/></svg></span><b>${esc(BP.legend?.main ?? "Main path")}</b>
-<span><svg width="84" height="12"><line x1="0" y1="6" x2="74" y2="6" stroke="#5f6b7c" stroke-width="1.6"/><path d="M74,1 L84,6 L74,11z" fill="#5f6b7c"/></svg></span><span>Data or control flow</span>
-<span><svg width="84" height="12"><line x1="0" y1="6" x2="80" y2="6" stroke="#5f6b7c" stroke-width="1.6" stroke-dasharray="6 5"/></svg></span><span>Only sometimes (a flag, a condition). A dashed box is optional too.</span>
-<span><span class="pin"><i data-lucide="triangle-alert"></i> 1</span></span><span>Suspected bottleneck; see the Bottlenecks zone</span>
-<span>${M}</span><span>From an eval run</span>
-<span>${P}</span><span>Some evidence, not a full measure</span>
-<span>${N}</span><span>Reasoned from the code only</span>
-</div><div class="legend-row" id="kind-legend"></div>`,
-  d: BP.legend?.d ?? "" });
 const byId = {};
 const pinsFor = {};
 for (const n of NODES) for (const b of n.issues ?? []) (pinsFor[n.id] ??= []).push(b);
@@ -353,6 +359,18 @@ for (const n of NODES) {
   el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPanel(n.id); } });
   world.appendChild(el); byId[n.id] = { n, el };
 }
+// Legend: a button under the title that opens beside the map, so it can stay open while reading.
+const lgBtn = document.getElementById("lg"), lgx = document.getElementById("lgx");
+lgx.innerHTML = `<div class="legend-row">
+<span><svg width="56" height="12"><line x1="0" y1="6" x2="46" y2="6" stroke="#e6ecf3" stroke-width="2.2"/><path d="M46,1 L56,6 L46,11z" fill="#e6ecf3"/></svg></span><b>${esc(BP.legend?.main ?? "Main path")}</b>
+<span><svg width="56" height="12"><line x1="0" y1="6" x2="46" y2="6" stroke="#5f6b7c" stroke-width="1.6"/><path d="M46,1 L56,6 L46,11z" fill="#5f6b7c"/></svg></span><span>Data or control flow</span>
+<span><svg width="56" height="12"><line x1="0" y1="6" x2="56" y2="6" stroke="#5f6b7c" stroke-width="1.6" stroke-dasharray="6 5"/></svg></span><span>Only sometimes (a flag, a condition). A dashed box is optional too.</span>
+<span><span class="pin"><i data-lucide="triangle-alert"></i> 1</span></span><span>Suspected bottleneck; see the Bottlenecks zone</span>
+<span>${M}</span><span>From an eval run</span>
+<span>${P}</span><span>Some evidence, not a full measure</span>
+<span>${N}</span><span>Reasoned from the code only</span>
+</div><div class="legend-row kinds" id="kind-legend"></div>${BP.legend?.d ? `<div class="src">${BP.legend.d}</div>` : ""}`;
+lgBtn.onclick = () => { const open = lgx.hidden; lgx.hidden = !open; lgBtn.setAttribute("aria-expanded", String(open)); };
 const kl = document.getElementById("kind-legend");
 if (kl) kl.innerHTML = Object.values(BP.kinds).map(([g, k]) => `<span><span class="ic" style="--zc:var(--text-2)">${icon(g)}</span></span><span>${esc(k)}</span>`).join("");
 icons();

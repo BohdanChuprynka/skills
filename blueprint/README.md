@@ -5,10 +5,11 @@ Turn a system, or one part of it, into a zoomable architecture map that an engin
 The agent reads the real code, writes a small data file, and builds one self-contained HTML page:
 
 - **Zones that flow left to right**, with every box connected by arrows. Side zones (tools, data stores, models, measurement) sit below.
-- **Depth on click.** Each box opens a panel with what it does, its limits and flags, absolute code paths, and the *real* text it uses (a full prompt, a real config, a schema) with its size in characters, bytes, lines, words and estimated tokens.
+- **Depth on click.** Each box opens a panel with what it does, its limits and flags, and the *real* text it uses (a full prompt, a real config, a schema) with its size in characters, bytes, lines, words and estimated tokens.
 - **Suspected bottlenecks.** Orange pins mark the places worth looking at first. Each card says how strong its evidence is: measured, partly, or not measured. A "Next step" card names the one measurement that would locate the real bottleneck.
 - **Eval drill-down (optional).** When the project has per-case test or eval results, a click on a box shows before/after pass, partial and fail bars, a chart, and a filterable case list, down to one case with its expected facts, tool calls and answer.
 - **Walk-through.** One concrete request, step by step, highlighted on the map.
+- **Legend on demand.** A Legend button under the title opens beside the map. Pages show no local file paths, so they are safe to share.
 - **No text overflow at any zoom.** Zoomed out, a box shows only its title, sized to the box.
 - **Self-check.** The page validates its own data (unknown ids, missing sources, loose boxes, overflow, overlapping zones). `check.py` reads the result in headless Chrome and takes screenshots for a visual review.
 
