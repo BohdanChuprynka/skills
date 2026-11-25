@@ -1,0 +1,12 @@
+{
+ "build_doc": {
+  "title": "build.py usage",
+  "text": "Build a blueprint page from a data folder.\n\nUsage: build.py DIR [--name NAME]\n\nDIR/blueprint.js   required: `const BLUEPRINT = {...}` (see references/data-format.md)\nDIR/sources.json   optional: verbatim texts, {key: {title, text, note?, parts?: [{name, text}]}}\nDIR/eval.json      optional: eval cases, {label?, runs: {v0, v1}, totals?, cases: [...]}\n\nWrites DIR/NAME.page.html (the body to publish as an Artifact) and DIR/NAME.html\n(a standalone file with doctype). NAME defaults to the title in kebab case.",
+  "note": "The docstring of scripts/build.py."
+ },
+ "format": {
+  "title": "blueprint.js (this file, start)",
+  "text": "// Minimal example and starter: the blueprint skill drawn with itself. Copy this folder to start a new map.\nconst ROOT = \"~/.claude/skills/blueprint/\"; // use the absolute project path in a real map\nconst code = codeAt(ROOT);\n\nconst BLUEPRINT = {\n  title: \"Blueprint Architecture\",\n  date: \"2026-11-25\",\n  zones: [\n    { id: \"input\", name: \"Inputs\", icon: \"folder-open\", color: \"#8aa4ff\", place: { start: true },\n      sub: \"One folder per map. Only blueprint.js is required.\" },\n    { id: \"build\", name: \"Build\", icon: \"hammer\", color: \"#4fd1e8\", place: { after: \"input\" },\n      sub: \"build.py puts the data into the renderer and writes two HTML files.\" },\n    { id: \"page\", name: \"Page\", icon: \"app-window\", color: \"#b896f5\", place: { after: \"build\" },\n      sub: \"The renderer lays out the zones, draws the arrows and checks its own data.\" },\n    { id: \"ship\", name: \"Check and publish\", icon: \"send\", color: \"#7ee0a1\", place: { after: \"page\" },\n      sub: \"Headless Chrome reads the self-check and takes screenshots. Then the page is published.\" },\n  ],\n  nodes: [\n    { id: \"data\", zone: \"input\", col: 0, row: 0, kind: \"store\", icon: \"file-code\", main: true, title: \"blueprint.js\", sub: \"Zones, boxes, arrows, bottlenecks and the walk-through.\", chips: [\"required\"], src: [\"format\"],\n      d: `<p>A plain JavaScript file that sets <code>const BLUEPRINT = {...}</code>. It can use <code>M</code>, <code>P</code>, <code>N</code> and <code>codeAt()</code>, and can add its own charts.</p>${code(\"r",
+  "note": "First 1,500 characters."
+ }
+}

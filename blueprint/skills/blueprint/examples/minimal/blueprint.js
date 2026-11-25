@@ -1,0 +1,60 @@
+// Minimal example and starter: the blueprint skill drawn with itself. Copy this folder to start a new map.
+const ROOT = "~/.claude/skills/blueprint/"; // use the absolute project path in a real map
+const code = codeAt(ROOT);
+
+const BLUEPRINT = {
+  title: "Blueprint Architecture",
+  date: "2026-11-25",
+  zones: [
+    { id: "input", name: "Inputs", icon: "folder-open", color: "#8aa4ff", place: { start: true },
+      sub: "One folder per map. Only blueprint.js is required." },
+    { id: "build", name: "Build", icon: "hammer", color: "#4fd1e8", place: { after: "input" },
+      sub: "build.py puts the data into the renderer and writes two HTML files." },
+    { id: "page", name: "Page", icon: "app-window", color: "#b896f5", place: { after: "build" },
+      sub: "The renderer lays out the zones, draws the arrows and checks its own data." },
+    { id: "ship", name: "Check and publish", icon: "send", color: "#7ee0a1", place: { after: "page" },
+      sub: "Headless Chrome reads the self-check and takes screenshots. Then the page is published." },
+  ],
+  nodes: [
+    { id: "data", zone: "input", col: 0, row: 0, kind: "store", icon: "file-code", main: true, title: "blueprint.js", sub: "Zones, boxes, arrows, bottlenecks and the walk-through.", chips: ["required"], src: ["format"],
+      d: `<p>A plain JavaScript file that sets <code>const BLUEPRINT = {...}</code>. It can use <code>M</code>, <code>P</code>, <code>N</code> and <code>codeAt()</code>, and can add its own charts.</p>${code("references/data-format.md")}` },
+    { id: "sources", zone: "input", col: 0, row: 1, kind: "store", icon: "scroll-text", cond: true, title: "sources.json", sub: "Real texts from the code: prompts, configs, schemas.", chips: ["optional"],
+      d: `<p>Each source is <code>{title, text, note, parts}</code>. build.py counts characters, bytes, lines, words and tokens.</p>` },
+    { id: "eval", zone: "input", col: 0, row: 2, kind: "store", icon: "flask-conical", cond: true, title: "eval.json", sub: "Cases from an eval or a test run, before and after.", chips: ["optional"],
+      d: `<p>Cases with verdicts <code>pass</code>, <code>partial</code> or <code>fail</code> for two runs. Boxes link to them with <code>eval: {...}</code>.</p>` },
+    { id: "build", zone: "build", col: 0, row: 0, kind: "step", icon: "hammer", main: true, title: "build.py", sub: "Fills the renderer, writes NAME.page.html and NAME.html.", chips: ["python3", "no packages"], src: ["build_doc"],
+      d: `<p>Replaces the placeholders in <code>assets/renderer.html</code>. The page file is for the Artifact tool; the other file opens on its own.</p>${code("scripts/build.py")}` },
+    { id: "layout", zone: "page", col: 0, row: 0, kind: "step", icon: "layout-grid", main: true, title: "Layout", sub: "A grid in each zone; zones placed after or below each other.", issues: ["1"],
+      d: `<p>Rows are centred so straight arrows stay straight. A zone placed <code>after</code> another lines up on the first arrow that crosses into it.</p>` },
+    { id: "draw", zone: "page", col: 1, row: 0, kind: "step", icon: "spline", main: true, title: "Arrows and zoom", sub: "Right-angle arrows; zone names grow when zoomed out.",
+      d: `<p>Zoomed out, a box shows only its title, sized to the box, so no text spills out.</p>` },
+    { id: "self", zone: "page", col: 1, row: 1, kind: "guard", icon: "shield-check", title: "Self-check", sub: "Unknown ids are errors; loose boxes and overflow are warnings.",
+      d: `<p>Errors show as a red banner on the page. Both lists are written on the <code>&lt;html&gt;</code> element for check.py.</p>` },
+    { id: "cdn", zone: "page", col: 0, row: 1, kind: "external", icon: "cloud", cond: true, title: "Icons and fonts", sub: "Lucide and Geist come from a CDN.", issues: ["2"],
+      d: `<p>Lucide 0.460.0 from jsDelivr and Geist from Google Fonts. Apple devices use SF Pro, the system font.</p>` },
+    { id: "check", zone: "ship", col: 0, row: 0, kind: "guard", icon: "scan-search", main: true, title: "check.py", sub: "Prints errors and warnings, then takes screenshots.", chips: ["headless Chrome"],
+      d: `<p>Look at every screenshot before you publish. The self-check can't see a layout that only looks wrong.</p>${code("scripts/check.py")}` },
+    { id: "publish", zone: "ship", col: 1, row: 0, kind: "step", icon: "send", main: true, title: "Publish", sub: "Artifact link, or the HTML file where there is no Artifact tool.",
+      d: `<p>Publish NAME.page.html. Send NAME.html as the file.</p>` },
+  ],
+  issues: [
+    { id: "1", title: "Layout is a grid, not a solver", ev: "p", sub: "Crossing arrows are possible when a zone has many links.", on: ["layout"],
+      d: `<p>The grid keeps most arrows straight. Long arrows between far zones can cross boxes. Fix it in the data: move the box or the zone.</p>` },
+    { id: "2", title: "Needs the network for icons", ev: "n", sub: "Offline, the icons are missing and the fonts fall back.", on: ["cdn"],
+      d: `<p>The page still works offline. Only the icons and Geist need the CDN.</p>` },
+  ],
+  next: { title: "Next step: draw a real system", sub: "Copy this folder, then replace the data.", d: `<p>Follow SKILL.md.</p>` },
+  legend: { main: "Main path of a build", d: `<p>This map shows the blueprint skill itself.</p>` },
+  bottleneckKey: `<p><b>Suspected bottleneck:</b> where a map build most likely goes wrong: the grid layout and the CDN.</p>`,
+  edges: [
+    ["data", "build", "", "main"], ["sources", "build", "", "cond"], ["eval", "build", "", "cond"],
+    ["build", "layout", "page", "main"], ["layout", "draw", "", "main"], ["draw", "self"], ["cdn", "layout", "", "cond"],
+    ["draw", "check", "", "main"], ["check", "publish", "", "main"],
+  ],
+  tour: { question: "EXAMPLE: draw one part of a project", steps: [
+    { ids: ["data", "sources"], cap: "You write blueprint.js from the code you read, and put real texts in sources.json." },
+    { ids: ["build", "layout", "draw"], cap: "build.py fills the renderer. The page lays out the zones and draws the arrows." },
+    { ids: ["self", "check"], cap: "The page checks its own data. check.py reads the result and takes screenshots." },
+    { ids: ["publish"], cap: "After you look at the screenshots, publish the page." },
+  ] },
+};
