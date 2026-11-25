@@ -1,6 +1,5 @@
 // Minimal example and starter: the blueprint skill drawn with itself. Copy this folder to start a new map.
-const ROOT = "~/.claude/skills/blueprint/"; // use the absolute project path in a real map
-const code = codeAt(ROOT);
+const code = codeAt();
 
 const BLUEPRINT = {
   title: "Blueprint Architecture",
