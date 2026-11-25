@@ -1,0 +1,783 @@
+<title>__TITLE__</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<style>
+/* Blueprint template: one pannable, zoomable sheet. Data lives in BLUEPRINT (below); the renderer lays it out. */
+:root {
+  --bg: #0b0d11;
+  --dot: rgba(150, 164, 184, 0.16);
+  --line: rgba(150, 164, 184, 0.075);
+  --surface: #161b22;
+  --surface-2: #1d232c;
+  --border: #2c3440;
+  --border-2: #475263;
+  --text: #eef2f7;
+  --text-2: #b0bac8;
+  --text-3: #7d889a;
+  --edge: #5f6b7c;
+  --main: #e6ecf3;
+  --hl: #ffd166;
+  --issue: #ff9b54;
+  --pass: #7ee0a1;
+  --partial: #ffcf5c;
+  --fail: #ff7b8a;
+  /* SF Pro on Apple devices (system font), Geist elsewhere; Geist Mono for labels and numbers. */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Geist", "Segoe UI", system-ui, sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0b0d11; } }
+:root[data-theme="dark"] { --bg: #0b0d11; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); overflow: hidden; -webkit-font-smoothing: antialiased; }
+button { font: 500 12.5px var(--mono); color: var(--text); background: var(--surface); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+button:hover { border-color: var(--border-2); background: var(--surface-2); }
+button:focus-visible { outline: 2px solid var(--hl); outline-offset: 2px; }
+svg.lucide { width: 1em; height: 1em; stroke-width: 2; vertical-align: -0.125em; }
+
+/* Sheet: dots on the minor grid, thin lines on the major grid; both scale and move with the view. */
+#view {
+  position: fixed; inset: 0; touch-action: none; cursor: grab; background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px),
+    radial-gradient(circle at 1px 1px, var(--dot) 1.1px, transparent 1.4px);
+  background-size: var(--G, 120px) var(--G, 120px), var(--G, 120px) var(--G, 120px), var(--g, 24px) var(--g, 24px);
+  background-position: var(--gx, 0) var(--gy, 0);
+}
+#view.dragging { cursor: grabbing; }
+#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+#edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+
+/* Title card: name, date, and the bottleneck key (a button that shows all bottlenecks) */
+.top { position: fixed; z-index: 5; top: calc(12px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); display: flex; align-items: flex-start; gap: 10px; pointer-events: none; }
+.top > * { pointer-events: auto; }
+.cards { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.title, .keybox { background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--border); border-radius: 10px; }
+.title { padding: 9px 14px; display: flex; align-items: baseline; gap: 12px; }
+.title h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.005em; }
+.title time { font: 12px var(--mono); color: var(--text-3); }
+/* Bottleneck key: a button that shows every bottleneck and opens a short explanation under it. */
+.keybox { padding: 6px; max-width: min(290px, calc(100vw - 32px)); box-sizing: border-box; }
+.key { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px 6px 9px; font: 600 12.5px var(--font); background: var(--issue); color: #1d1206; border: 1px solid var(--issue); border-radius: 7px; }
+.key:hover { background: color-mix(in srgb, var(--issue) 85%, white); border-color: var(--issue); }
+.key .chev { transition: transform .15s; }
+.key[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.keyx { padding: 8px 4px 2px; font-size: 12.5px; line-height: 1.45; color: var(--text-2); }
+.keyx[hidden] { display: none; }
+.keyx p { margin: 0 0 8px; }
+.keyx b { color: var(--text); font-weight: 600; }
+.keyx .ev { margin-right: 2px; }
+.keyx button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; font-size: 11.5px; }
+.top .spacer { flex: 1; }
+
+/* Dock: bottom right. The arrow opens the zone list to its left. */
+.dock { position: fixed; z-index: 5; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: flex-end; gap: 6px; max-width: calc(100vw - 32px); }
+.dock .zl { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.dock .zl[hidden] { display: none; }
+.dock .zl button { display: inline-flex; align-items: center; gap: 6px; }
+.dock .zl button svg { color: var(--zc); }
+.dock .ctl { display: flex; gap: 6px; flex: none; }
+.dock .ctl button { min-width: 36px; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+
+/* Zones. The name sits above the frame and grows when zoomed out, so it never pushes into the boxes. */
+.zone { position: absolute; border: 1px solid color-mix(in srgb, var(--zc) 30%, transparent); border-radius: 14px; background: color-mix(in srgb, var(--zc) 3.5%, transparent); }
+.zone .zn { position: absolute; left: 18px; bottom: calc(100% + 8px); display: flex; align-items: center; gap: 8px; font: 600 15px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--zc); white-space: nowrap; transform: scale(var(--zinv, 1)); transform-origin: 0 100%; }
+.zone .zs { position: absolute; left: 24px; top: 18px; right: 24px; font-size: 14px; line-height: 1.45; color: var(--text-2); max-width: 78ch; }
+body.far .zone .zs { visibility: hidden; }
+
+/* Nodes */
+.node { position: absolute; box-sizing: border-box; padding: 12px 14px 13px 16px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--zc); border-radius: 8px; cursor: pointer; transition: opacity .15s, box-shadow .15s, border-color .15s; overflow: hidden; }
+.node.sized { container-type: size; }
+.node:hover { border-color: var(--border-2); border-left-color: var(--zc); background: var(--surface-2); }
+.node:focus-visible { outline: 2px solid var(--hl); outline-offset: 3px; }
+.node .k { display: flex; align-items: center; gap: 8px; font: 600 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--zc); padding-right: 64px; }
+.ic { flex: none; width: 24px; height: 24px; border-radius: 6px; display: inline-grid; place-items: center; background: color-mix(in srgb, var(--zc) 16%, transparent); color: var(--zc); font-size: 14px; }
+.node h3 { margin: 7px 0 4px; font-size: 17px; font-weight: 600; line-height: 1.25; letter-spacing: -.005em; text-wrap: balance; overflow-wrap: anywhere; }
+.node p { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text-2); }
+.node .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.node .chip { font: 11.5px var(--mono); padding: 2px 7px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node.cond { border-style: dashed; border-left-style: solid; }
+.node.main { box-shadow: 0 0 0 1px color-mix(in srgb, var(--main) 22%, transparent); }
+.node.issue { --zc: var(--issue); }
+.node.next { border-color: var(--hl); border-left-color: var(--hl); --zc: var(--hl); }
+.node .pins { position: absolute; top: 12px; right: 10px; display: flex; gap: 4px; }
+.pin { display: inline-flex; align-items: center; gap: 3px; font: 600 11px var(--mono); background: var(--issue); color: #1d1206; padding: 2px 7px 2px 6px; border-radius: 10px; }
+.pin svg { font-size: 11px; }
+.ev { font: 600 10px var(--mono); white-space: nowrap; padding: 1px 6px; border-radius: 3px; letter-spacing: .05em; }
+.ev.m { background: var(--pass); color: #062014; }
+.ev.p { background: var(--partial); color: #241a00; }
+.ev.n { border: 1px solid var(--text-3); color: var(--text-2); }
+/* Zoomed out: only the title stays, sized to the box so it never spills out. */
+body.far .node p, body.far .node .chips, body.far .node .kt, body.far .node .tbl, body.far .node .legend-row, body.far .node .pins .n { display: none; }
+body.far .node { display: flex; align-items: center; }
+body.far .node .k { display: none; }
+body.far .node h3 { margin: 0; font-size: min(calc(17px * var(--tinv, 1)), 12cqw, 30cqh); line-height: 1.15; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+body.focus .node:not(.hl) { opacity: .28; }
+body.focus .edge:not(.hl) { opacity: .14; }
+.node.hl { opacity: 1; }
+.node.sel { box-shadow: 0 0 0 2px var(--hl); }
+body.trace .node.hl { box-shadow: 0 0 0 2px var(--hl); }
+
+.edge path { fill: none; stroke: var(--edge); stroke-width: 1.6; }
+.edge.main path { stroke: var(--main); stroke-width: 2.2; }
+.edge.cond path { stroke-dasharray: 6 5; }
+.edge text { font: 500 12.5px var(--mono); fill: var(--text-2); paint-order: stroke; stroke: var(--bg); stroke-width: 6px; stroke-linejoin: round; }
+.edge.hl path { stroke: var(--hl); stroke-width: 2.4; }
+.edge.hl text { fill: var(--hl); }
+
+table.tbl { border-collapse: collapse; width: 100%; font-size: 13.5px; margin-top: 4px; }
+table.tbl th, table.tbl td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.tbl th { font: 600 10.5px var(--mono); color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; }
+table.tbl td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+code { font-family: var(--mono); font-size: .9em; color: #9fd8ff; }
+.up { color: var(--pass); } .down { color: var(--fail); }
+.legend-row { display: grid; grid-template-columns: 92px 1fr; gap: 8px 12px; align-items: center; font-size: 13.5px; color: var(--text-2); margin-top: 6px; }
+.legend-row b { font-weight: 500; color: var(--text); }
+.legend-row .ic { width: 22px; height: 22px; }
+
+/* Detail panel */
+.bperr { position: fixed; z-index: 9; left: 16px; right: 16px; bottom: 80px; max-height: 40vh; overflow: auto; background: #3a0d14; border: 1px solid var(--fail); color: #ffd7dc; border-radius: 10px; padding: 12px 16px; font: 13px/1.5 var(--mono); white-space: pre-wrap; }
+.bperr[hidden] { display: none; }
+.panel { position: fixed; z-index: 6; top: calc(92px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(70px + env(safe-area-inset-bottom, 0px)); width: min(600px, calc(100vw - 32px)); overflow: auto; background: var(--surface); border: 1px solid var(--border-2); border-top: 3px solid var(--zc); border-radius: 10px; padding: 18px 20px 24px; font-size: 15px; line-height: 1.55; box-shadow: 0 18px 50px rgba(0,0,0,.45); box-sizing: border-box; }
+.panel.wide { width: min(880px, calc(100vw - 32px)); }
+.panel[hidden] { display: none !important; }
+.panel .k { display: flex; align-items: center; gap: 8px; font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--zc); }
+.panel h2 { margin: 8px 0 8px; font-size: 23px; line-height: 1.2; letter-spacing: -.01em; text-wrap: balance; }
+.panel .lead { color: var(--text-2); margin: 0 0 12px; }
+.panel h4 { margin: 22px 0 8px; font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--text-3); }
+.panel p { margin: 0 0 9px; max-width: 70ch; }
+.panel ul, .panel ol { margin: 0 0 9px; padding-left: 20px; }
+.panel li { margin-bottom: 4px; }
+.panel .path { font: 11.5px/1.5 var(--mono); color: var(--text-3); word-break: break-all; margin-bottom: 3px; }
+.panel pre { font: 12px/1.55 var(--mono); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; white-space: pre-wrap; word-break: break-word; margin: 0 0 9px; color: #dfe6ee; }
+.panel .bar-top { position: sticky; top: -18px; margin: -18px -20px 0; padding: 12px 20px 8px; background: var(--surface); display: flex; gap: 6px; z-index: 2; }
+.panel .bar-top .sp { flex: 1; }
+.panel .links { display: flex; flex-wrap: wrap; gap: 6px; }
+.panel .links button, .panel button { display: inline-flex; align-items: center; gap: 6px; }
+.panel .links button svg { color: var(--zc, var(--text-2)); }
+.panel details { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 10px; background: color-mix(in srgb, var(--bg) 50%, var(--surface)); }
+.panel summary { cursor: pointer; padding: 9px 12px; font: 500 13px var(--mono); display: flex; gap: 10px; align-items: baseline; list-style: none; }
+.panel summary::-webkit-details-marker { display: none; }
+.panel summary::before { content: "▸"; color: var(--text-3); }
+.panel details[open] > summary::before { content: "▾"; }
+.panel summary .sz { margin-left: auto; color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
+.panel details > .body { padding: 0 12px 10px; }
+.panel .note { font-size: 13px; color: var(--text-3); margin-bottom: 8px; }
+.panel .copy { font-size: 11px; padding: 3px 8px; margin-bottom: 8px; }
+.panel table.sizes, .panel table.parts { margin: 0 0 10px; font-size: 12.5px; }
+.panel td.bar { position: relative; width: 34%; }
+.panel td.bar span { display: block; height: 8px; margin-top: 6px; background: var(--zc); border-radius: 2px; min-width: 2px; }
+.panel td.bar em { position: absolute; right: 8px; top: 4px; font: 11px var(--mono); font-style: normal; color: var(--text-3); }
+
+/* Eval visuals */
+.stack { display: grid; grid-template-columns: 96px 1fr; gap: 6px 10px; align-items: center; font: 12px var(--mono); color: var(--text-2); }
+.sbar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; background: var(--bg); }
+.sbar span { display: flex; align-items: center; justify-content: center; font: 600 11px var(--mono); color: #10141a; min-width: 0; overflow: hidden; white-space: nowrap; }
+.s-pass { background: var(--pass); } .s-partial { background: var(--partial); } .s-fail { background: var(--fail); }
+.vchip { display: inline-block; font: 600 10.5px var(--mono); padding: 1px 6px; border-radius: 3px; color: #10141a; text-transform: uppercase; letter-spacing: .04em; }
+.vchip.pass { background: var(--pass); } .vchip.partial { background: var(--partial); } .vchip.fail { background: var(--fail); } .vchip.none { background: var(--border-2); }
+.kpis { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.kpi { border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; min-width: 92px; }
+.kpi b { display: block; font: 600 18px var(--mono); color: var(--text); }
+.kpi span { font-size: 12px; color: var(--text-3); }
+.hist { display: flex; align-items: flex-end; gap: 4px; height: 120px; margin-top: 8px; }
+.hist div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; font: 11px var(--mono); color: var(--text-3); }
+.hist i { display: block; width: 100%; background: color-mix(in srgb, var(--zc) 70%, transparent); border-radius: 3px 3px 0 0; min-height: 1px; }
+.hist i.hot { background: var(--issue); }
+.hist em { font-style: normal; color: var(--text-2); }
+.areas { display: grid; grid-template-columns: minmax(120px, 190px) 1fr 52px; gap: 4px 10px; align-items: center; font-size: 12.5px; }
+.areas .nm { font-family: var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.areas .nm:hover { color: var(--text); text-decoration: underline; }
+.areas .track { position: relative; height: 14px; background: var(--bg); border-radius: 3px; }
+.areas .track i { position: absolute; top: 3px; height: 8px; border-radius: 4px; }
+.areas .track b { position: absolute; top: 1px; width: 3px; height: 12px; border-radius: 2px; }
+.areas .d { font: 600 12px var(--mono); text-align: right; }
+.matrix td.n { text-align: center; }
+.matrix td.same { color: var(--text-3); }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 10px; }
+.filters button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.filters select, .filters input { font: 12.5px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+.filters input { flex: 1; min-width: 140px; }
+.crow { display: grid; grid-template-columns: 74px 128px 1fr; gap: 10px; align-items: center; padding: 8px 6px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13.5px; }
+.crow:hover { background: var(--surface-2); }
+.crow .id { font: 12px var(--mono); color: var(--text-3); }
+.crow .q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.turn .uq { font-weight: 600; margin-bottom: 8px; }
+.turn .ans { white-space: pre-wrap; font-size: 14px; color: var(--text-2); background: var(--bg); border-radius: 6px; padding: 8px 10px; max-height: 320px; overflow: auto; }
+.trail { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
+.trail .tc { display: grid; grid-template-columns: 34px 150px 1fr; gap: 8px; font: 11.5px/1.45 var(--mono); align-items: start; }
+.trail .st { color: var(--text-3); }
+.trail .tn { color: #9fd8ff; }
+.trail .tn.err { color: var(--fail); }
+.trail .ta { color: var(--text-2); word-break: break-word; }
+.trail .th { grid-column: 3; color: var(--text-3); word-break: break-word; }
+.must li { list-style: none; margin-left: -18px; }
+
+/* Walk-through bar */
+.trace { position: fixed; z-index: 7; left: 50%; transform: translateX(-50%); bottom: calc(68px + env(safe-area-inset-bottom, 0px)); width: min(760px, calc(100vw - 32px)); box-sizing: border-box; background: var(--surface); border: 1px solid var(--hl); border-radius: 10px; padding: 12px 14px; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+.trace[hidden] { display: none !important; }
+.trace .q { font: 12px var(--mono); color: var(--hl); margin-bottom: 4px; }
+.trace .cap { font-size: 15.5px; line-height: 1.5; min-height: 3em; }
+.trace .row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.trace .count { font: 12px var(--mono); color: var(--text-3); margin-right: auto; }
+
+@media (max-width: 640px) {
+  .panel, .panel.wide { top: auto; left: 8px; right: 8px; width: auto; max-height: 64vh; bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+  .top #play { font-size: 11.5px; padding: 6px 8px; }
+  .title time { display: none; }
+  .crow { grid-template-columns: 64px 1fr; } .crow .q { grid-column: 1 / -1; }
+}
+@media (prefers-reduced-motion: reduce) { .node { transition: none; } }
+</style>
+
+<div class="top">
+  <div class="cards">
+    <div class="title"><h1 id="bp-title"></h1><time id="bp-date"></time></div>
+    <div class="keybox">
+      <button class="key" id="bn" aria-pressed="false" aria-expanded="false" aria-controls="bnx"><i data-lucide="triangle-alert"></i>Suspected bottleneck<i class="chev" data-lucide="chevron-down"></i></button>
+      <div class="keyx" id="bnx" hidden></div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <button id="play">Walk through ▸</button>
+</div>
+
+<div id="view"><div id="world"><svg id="edges"><defs></defs></svg></div></div>
+
+<aside class="panel" id="panel" hidden aria-live="polite"></aside>
+<div class="bperr" id="bperr" hidden role="alert"></div>
+
+<div class="trace" id="trace" hidden>
+  <div class="q" id="tq"></div>
+  <div class="cap" id="tcap"></div>
+  <div class="row"><span class="count" id="tcount"></span><button id="tprev">◂ Back</button><button id="tnext">Next ▸</button><button id="tclose">Close</button></div>
+</div>
+
+<div class="dock">
+  <div class="zl" id="zl" hidden></div>
+  <div class="ctl">
+    <button id="zt" aria-expanded="false" aria-controls="zl" aria-label="Show zones" title="Zones"><i data-lucide="chevron-left"></i></button>
+    <button id="zin" aria-label="Zoom in"><i data-lucide="plus"></i></button>
+    <button id="zout" aria-label="Zoom out"><i data-lucide="minus"></i></button>
+    <button id="fit">Fit</button>
+  </div>
+</div>
+
+<script>
+// Helpers and inputs a blueprint data file can use. build.py fills SOURCES and EVAL.
+const SOURCES = __SOURCES__;
+const EVAL = __EVAL__;
+const M = '<span class="ev m">MEASURED</span>', P = '<span class="ev p">PARTLY</span>', N = '<span class="ev n">NOT MEASURED</span>';
+const codeAt = (root) => (...ps) => `<h4>Code</h4>${ps.map((p) => `<div class="path">${root}${p}</div>`).join("")}`;
+</script>
+<script>
+__BLUEPRINT__
+</script>
+<script>
+// ================= RENDERER (generic: do not put project data here) =================
+const NODE_W = 300, COL_GAP = 96, ROW_GAP = 48, PAD_X = 36, PAD_B = 36, ZONE_GAP = 200, HEAD_MIN = 64;
+const EV = { m: M, p: P, n: N };
+const BP = BLUEPRINT;
+// Kinds give every box a standard icon, so a reader knows what a box is before reading it. [icon, name]
+const KINDS = {
+  step: ["play", "Step"], decision: ["split", "Decision"], guard: ["shield-check", "Guard"], model: ["sparkles", "Model call"],
+  tools: ["wrench", "Tool group"], store: ["database", "Data store"], external: ["cloud", "Outside service"], limit: ["timer", "Limit"],
+  issue: ["triangle-alert", "Bottleneck"], next: ["arrow-big-right", "Next step"], note: ["file-text", "Reference"],
+};
+BP.kinds = { ...KINDS, ...(BP.kinds ?? {}) };
+BP.issues ??= []; BP.edges ??= []; BP.nodes ??= [];
+if (BP.issues.length && !BP.zones.some((z) => z.id === "issues"))
+  BP.zones.push({ id: "issues", name: "Bottlenecks", icon: "triangle-alert", color: "#ff9b54", place: { after: BP.zones.at(-1).id }, sub: "Where problems most likely start. Each card says how strong its evidence is." });
+if (!BP.zones.some((z) => z.id === "legend"))
+  BP.zones.push({ id: "legend", name: "Legend", icon: "map", color: "#7d889a", place: { below: BP.zones.at(-1).id }, sub: "" });
+if (!BP.tour) document.getElementById("play").hidden = true;
+if (!BP.issues.length) document.querySelector(".keybox").hidden = true;
+const world = document.getElementById("world"), view = document.getElementById("view"), svg = document.getElementById("edges");
+document.getElementById("bp-title").textContent = BP.title;
+document.getElementById("bp-date").textContent = BP.date;
+document.title = BP.title;
+const ZONE = Object.fromEntries(BP.zones.map((z) => [z.id, z]));
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const icon = (name) => `<i data-lucide="${name}"></i>`;
+const icons = () => window.lucide?.createIcons({ attrs: { "aria-hidden": "true" } });
+
+// Bottleneck cards become nodes of the "issues" zone, 3 to a row, with the next step last.
+function linkBtn(o) {
+  const n = BP.nodes.find((x) => x.id === o);
+  return `<button data-go="${o}" style="--zc:${ZONE[n?.zone]?.color}">${icon(n?.icon ?? BP.kinds[n?.kind]?.[0] ?? "circle")}${esc(n?.title ?? o)}</button>`;
+}
+const issueNodes = BP.issues.map((b, i) => ({ id: "i_" + b.id, zone: "issues", col: i % 3, row: Math.floor(i / 3), kind: "issue", issue: b, eval: b.eval,
+  title: b.title, sub: b.sub, kick: `Bottleneck ${b.id}`,
+  d: `<p>${EV[b.ev]}</p>${b.d}<h4>Where in the map</h4><div class="links">${b.on.map((o) => linkBtn(o)).join("")}</div>` }));
+const NODES = [...BP.nodes, ...issueNodes];
+if (BP.next) NODES.push({ id: "i_next", zone: "issues", col: 0, row: Math.ceil(BP.issues.length / 3), span: Math.min(3, Math.max(1, BP.issues.length)), kind: "next", free: true, title: BP.next.title, sub: BP.next.sub, d: BP.next.d });
+NODES.push({ id: "l_legend", zone: "legend", col: 0, row: 0, w: 440, kind: "note", icon: "map", free: true, title: "How to read this map", sub: "",
+  html: `<div class="legend-row">
+<span><svg width="84" height="12"><line x1="0" y1="6" x2="74" y2="6" stroke="#e6ecf3" stroke-width="2.2"/><path d="M74,1 L84,6 L74,11z" fill="#e6ecf3"/></svg></span><b>${esc(BP.legend?.main ?? "Main path")}</b>
+<span><svg width="84" height="12"><line x1="0" y1="6" x2="74" y2="6" stroke="#5f6b7c" stroke-width="1.6"/><path d="M74,1 L84,6 L74,11z" fill="#5f6b7c"/></svg></span><span>Data or control flow</span>
+<span><svg width="84" height="12"><line x1="0" y1="6" x2="80" y2="6" stroke="#5f6b7c" stroke-width="1.6" stroke-dasharray="6 5"/></svg></span><span>Only sometimes (a flag, a condition). A dashed box is optional too.</span>
+<span><span class="pin"><i data-lucide="triangle-alert"></i> 1</span></span><span>Suspected bottleneck; see the Bottlenecks zone</span>
+<span>${M}</span><span>From an eval run</span>
+<span>${P}</span><span>Some evidence, not a full measure</span>
+<span>${N}</span><span>Reasoned from the code only</span>
+</div><div class="legend-row" id="kind-legend"></div>`,
+  d: BP.legend?.d ?? "" });
+const byId = {};
+const pinsFor = {};
+for (const n of NODES) for (const b of n.issues ?? []) (pinsFor[n.id] ??= []).push(b);
+
+// 1. Draw zones and nodes so their sizes can be measured.
+for (const z of BP.zones) {
+  const el = document.createElement("div");
+  el.className = "zone"; el.style.setProperty("--zc", z.color);
+  el.innerHTML = `<div class="zn">${z.icon ? icon(z.icon) : ""}${esc(z.name)}</div>${z.sub ? `<div class="zs">${esc(z.sub)}</div>` : ""}`;
+  world.appendChild(el); z.el = el;
+  const b = document.createElement("button"); b.innerHTML = `${icon(z.icon ?? "square")}${esc(z.name)}`; b.style.setProperty("--zc", z.color);
+  b.onclick = () => fitRect(z.x - 30, z.y - 60, z.w + 60, z.h + 90);
+  document.getElementById("zl").appendChild(b);
+}
+for (const n of NODES) {
+  const z = ZONE[n.zone];
+  const el = document.createElement("div");
+  el.className = `node ${n.kind ?? ""} ${n.main ? "main" : ""} ${n.cond ? "cond" : ""}`;
+  el.tabIndex = 0; el.dataset.id = n.id; el.style.setProperty("--zc", z.color);
+  const [kicon, kname] = BP.kinds[n.kind] ?? ["circle", ""];
+  const chips = (n.chips ?? []).map((c) => `<span class="chip">${esc(c)}</span>`).join("");
+  const pins = (pinsFor[n.id] ?? []).map((b) => `<span class="pin">${icon("triangle-alert")}<span class="n">${b}</span></span>`).join("");
+  const ev = n.issue ? ` ${EV[n.issue.ev]}` : "";
+  el.innerHTML = `${pins ? `<div class="pins">${pins}</div>` : ""}<div class="k"><span class="ic">${icon(n.icon ?? kicon)}</span><span class="kt">${esc(n.kick ?? kname)}${ev}</span></div><h3>${esc(n.title)}</h3>${n.sub ? `<p>${esc(n.sub)}</p>` : ""}${n.html ?? ""}${chips ? `<div class="chips">${chips}</div>` : ""}`;
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPanel(n.id); } });
+  world.appendChild(el); byId[n.id] = { n, el };
+}
+const kl = document.getElementById("kind-legend");
+if (kl) kl.innerHTML = Object.values(BP.kinds).map(([g, k]) => `<span><span class="ic" style="--zc:var(--text-2)">${icon(g)}</span></span><span>${esc(k)}</span>`).join("");
+icons();
+
+// 2. Layout: a grid inside each zone (col/row), rows centred so straight arrows stay straight;
+//    zones placed by `place` (start, after, below), aligned on the first arrow that crosses into them.
+function layout() {
+  // Measure full boxes: far mode hides text, so turn it off while measuring.
+  const far = document.body.classList.contains("far"); document.body.classList.remove("far");
+  for (const n of NODES) { const el = byId[n.id].el; el.classList.remove("sized"); el.style.height = ""; }
+  for (const z of BP.zones) {
+    const ns = NODES.filter((n) => n.zone === z.id);
+    const cols = Math.max(...ns.map((n) => n.col + (n.span ?? 1)));
+    const colW = Array(cols).fill(0), rows = Math.max(...ns.map((n) => n.row)) + 1, rowH = Array(rows).fill(0);
+    for (const n of ns) if (!n.span) colW[n.col] = Math.max(colW[n.col], n.w ?? NODE_W);
+    // The subtitle wraps at the zone's own width, so set that width before measuring it.
+    z.w = PAD_X * 2 + colW.reduce((a, b) => a + b, 0) + COL_GAP * (cols - 1);
+    z.el.style.width = z.w + "px"; z.el.style.left = "0px";
+    const zs = z.el.querySelector(".zs");
+    const head = Math.max(HEAD_MIN, (zs ? zs.offsetHeight : 0) + 46);
+    for (const n of ns) {
+      n.ww = n.span ? colW.slice(n.col, n.col + n.span).reduce((a, b) => a + b, 0) + COL_GAP * (n.span - 1) : colW[n.col];
+      byId[n.id].el.style.width = n.ww + "px";
+    }
+    for (const n of ns) { n.hh = byId[n.id].el.offsetHeight; rowH[n.row] = Math.max(rowH[n.row], n.hh); }
+    const cx = [], ry = [];
+    colW.reduce((x, w, i) => (cx[i] = x, x + w + COL_GAP), PAD_X);
+    rowH.reduce((y, h, i) => (ry[i] = y, y + h + ROW_GAP), head);
+    for (const n of ns) { n.lx = cx[n.col]; n.ly = ry[n.row] + (rowH[n.row] - n.hh) / 2; }
+    z.h = head + rowH.reduce((a, b) => a + b, 0) + ROW_GAP * (rows - 1) + PAD_B;
+  }
+  const placed = [];
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h + ZONE_GAP * 0.5 && b.y < a.y + a.h + ZONE_GAP * 0.5;
+  for (const z of BP.zones) {
+    const p = z.place;
+    if (p.start) { z.x = 0; z.y = 0; }
+    else if (p.after) {
+      const r = ZONE[p.after]; z.x = r.x + r.w + ZONE_GAP; z.y = r.y;
+      const cross = BP.edges.find(([f, t]) => byId[t]?.n.zone === z.id && placed.includes(ZONE[byId[f]?.n.zone]));
+      if (cross) { const a = byId[cross[0]].n, b = byId[cross[1]].n; z.y = ZONE[a.zone].y + a.ly + a.hh / 2 - (b.ly + b.hh / 2); }
+    } else if (p.below) {
+      const r = ZONE[p.below];
+      z.x = r.x;
+      if (p.under) { const a = byId[p.under].n; z.x = ZONE[a.zone].x + a.lx + a.ww / 2 - z.w / 2; }
+      const over = placed.filter((q) => q.x < z.x + z.w && z.x < q.x + q.w);
+      z.y = Math.max(...over.map((q) => q.y + q.h)) + ZONE_GAP * 0.7;
+    }
+    for (let i = 0; i < 50; i++) { const hit = placed.find((q) => overlaps(z, q)); if (!hit) break; z.y = hit.y + hit.h + ZONE_GAP * 0.7; }
+    placed.push(z);
+  }
+  const minX = Math.min(...BP.zones.map((z) => z.x)), minY = Math.min(...BP.zones.map((z) => z.y));
+  for (const z of BP.zones) { z.x -= minX - 60; z.y -= minY - 120; Object.assign(z.el.style, { left: z.x + "px", top: z.y + "px", width: z.w + "px", height: z.h + "px" }); }
+  for (const n of NODES) { const z = ZONE[n.zone]; n.x = z.x + n.lx; n.y = z.y + n.ly; Object.assign(byId[n.id].el.style, { left: n.x + "px", top: n.y + "px", height: n.hh + "px" }); byId[n.id].el.classList.add("sized"); }
+  W = Math.max(...BP.zones.map((z) => z.x + z.w)) + 60; H = Math.max(...BP.zones.map((z) => z.y + z.h)) + 60;
+  world.style.width = W + "px"; world.style.height = H + "px"; svg.setAttribute("width", W); svg.setAttribute("height", H);
+  document.body.classList.toggle("far", far);
+}
+
+// 3. Arrows: orthogonal, with rounded corners, from side to side.
+function rectOf(id) {
+  if (id.startsWith("zone:")) { const z = ZONE[id.slice(5)]; return { x: z.x, y: z.y, w: z.w, h: z.h, zone: z.id }; }
+  const n = byId[id].n; return { x: n.x, y: n.y, w: n.ww, h: n.hh, zone: n.zone };
+}
+function route(a, b) {
+  const ar = a.x + a.w, ab = a.y + a.h, acy = a.y + a.h / 2, br = b.x + b.w, bb = b.y + b.h, bcy = b.y + b.h / 2;
+  const same = a.zone === b.zone;
+  if (b.x >= ar - 1) {
+    if (Math.abs(acy - bcy) < 2) return [[ar, acy], [b.x, acy]];
+    const xm = same ? b.x - COL_GAP / 2 : (ar + b.x) / 2;
+    return [[ar, acy], [xm, acy], [xm, bcy], [b.x, bcy]];
+  }
+  if (br <= a.x + 1) {
+    if (Math.abs(acy - bcy) < 2) return [[a.x, acy], [br, acy]];
+    const xm = a.x - COL_GAP / 2;
+    return [[a.x, acy], [xm, acy], [xm, bcy], [br, bcy]];
+  }
+  const lo = Math.max(a.x, b.x), hi = Math.min(ar, br), acx = a.x + a.w / 2;
+  const x = acx >= lo && acx <= hi ? acx : (lo + hi) / 2;
+  return b.y >= ab ? [[x, ab], [x, b.y]] : [[x, a.y], [x, bb]];
+}
+function rounded(pts, r = 12) {
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [p0, p1, p2] = [pts[i - 1], pts[i], pts[i + 1]];
+    const l1 = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), l2 = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+    const rr = Math.min(r, l1 / 2, l2 / 2);
+    if (rr < 0.5) { d += ` L${p1[0]},${p1[1]}`; continue; }
+    const a = [p1[0] - (p1[0] - p0[0]) / l1 * rr, p1[1] - (p1[1] - p0[1]) / l1 * rr];
+    const b = [p1[0] + (p2[0] - p1[0]) / l2 * rr, p1[1] + (p2[1] - p1[1]) / l2 * rr];
+    d += ` L${a[0]},${a[1]} Q${p1[0]},${p1[1]} ${b[0]},${b[1]}`;
+  }
+  const e = pts[pts.length - 1]; return d + ` L${e[0]},${e[1]}`;
+}
+const MARK = { main: "#e6ecf3", "": "#5f6b7c", cond: "#5f6b7c", hl: "#ffd166" };
+svg.querySelector("defs").innerHTML = Object.entries(MARK).map(([k, c]) => `<marker id="ar-${k || "d"}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`).join("");
+const markOf = (style) => `url(#ar-${style || "d"})`;
+function drawEdges() {
+  svg.querySelectorAll("g.edge").forEach((g) => g.remove());
+  for (const [from, to, label = "", style = ""] of BP.edges) {
+    const pts = route(rectOf(from), rectOf(to));
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", `edge ${style}`); g.dataset.from = from; g.dataset.to = to; g.dataset.style = style;
+    g.innerHTML = `<path d="${rounded(pts)}" marker-end="${markOf(style)}"/>`;
+    if (label) {
+      let best = 0, bi = 0;
+      for (let i = 0; i < pts.length - 1; i++) { const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); if (l > best) { best = l; bi = i; } }
+      const [p, q] = [pts[bi], pts[bi + 1]], vertical = Math.abs(p[0] - q[0]) < 1;
+      const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+      g.innerHTML += vertical ? `<text x="${mx + 10}" y="${my + 4}">${esc(label)}</text>` : `<text x="${mx}" y="${my - 9}" text-anchor="middle">${esc(label)}</text>`;
+    }
+    svg.appendChild(g);
+  }
+}
+
+// 4. Pan and zoom. Zone names grow when zoomed out, like place names on a map.
+let s = 0.3, tx = 0, ty = 0, moved = false, W = 0, H = 0;
+function apply() {
+  world.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
+  let g = 24 * s; while (g < 12) g *= 5;
+  view.style.setProperty("--g", g + "px"); view.style.setProperty("--G", g * 5 + "px");
+  view.style.setProperty("--gx", tx + "px"); view.style.setProperty("--gy", ty + "px");
+  world.style.setProperty("--zinv", Math.min(4.5, Math.max(1, 0.9 / s)));
+  world.style.setProperty("--tinv", Math.min(3.2, Math.max(1, 0.5 / s)));
+  document.body.classList.toggle("far", s < 0.34);
+}
+const TOP = () => 124, BOTTOM = () => 64;
+function fitRect(x, y, w, h) {
+  const vw = innerWidth - 32, vh = innerHeight - TOP() - BOTTOM();
+  s = Math.min(1.6, Math.max(0.05, Math.min(vw / w, vh / h)));
+  tx = 16 + (vw - w * s) / 2 - x * s; ty = TOP() + (vh - h * s) / 2 - y * s; apply();
+}
+const fitAll = () => fitRect(0, 0, W, H);
+function zoomAt(f, cx, cy) {
+  const ns = Math.min(2.5, Math.max(0.05, s * f));
+  tx = cx - (cx - tx) * (ns / s); ty = cy - (cy - ty) * (ns / s); s = ns; apply();
+}
+view.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  if (e.ctrlKey || Math.abs(e.deltaY) > 40 || e.deltaMode === 1) zoomAt(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX, e.clientY);
+  else { tx -= e.deltaX; ty -= e.deltaY; apply(); }
+}, { passive: false });
+const ptrs = new Map(); let last = null, pinch = null;
+view.addEventListener("pointerdown", (e) => {
+  ptrs.set(e.pointerId, [e.clientX, e.clientY]); moved = false; last = [e.clientX, e.clientY];
+  view.setPointerCapture(e.pointerId); view.classList.add("dragging");
+  if (ptrs.size === 2) { const [p, q] = [...ptrs.values()]; pinch = { d: Math.hypot(p[0] - q[0], p[1] - q[1]) }; }
+});
+view.addEventListener("pointermove", (e) => {
+  if (!ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 2 && pinch) {
+    const [p, q] = [...ptrs.values()]; const d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+    zoomAt(d / pinch.d, (p[0] + q[0]) / 2, (p[1] + q[1]) / 2); pinch.d = d; moved = true; return;
+  }
+  const dx = e.clientX - last[0], dy = e.clientY - last[1];
+  if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+  tx += dx; ty += dy; last = [e.clientX, e.clientY]; apply();
+});
+const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (ptrs.size === 0) view.classList.remove("dragging"); if (ptrs.size === 1) last = [...ptrs.values()][0]; };
+view.addEventListener("pointerup", (e) => {
+  up(e);
+  if (moved) return;
+  // Pointer capture retargets the click to #view, so find the box under the pointer here.
+  const hit = document.elementsFromPoint(e.clientX, e.clientY).find((el) => el.classList?.contains("node"));
+  if (hit) openPanel(hit.dataset.id); else if (!panel.hidden) closePanel();
+});
+view.addEventListener("pointercancel", up);
+document.getElementById("zin").onclick = () => zoomAt(1.25, innerWidth / 2, innerHeight / 2);
+document.getElementById("zout").onclick = () => zoomAt(0.8, innerWidth / 2, innerHeight / 2);
+document.getElementById("fit").onclick = fitAll;
+const zt = document.getElementById("zt"), zl = document.getElementById("zl");
+zt.onclick = () => { const open = zl.hidden; zl.hidden = !open; zt.setAttribute("aria-expanded", String(open)); zt.innerHTML = icon(open ? "chevron-right" : "chevron-left"); icons(); };
+addEventListener("keydown", (e) => {
+  if (e.target.closest?.("input,textarea,select")) return;
+  if (e.key === "+" || e.key === "=") zoomAt(1.25, innerWidth / 2, innerHeight / 2);
+  else if (e.key === "-") zoomAt(0.8, innerWidth / 2, innerHeight / 2);
+  else if (e.key === "0") fitAll();
+  else if (e.key === "Escape") { closePanel(); closeTrace(); }
+  else if (!trace.hidden && e.key === "ArrowRight") step(1);
+  else if (!trace.hidden && e.key === "ArrowLeft") step(-1);
+});
+
+// 5. Eval evidence: charts for a box, a case list, and one case in full.
+const CASES = EVAL?.cases ?? [];
+for (const c of CASES) { for (const k of ["areas", "must", "met", "mustNot", "hit", "turns"]) c[k] ??= []; for (const t of c.turns) t.tools ??= []; }
+const VS = ["pass", "partial", "fail"];
+const usedTools = (c) => new Set(c.turns.flatMap((t) => t.tools.map((k) => k[1])));
+function casesFor(f) {
+  if (!f) return [];
+  if (f.all) return CASES;
+  if (f.tools) return CASES.filter((c) => { const u = usedTools(c); return f.tools.some((t) => u.has(t)); });
+  if (f.areas) return CASES.filter((c) => c.areas.some((a) => f.areas.includes(a)));
+  return [];
+}
+const count = (cs, k) => Object.fromEntries(VS.map((v) => [v, cs.filter((c) => c[k] === v).length]));
+function sbar(cnt) {
+  const tot = VS.reduce((a, v) => a + cnt[v], 0) || 1;
+  return `<div class="sbar">${VS.map((v) => cnt[v] ? `<span class="s-${v}" style="width:${cnt[v] / tot * 100}%" title="${v} ${cnt[v]}">${cnt[v] / tot > 0.07 ? cnt[v] : ""}</span>` : "").join("")}</div>`;
+}
+const vchip = (v) => `<span class="vchip ${v ?? "none"}">${v ?? "—"}</span>`;
+const rank = { fail: 0, partial: 1, pass: 2 };
+const change = (c) => (c.v0 && c.v1 ? Math.sign(rank[c.v1] - rank[c.v0]) : 0);
+function evidenceHTML(n) {
+  const f = n.eval; if (!f || !CASES.length) return "";
+  const cs = casesFor(f);
+  if (!cs.length) return `<h4>Eval evidence</h4><p class="note">No eval case used this. So the eval does not test it.</p>`;
+  const c0 = count(cs, "v0"), c1 = count(cs, "v1");
+  const upN = cs.filter((c) => change(c) > 0).length, downN = cs.filter((c) => change(c) < 0).length;
+  const chart = f.chart ? CHARTS[f.chart]?.(cs) ?? "" : "";
+  const tri = (a) => ({ pass: a[0], partial: a[1], fail: a[2] });
+  const blind = f.all ? (EVAL.totals ?? []).map((x) => `<div class="stack" style="margin-top:8px"><span>${esc(x.name)} before</span>${sbar(tri(x.v0))}<span>${esc(x.name)} after</span>${sbar(tri(x.v1))}</div>${x.note ? `<p class="note">${esc(x.note)}</p>` : ""}`).join("") : "";
+  return `<h4>Eval evidence: ${cs.length} ${esc(f.label ?? (f.all ? EVAL.label ?? "cases" : "cases that used these tools"))}</h4>
+<div class="stack"><span>Before</span>${sbar(c0)}<span>After</span>${sbar(c1)}</div>
+<div class="kpis"><div class="kpi"><b>${Math.round(c1.pass / cs.length * 100)}%</b><span>pass after</span></div><div class="kpi"><b class="up">${upN}</b><span>cases better</span></div><div class="kpi"><b class="down">${downN}</b><span>cases worse</span></div></div>
+${blind}${chart}<p style="margin-top:12px"><button data-explore="${n.id}">${icon("list")} Open the ${cs.length} cases</button></p>
+<p class="note">${esc(EVAL.runs.v0)}. ${esc(EVAL.runs.v1)}. One run each, so single cases move by chance too.</p>`;
+}
+const CHARTS = { areas: () => areasChart(), flips: (cs) => flipsChart(cs), ...(BP.charts ?? {}) };
+function areasChart() {
+  const areas = [...new Set(CASES.flatMap((c) => c.areas))].map((a) => {
+    const cs = CASES.filter((c) => c.areas.includes(a));
+    const p0 = cs.filter((c) => c.v0 === "pass").length / cs.length * 100, p1 = cs.filter((c) => c.v1 === "pass").length / cs.length * 100;
+    return { a, n: cs.length, p0, p1, d: p1 - p0 };
+  }).filter((x) => x.n >= 5).sort((x, y) => x.d - y.d);
+  return `<h4>Pass rate by area, before ▸ after (areas with 5+ cases; click a name)</h4><div class="areas">${areas.map((x) => {
+    const lo = Math.min(x.p0, x.p1), hi = Math.max(x.p0, x.p1), col = x.d >= 0 ? "var(--pass)" : "var(--fail)";
+    return `<span class="nm" data-area="${esc(x.a)}" title="${x.n} cases">${esc(x.a)} · ${x.n}</span><span class="track"><i style="left:${lo}%;width:${Math.max(hi - lo, 0.5)}%;background:${col};opacity:.45"></i><b style="left:calc(${x.p0}% - 1px);background:var(--text-3)"></b><b style="left:calc(${x.p1}% - 1px);background:${col}"></b></span><span class="d" style="color:${col}">${x.d >= 0 ? "+" : ""}${x.d.toFixed(0)}</span>`;
+  }).join("")}</div><p class="note">Gray tick: before. Colored tick: after. The number is the change in pass rate, in points.</p>`;
+}
+function hist(buckets, hot, label) {
+  const max = Math.max(...buckets.map((b) => b[1]), 1);
+  return `<div class="hist">${buckets.map(([k, v]) => `<div><em>${v}</em><i class="${hot(k) ? "hot" : ""}" style="height:${v / max * 88}%"></i>${k}</div>`).join("")}</div><p class="note">${label}</p>`;
+}
+function flipsChart(cs) {
+  const m = {}; for (const c of cs) m[c.v0 + ">" + c.v1] = (m[c.v0 + ">" + c.v1] ?? 0) + 1;
+  return `<h4>How each case moved, before ▸ after</h4><table class="tbl matrix"><tr><th>Before \\ After</th>${VS.map((v) => `<th>${v}</th>`).join("")}</tr>${VS.map((a) => `<tr><td>${vchip(a)}</td>${VS.map((b) => `<td class="n ${a === b ? "same" : rank[b] > rank[a] ? "up" : "down"}">${m[a + ">" + b] ?? 0}</td>`).join("")}</tr>`).join("")}</table><p class="note">Off the gray diagonal: cases that changed verdict. With flat totals, most of that movement is noise.</p>`;
+}
+
+// The case list and one case, inside the panel. Back returns to the box.
+let explore = null;
+function openExplorer(nodeId, area) {
+  const n = byId[nodeId]?.n;
+  explore = { nodeId, base: n?.eval ? casesFor(n.eval) : CASES, verdict: "all", move: "all", area: area ?? "", q: "" };
+  renderExplorer();
+}
+function renderExplorer() {
+  const e = explore, n = byId[e.nodeId]?.n;
+  const areas = [...new Set(e.base.flatMap((c) => c.areas))].sort();
+  let cs = e.base.filter((c) => (e.verdict === "all" || c.v1 === e.verdict) && (e.move === "all" || (e.move === "up" ? change(c) > 0 : e.move === "down" ? change(c) < 0 : change(c) === 0)) && (!e.area || c.areas.includes(e.area)));
+  if (e.q) { const q = e.q.toLowerCase(); cs = cs.filter((c) => (c.id + " " + c.turns.map((t) => t.q).join(" ") + " " + c.notes).toLowerCase().includes(q)); }
+  const btn = (k, v, t) => `<button data-f="${k}:${v}" aria-pressed="${e[k] === v}">${t}</button>`;
+  panel.classList.add("wide");
+  panel.innerHTML = `<div class="bar-top">${n ? `<button data-back>${icon("arrow-left")} ${esc(n.title)}</button>` : ""}<span class="sp"></span><button data-close>Close</button></div>
+<div class="k">${icon("list")} ${esc(EVAL.label ?? "Eval cases")}</div><h2>${cs.length} of ${e.base.length} cases</h2>
+<div class="filters">${btn("verdict", "all", "All")}${btn("verdict", "pass", "Pass")}${btn("verdict", "partial", "Partial")}${btn("verdict", "fail", "Fail")}</div>
+<div class="filters">${btn("move", "all", "Any change")}${btn("move", "up", "Better")}${btn("move", "down", "Worse")}${btn("move", "same", "Same")}
+<select data-areasel><option value="">All areas</option>${areas.map((a) => `<option ${a === e.area ? "selected" : ""}>${esc(a)}</option>`).join("")}</select>
+<input data-q placeholder="Search questions and judge notes" value="${esc(e.q)}"></div>
+<div class="stack" style="margin-bottom:10px"><span>Shown</span>${sbar(count(cs, "v1"))}</div>
+<div>${cs.slice(0, 300).map((c) => `<div class="crow" data-case="${c.id}"><span class="id">${c.id}</span><span>${vchip(c.v0)} ▸ ${vchip(c.v1)}</span><span class="q">${esc(c.turns[0]?.q ?? "")}</span></div>`).join("")}</div>
+${cs.length > 300 ? `<p class="note">Showing the first 300. Use the filters to narrow the list.</p>` : ""}`;
+  panel.scrollTop = 0; icons();
+  const qi = panel.querySelector("[data-q]");
+  qi.oninput = () => { e.q = qi.value; clearTimeout(qi.t); qi.t = setTimeout(() => { renderExplorer(); const el = panel.querySelector("[data-q]"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }, 250); };
+  panel.querySelector("[data-areasel]").onchange = (ev) => { e.area = ev.target.value; renderExplorer(); };
+}
+function renderCase(id) {
+  const c = CASES.find((x) => x.id === id); if (!c) return;
+  panel.classList.add("wide");
+  const must = c.must.map((m, i) => `<li>${c.met[i] === true ? `<span class="up">${icon("check")}</span>` : c.met[i] === false ? `<span class="down">${icon("x")}</span>` : "·"} ${esc(m)}</li>`).join("");
+  const mustNot = c.mustNot.map((m) => `<li>${c.hit.includes(m) ? `<span class="down">${icon("triangle-alert")} said it:</span>` : `<span class="up">${icon("check")}</span>`} ${esc(m)}</li>`).join("");
+  const turns = c.turns.map((t, i) => `<div class="turn"><div class="uq">${icon("user")} Turn ${i + 1}: ${esc(t.q)}</div>
+<div class="note">${t.tools.length} tool calls · ${((t.ms ?? 0) / 1000).toFixed(0)} s${t.note ? " · " + esc(t.note) : ""}</div>
+<div class="trail">${t.tools.map((k) => `<div class="tc"><span class="st">s${k[0] ?? "?"}</span><span class="tn ${k[3] ? "err" : ""}">${esc(k[1])}</span><span class="ta">${esc(k[2])}</span>${k[4] ? `<span class="th">↳ ${esc(k[4])}</span>` : ""}</div>`).join("")}</div>
+<div class="ans">${esc(t.a)}</div></div>`).join("");
+  panel.innerHTML = `<div class="bar-top"><button data-backlist>${icon("arrow-left")} Cases</button><span class="sp"></span><button data-close>Close</button></div>
+<div class="k">${icon("flask-conical")} ${[c.id, c.persona, c.lang, c.diff, c.surface].filter(Boolean).map(esc).join(" · ")}</div>
+<h2>${vchip(c.v0)} ▸ ${vchip(c.v1)}</h2>
+<p class="lead">${c.areas.map(esc).join(" · ")}${c.gap ? ` · judge's gap: <b>${esc(c.gap)}</b>` : ""}</p>
+${c.notes ? `<h4>Judge's note (after)</h4><p>${esc(c.notes)}</p>` : ""}${c.notes0 && c.v0 !== c.v1 ? `<h4>Judge's note (before)</h4><p class="note">${esc(c.notes0)}</p>` : ""}
+<h4>Expected facts (${c.met.filter(Boolean).length} of ${c.must.length} met)</h4><ul class="must">${must}</ul>
+${mustNot ? `<h4>Must not say</h4><ul class="must">${mustNot}</ul>` : ""}
+${c.why ? `<h4>Why it is hard</h4><p class="note">${esc(c.why)}</p>` : ""}
+<h4>Turns: tool calls and the answer (after)</h4>${turns}<p class="note">Tool results are cut to their first lines. Answers over 3,000 characters are cut.</p>`;
+  panel.scrollTop = 0; icons();
+  history.replaceState(null, "", "#case:" + id);
+}
+
+// 6. Detail panel: summary, eval evidence, the verbatim texts, then what connects to the box.
+const panel = document.getElementById("panel");
+function sourceBlock(key, open) {
+  const src = SOURCES[key]; if (!src) return "";
+  const st = src.stats, f = (x) => x.toLocaleString("en-US");
+  const k = (x) => (x >= 1000 ? `${(x / 1000).toFixed(1)}k` : String(x));
+  const size = `<table class="tbl sizes"><tr><th>Characters</th><th>Bytes</th><th>Lines</th><th>Words</th><th>≈ Tokens</th></tr><tr><td class="n">${f(st.chars)}</td><td class="n">${f(st.bytes)}</td><td class="n">${f(st.lines)}</td><td class="n">${f(st.words)}</td><td class="n">${f(st.tokens)}</td></tr></table>`;
+  const parts = src.parts ? `<table class="tbl parts"><tr><th>Part</th><th>Chars</th><th>≈ Tokens</th><th>Share</th></tr>${src.parts.map((p) => `<tr><td>${esc(p.name)}</td><td class="n">${f(p.chars)}</td><td class="n">${f(p.tokens)}</td><td class="bar"><span style="width:${(p.chars / st.chars * 100).toFixed(1)}%"></span><em>${Math.round(p.chars / st.chars * 100)}%</em></td></tr>`).join("")}</table>` : "";
+  return `<details${open ? " open" : ""}><summary>${esc(src.title)}<span class="sz">${k(st.chars)} chars · ≈${k(st.tokens)} tokens</span></summary><div class="body">${src.note ? `<div class="note">${esc(src.note)}</div>` : ""}${size}${parts}<div class="note">Tokens are an estimate: 4 characters per token.</div><button class="copy" data-copy="${key}">Copy</button><pre>${esc(src.text)}</pre></div></details>`;
+}
+let current = null;
+function openPanel(id) {
+  const { n, el } = byId[id];
+  const z = ZONE[n.zone];
+  current = id; explore = null; panel.classList.remove("wide");
+  document.querySelectorAll(".node.sel").forEach((x) => x.classList.remove("sel")); el.classList.add("sel");
+  panel.style.setProperty("--zc", n.kind === "issue" ? "var(--issue)" : z.color);
+  const [kicon, kname] = BP.kinds[n.kind] ?? ["circle", ""];
+  const link = (o) => o.startsWith("zone:") ? `<button data-go="${o}" style="--zc:${ZONE[o.slice(5)].color}">${icon(ZONE[o.slice(5)].icon)}${esc(ZONE[o.slice(5)].name)}</button>` : linkBtn(o);
+  const ins = BP.edges.filter((e) => e[1] === id).map((e) => link(e[0])), outs = BP.edges.filter((e) => e[0] === id).map((e) => link(e[1]));
+  const bs = (pinsFor[id] ?? []).map((b) => `<button data-go="i_${b}" style="--zc:var(--issue)">${icon("triangle-alert")}${b} · ${esc(BP.issues.find((x) => x.id === b).title)}</button>`).join("");
+  const srcs = (n.src ?? []).map((k, i) => sourceBlock(k, i === 0)).join("");
+  panel.innerHTML = `<div class="bar-top"><span class="sp"></span><button data-close>Close</button></div><div class="k"><span class="ic">${icon(n.icon ?? kicon)}</span>${esc(z.name)} · ${esc(n.kick ?? kname)}</div><h2>${esc(n.title)}</h2>${n.sub && n.zone !== "issues" ? `<p class="lead">${esc(n.sub)}</p>` : ""}${n.d ?? ""}${evidenceHTML(n)}${srcs ? `<h4>Verbatim</h4>${srcs}` : ""}${bs ? `<h4>Suspected bottlenecks here</h4><div class="links">${bs}</div>` : ""}${ins.length ? `<h4>Comes from</h4><div class="links">${ins.join("")}</div>` : ""}${outs.length ? `<h4>Goes to</h4><div class="links">${outs.join("")}</div>` : ""}`;
+  panel.hidden = false; panel.scrollTop = 0; icons();
+  if (trace.hidden && bnBtn.getAttribute("aria-pressed") !== "true") highlight([id, ...BP.edges.filter((e) => e[0] === id || e[1] === id).flatMap((e) => [e[0], e[1]])], true);
+  history.replaceState(null, "", "#" + id);
+}
+function closePanel() {
+  panel.hidden = true; current = null; document.querySelectorAll(".node.sel").forEach((x) => x.classList.remove("sel"));
+  if (trace.hidden && bnBtn.getAttribute("aria-pressed") !== "true") highlight([]);
+  history.replaceState(null, "", location.pathname + location.search);
+}
+panel.addEventListener("click", (e) => {
+  const t = e.target;
+  if (t.closest("[data-close]")) return closePanel();
+  if (t.closest("[data-back]")) return openPanel(explore.nodeId);
+  if (t.closest("[data-backlist]")) return explore ? renderExplorer() : openPanel(current);
+  const cp = t.closest("[data-copy]");
+  if (cp) { navigator.clipboard?.writeText(SOURCES[cp.dataset.copy].text).then(() => { cp.textContent = "Copied"; setTimeout(() => (cp.textContent = "Copy"), 1200); }); return; }
+  const ex = t.closest("[data-explore]"); if (ex) return openExplorer(ex.dataset.explore);
+  const ar = t.closest("[data-area]"); if (ar) return openExplorer(current, ar.dataset.area);
+  const fb = t.closest("[data-f]"); if (fb) { const [k, v] = fb.dataset.f.split(":"); explore[k] = v; return renderExplorer(); }
+  const cr = t.closest("[data-case]"); if (cr) return renderCase(cr.dataset.case);
+  const go = t.closest("[data-go]")?.dataset.go; if (!go) return;
+  const r = rectOf(go); fitRect(r.x - 300, r.y - 200, r.w + 600, r.h + 400);
+  if (!go.startsWith("zone:")) openPanel(go);
+});
+
+// 7. Highlight helpers, the bottleneck key and the walk-through.
+function highlight(ids, soft) {
+  const set = new Set(ids);
+  document.body.classList.toggle("focus", set.size > 0);
+  document.querySelectorAll(".node").forEach((el) => el.classList.toggle("hl", set.has(el.dataset.id)));
+  svg.querySelectorAll("g.edge").forEach((g) => {
+    const on = set.has(g.dataset.from) && set.has(g.dataset.to) && (!soft || ids[0] === g.dataset.from || ids[0] === g.dataset.to);
+    g.classList.toggle("hl", on); g.querySelector("path").setAttribute("marker-end", on ? markOf("hl") : markOf(g.dataset.style));
+  });
+}
+const bnBtn = document.getElementById("bn"), bnx = document.getElementById("bnx");
+bnx.innerHTML = (BP.bottleneckKey ?? `<p><b>Suspected bottleneck:</b> a good place to look first, because the problem most likely sits here. The lit boxes have one.</p>`) + `<button data-zone="issues">Show all ${icon("arrow-right")}</button>`;
+bnx.querySelector("[data-zone]").onclick = () => { const z = ZONE.issues; fitRect(z.x - 30, z.y - 60, z.w + 60, z.h + 90); };
+icons();
+function setBn(on) {
+  bnBtn.setAttribute("aria-pressed", String(on)); bnBtn.setAttribute("aria-expanded", String(on)); bnx.hidden = !on;
+}
+bnBtn.onclick = () => {
+  const on = bnBtn.getAttribute("aria-pressed") !== "true";
+  setBn(on); closeTrace(true);
+  highlight(on ? [...Object.keys(pinsFor), ...NODES.filter((n) => n.zone === "issues").map((n) => n.id)] : []);
+};
+const trace = document.getElementById("trace"); let ti = 0;
+document.getElementById("tq").textContent = BP.tour?.question ?? "";
+function showStep() {
+  const st = BP.tour.steps[ti];
+  document.getElementById("tcap").textContent = st.cap;
+  document.getElementById("tcount").textContent = `Step ${ti + 1} of ${BP.tour.steps.length}`;
+  document.getElementById("tprev").disabled = ti === 0;
+  document.getElementById("tnext").textContent = ti === BP.tour.steps.length - 1 ? "Done" : "Next ▸";
+  highlight(st.ids);
+  const rs = st.ids.map(rectOf);
+  const x0 = Math.min(...rs.map((r) => r.x)), y0 = Math.min(...rs.map((r) => r.y));
+  const x1 = Math.max(...rs.map((r) => r.x + r.w)), y1 = Math.max(...rs.map((r) => r.y + r.h));
+  fitRect(x0 - 140, y0 - 140, x1 - x0 + 280, y1 - y0 + 280 + (trace.offsetHeight + 20) / Math.max(s, 0.3));
+}
+function step(d) { if (ti + d >= BP.tour.steps.length) return closeTrace(); ti = Math.max(0, ti + d); showStep(); }
+function closeTrace(keep) { if (trace.hidden) return; trace.hidden = true; document.body.classList.remove("trace"); if (!keep) highlight([]); }
+document.getElementById("play").onclick = () => { closePanel(); setBn(false); trace.hidden = false; document.body.classList.add("trace"); ti = 0; showStep(); };
+document.getElementById("tnext").onclick = () => step(1);
+document.getElementById("tprev").onclick = () => step(-1);
+document.getElementById("tclose").onclick = () => { closeTrace(); fitAll(); };
+
+// 8. Start. A link like #c_check opens that box; #zone:tools frames that zone; #case:AG-004 opens a case.
+function start() {
+  layout(); drawEdges(); validate();
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (h.startsWith("zone:") && ZONE[h.slice(5)]) { const z = ZONE[h.slice(5)]; fitRect(z.x - 30, z.y - 60, z.w + 60, z.h + 90); }
+  else if (h.startsWith("case:")) { fitAll(); openExplorer(null); panel.hidden = false; renderCase(h.slice(5)); }
+  else if (h.startsWith("cases:") && byId[h.slice(6)]) { fitAll(); openPanel(h.slice(6)); openExplorer(h.slice(6)); }
+  else if (byId[h]) { const r = rectOf(h); fitRect(r.x - 500, r.y - 300, r.w + 1000, r.h + 600); openPanel(h); }
+  else fitAll();
+}
+// 9. Self-check. Data mistakes become a red banner (errors) or a list (warnings) on <html>; check.py reads both.
+function validate() {
+  // Measure with far mode off, because far mode hides the text.
+  const far = document.body.classList.contains("far"); document.body.classList.remove("far");
+  const err = [], warn = [], ids = new Set();
+  for (const n of NODES) { if (ids.has(n.id)) err.push(`duplicate box id "${n.id}"`); ids.add(n.id); }
+  const known = (x) => (x.startsWith("zone:") ? !!ZONE[x.slice(5)] : ids.has(x));
+  for (const z of BP.zones) for (const r of [z.place?.after, z.place?.below]) if (r && !ZONE[r]) err.push(`zone "${z.id}" is placed against unknown zone "${r}"`);
+  for (const [f, t] of BP.edges) for (const x of [f, t]) if (!known(x)) err.push(`arrow ${f} → ${t}: unknown "${x}"`);
+  for (const b of BP.issues) for (const o of b.on ?? []) if (!ids.has(o)) err.push(`bottleneck ${b.id}: unknown box "${o}"`);
+  for (const st of BP.tour?.steps ?? []) for (const x of st.ids) if (!known(x)) err.push(`walk-through step: unknown "${x}"`);
+  const linked = new Set(BP.edges.flatMap((e) => [e[0], e[1]]));
+  for (const n of NODES) {
+    for (const b of n.issues ?? []) if (!BP.issues.some((x) => x.id === b)) err.push(`box ${n.id}: unknown bottleneck "${b}"`);
+    for (const k of n.src ?? []) if (!SOURCES?.[k]) err.push(`box ${n.id}: no source "${k}" in sources.json`);
+    if (n.eval?.chart && !CHARTS[n.eval.chart]) err.push(`box ${n.id}: unknown chart "${n.eval.chart}"`);
+    if (n.eval && !CASES.length) warn.push(`box ${n.id} asks for eval evidence, but there is no eval.json`);
+    if (!["issue", "next"].includes(n.kind) && !n.free && !ZONE[n.zone]?.free && !linked.has(n.id)) warn.push(`box ${n.id} has no arrow (set free: true if that is on purpose)`);
+    if (/^[A-Z]{1,2}\d+\b/.test(n.title ?? "")) warn.push(`box ${n.id}: the title starts with a code ("${n.title}")`);
+    const el = byId[n.id].el;
+    if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) warn.push(`box ${n.id}: text overflows the box`);
+  }
+  const zs = BP.zones;
+  for (let i = 0; i < zs.length; i++) for (let j = i + 1; j < zs.length; j++) {
+    const a = zs[i], b = zs[j];
+    if (a.x < b.x + b.w && b.x < a.x + a.w && a.y - 50 < b.y + b.h && b.y - 50 < a.y + a.h) warn.push(`zones ${a.id} and ${b.id} overlap`);
+  }
+  document.body.classList.toggle("far", far);
+  const root = document.documentElement;
+  root.dataset.bpErrors = JSON.stringify(err); root.dataset.bpWarnings = JSON.stringify(warn); root.dataset.bpZones = JSON.stringify(zs.map((z) => z.id));
+  const box = document.getElementById("bperr");
+  box.hidden = !err.length; box.textContent = err.length ? `Blueprint data has ${err.length} error(s):\n` + err.map((e) => "• " + e).join("\n") : "";
+  if (warn.length) console.warn("Blueprint warnings:\n" + warn.join("\n"));
+}
+// Lay out once the web fonts are in, so measured heights match what is drawn.
+(document.fonts?.ready ?? Promise.resolve()).then(start);
+let vw0 = innerWidth, vh0 = innerHeight;
+addEventListener("resize", () => { tx += (innerWidth - vw0) / 2; ty += (innerHeight - vh0) / 2; vw0 = innerWidth; vh0 = innerHeight; apply(); });
+</script>
